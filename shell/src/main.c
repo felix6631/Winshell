@@ -2,6 +2,7 @@
 #include <string.h>
 #include <windows.h>
 #include "constants.h"
+#include "parser.h"
 
 
 void winshell_terminalInit() {
@@ -17,7 +18,8 @@ int main() {
     winshell_terminalInit();
     CHAR input_buffer[BUFFERSIZE];
     while(1) {
-        printf("~/ > ");
+        memset(input_buffer, 0, sizeof(CHAR));
+        printf(" > ");
         fgets(input_buffer, BUFFERSIZE, stdin);
         // strip linefeed
         input_buffer[strlen(input_buffer)-1] = '\0';
@@ -26,7 +28,11 @@ int main() {
         if (strcmp(input_buffer, "quit") == 0)
             break;
 
-        puts(input_buffer);
+        LPSTR* parsed = winshell_parser(input_buffer);
+        
+        for(int i = 0; parsed[i] != NULL; i++) {
+            printf("%d. %s\n", i, parsed[i]);
+        }
     }
     return 0;
 }
