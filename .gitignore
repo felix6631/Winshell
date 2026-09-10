@@ -1,2 +1,7 @@
 Makefile
 *.o
+*.exe
+.vscode
+*.out
+obj
+bin

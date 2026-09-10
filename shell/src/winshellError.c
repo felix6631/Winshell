@@ -10,3 +10,4 @@ int* strhex(char* string) {
     hex[strlen(string)] = 0;
     return hex;
 }
+

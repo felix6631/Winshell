@@ -20,29 +20,22 @@ LPSTR* winshell_parser(CHAR* cmdline) {
 
     while ((parsed[length++] = strtok(NULL, " \n"))) {
         if (length >= PARSEDSIZE) {
-            // TODO: Raise Exception Here
+            goto err_parseLimitExceed;
             return NULL;
         }
         if (length >= capacity) {
             capacity *= 2;
-            parsed = realloc(parsed, capacity * sizeof *parsed);
+            parsed = realloc(parsed, capacity * sizeof(*parsed));
         }
     }
 
-    
-
     for(size_t i = length; i < capacity; i++)
         parsed[i] = NULL;
-
-
     
-    // for(size_t i = 0; i < capacity; i++) {
-    //     int* hex = strhex(parsed[i]);
-    //     for(int j = 0; hex[j] != 0; j++)
-    //         printf("%x ",hex[j]);
-    //     printf("\n");
-    // }
-    
-
     return parsed;
+
+err_parseLimitExceed:
+    fprintf(stderr, "Error: Parsed limit exceeded. Max limit is %d\n", PARSEDSIZE);
+    free(parsed);
+    return NULL;
 }

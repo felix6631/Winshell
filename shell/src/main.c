@@ -3,7 +3,7 @@
 #include <windows.h>
 #include "constants.h"
 #include "parser.h"
-
+#include "executer.h"
 
 void winshell_terminalInit() {
     HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
@@ -30,8 +30,12 @@ int main() {
 
         LPSTR* parsed = winshell_parser(input_buffer);
         
-        for(int i = 0; parsed[i] != NULL; i++) {
-            printf("%d. %s\n", i, parsed[i]);
+        // execute given command
+        if (parsed[0] != NULL) {
+            int result = execute(parsed[0], parsed[1], parsed[2], parsed[3], parsed[4]);
+            if (result != 0) {
+                fprintf(stderr, "Error: Failed to execute command '%s'\n", parsed[0]);
+            }
         }
     }
     return 0;
