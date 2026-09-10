@@ -32,11 +32,15 @@ int main() {
         
         // execute given command
         if (parsed[0] != NULL) {
+            strcat(parsed[0], ".exe");
+
             int result = execute(parsed[0], parsed[1], parsed[2], parsed[3], parsed[4]);
             if (result != 0) {
                 fprintf(stderr, "Error: Failed to execute command '%s'\n", parsed[0]);
             }
         }
+
+        
     }
     return 0;
 }
