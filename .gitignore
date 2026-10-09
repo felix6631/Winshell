@@ -1,7 +1,10 @@
 Makefile
 *.o
 *.exe
-.vscode
+.vscode/
 *.out
-obj
-bin
+obj/
+bin/
+
+*.md
+!README.md

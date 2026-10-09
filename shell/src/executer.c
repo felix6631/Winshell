@@ -24,7 +24,7 @@ int execute(const char* program, ...) {
         TRUE,               // child process inherits handles to use same input/output streams
         0,                  // creation flags; not creating new window, rather using the same console window
         NULL,               // environment block; use parent's environment
-        "/bin",               // current directory; use parent's current directory
+        "/bin",             // current directory; use parent's current directory
         &si,                // startup information
         &pi)                // process information
     ) {
