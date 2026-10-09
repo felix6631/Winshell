@@ -8,7 +8,6 @@ int main() {
     SYSTEM_INFO sysInfo;
     GetNativeSystemInfo(&sysInfo);
 
-    // coreutils arch 명령어 표준 출력과 1:1 매핑
     switch (sysInfo.wProcessorArchitecture) {
         case PROCESSOR_ARCHITECTURE_INTEL:
             printf("i686\n"); // Linux 표준 32비트 x86 표기
@@ -61,3 +60,4 @@ int main() {
             printf("unknown\n");
             break;
     }
+}

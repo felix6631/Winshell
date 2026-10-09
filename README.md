@@ -1,0 +1,121 @@
+# Winshell by Felix Brown
+
+## What is Winshell?
+Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하기 위한 프로젝트 및 툴체인입니다.
+Winshell is project/toolchain to use linux style shell and coreutils in Windows.
+
+## Implemented
+2026.10.09. 기준 개발이 완료된 것은 아래와 같습니다.
+Followings are implemented; by the time 2026. 10. 09.
+- arch
+- echo
+- pwd
+
+## TODO
+- |
+- >
+- <
+- [
+- b2sum
+- base32
+- base64
+- basename
+- cat
+- chcon
+- chgrp
+- chmod
+- chown
+- chroot
+- cksum
+- comm
+- coreutils
+- cp
+- csplit
+- cut
+- date
+- dd
+- df
+- dir
+- dircolors
+- dirname
+- du
+- env
+- expand
+- expr
+- factor
+- false
+- fmt
+- fold
+- groups
+- head
+- hostid
+- hostname
+- id
+- install
+- join
+- kill
+- link
+- ln
+- logname
+- ls
+- md5sum
+- mkfifo
+- mknod
+- mktemp
+- mv
+- nice
+- nl
+- nohup
+- nproc
+- numfmt
+- od
+- paste
+- pathchk
+- pinky
+- pr
+- printenv
+- printf
+- ptx
+- readlink
+- realpath
+- rm
+- rmdir
+- runcon
+- seq
+- sha1sum
+- sha224sum
+- sha256sum
+- sha384sum
+- sha512sum
+- shred
+- shuf
+- sleep
+- sort
+- split
+- stat
+- stdbuv
+- stty
+- sum
+- sync
+- tac
+- tail
+- tee
+- test
+- tr
+- true
+- truncate
+- tsort
+- tty
+- uname
+- unexpand
+- uniq
+- unlink
+- uptime
+- users
+- vdir
+- wc
+- who
+- whoami
+- yes
+
+## 
