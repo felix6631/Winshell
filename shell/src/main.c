@@ -6,18 +6,37 @@
 #include "parser.h"
 #include "executer.h"
 
+/** Set when Ctrl+C or Ctrl+Break reached the shell. */
+static volatile LONG interrupted = 0;
+
+/**
+ * Ctrl+C and Ctrl+Break are delivered to every process on the console.
+ * The shell swallows them so that it survives, while the program it is
+ * running has its own default handler and is terminated.
+ * Closing the console, logging off and shutting down are left to the default handler.
+ *
+ * SetConsoleCtrlHandler(NULL, TRUE) is deliberately not used: that setting
+ * would be inherited, and the programs started by the shell could not be interrupted.
+ */
+static BOOL WINAPI winshell_ctrlHandler(DWORD type) {
+    switch (type) {
+        case CTRL_C_EVENT:
+        case CTRL_BREAK_EVENT:
+            InterlockedExchange(&interrupted, 1);
+            return TRUE;
+        default:
+            return FALSE;
+    }
+}
+
 void winshell_terminalInit() {
-    HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
-    DWORD prevMode;
-
-    GetConsoleMode(hInput, &prevMode);
-
-    // Do nothing now;
+    SetConsoleCtrlHandler(winshell_ctrlHandler, TRUE);
 }
 
 /**
  * Reads one whole line from stdin, however long it is.
- * Returns NULL at the end of input. The result has to be freed.
+ * Returns NULL at the end of input, or when reading was interrupted.
+ * The result has to be freed.
  */
 static char* read_line(void) {
     size_t length = 0, capacity = BUFFERSIZE;
@@ -27,7 +46,7 @@ static char* read_line(void) {
 
     for (;;) {
         if (fgets(line + length, (int)(capacity - length), stdin) == NULL) {
-            if (length == 0) {
+            if (length == 0 || interrupted) {
                 free(line);
                 return NULL;
             }
@@ -58,10 +77,19 @@ int main() {
         printf(" > ");
         fflush(stdout);
 
-        // end of input
+        InterlockedExchange(&interrupted, 0);
         char* input = read_line();
-        if (input == NULL)
+        if (input == NULL) {
+            // Ctrl+C at the prompt abandons the line, it does not end the shell
+            if (interrupted) {
+                InterlockedExchange(&interrupted, 0);
+                clearerr(stdin);
+                putchar('\n');
+                continue;
+            }
+            // end of input
             break;
+        }
 
         // strip linefeed
         input[strcspn(input, "\r\n")] = '\0';
@@ -72,9 +100,9 @@ int main() {
             break;
         }
 
+        // the parser reports its own errors
         LPSTR* parsed = winshell_parser(input);
         if (parsed == NULL) {
-            fprintf(stderr, "Error: Out of memory\n");
             free(input);
             continue;
         }

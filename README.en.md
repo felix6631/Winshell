@@ -19,6 +19,20 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 
 See [Planned](#planned) for what is still to come.
 
+## Using the shell
+
+- Programs are only looked up in the directory of `shell.exe` (`bin\`); the `.exe` extension may be omitted.
+- Exit with `quit`. End of input (Ctrl+Z, Enter) also exits.
+- **Quoting**
+  - `"a b"`: keeps the spaces. `\"` inside is a literal double quote.
+  - `'a b'`: everything inside is taken literally.
+  - They can be mixed, as in `a"b c"d`, and `""` gives an empty argument.
+  - A backslash is only special in front of a double quote, so paths such as `C:\bin\echo` can be typed as they are.
+  - An unclosed quote prints an error and nothing is executed.
+- **Ctrl+C / Ctrl+Break**
+  - While a program is running, only that program is interrupted and the shell keeps running.
+  - At the prompt the shell does not exit; it discards the line being typed.
+
 ## Build
 
 ### Requirements
