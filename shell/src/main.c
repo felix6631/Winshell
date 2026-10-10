@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <windows.h>
 #include "constants.h"
@@ -11,36 +12,83 @@ void winshell_terminalInit() {
 
     GetConsoleMode(hInput, &prevMode);
 
-    // Do nothing now; 
+    // Do nothing now;
+}
+
+/**
+ * Reads one whole line from stdin, however long it is.
+ * Returns NULL at the end of input. The result has to be freed.
+ */
+static char* read_line(void) {
+    size_t length = 0, capacity = BUFFERSIZE;
+    char* line = malloc(capacity);
+    if (line == NULL)
+        return NULL;
+
+    for (;;) {
+        if (fgets(line + length, (int)(capacity - length), stdin) == NULL) {
+            if (length == 0) {
+                free(line);
+                return NULL;
+            }
+            break;
+        }
+
+        length += strlen(line + length);
+        if (line[length - 1] == '\n')
+            break;
+
+        // buffer is full without a line feed; make room for the rest
+        if (length + 1 >= capacity) {
+            char* grown = realloc(line, capacity * 2);
+            if (grown == NULL) {
+                free(line);
+                return NULL;
+            }
+            line = grown;
+            capacity *= 2;
+        }
+    }
+    return line;
 }
 
 int main() {
     winshell_terminalInit();
-    CHAR input_buffer[BUFFERSIZE];
     while(1) {
-        memset(input_buffer, 0, sizeof(CHAR));
         printf(" > ");
-        fgets(input_buffer, BUFFERSIZE, stdin);
-        // strip linefeed
-        input_buffer[strlen(input_buffer)-1] = '\0';
+        fflush(stdout);
 
-        // quit command
-        if (strcmp(input_buffer, "quit") == 0)
+        // end of input
+        char* input = read_line();
+        if (input == NULL)
             break;
 
-        LPSTR* parsed = winshell_parser(input_buffer);
-        
+        // strip linefeed
+        input[strcspn(input, "\r\n")] = '\0';
+
+        // quit command
+        if (strcmp(input, "quit") == 0) {
+            free(input);
+            break;
+        }
+
+        LPSTR* parsed = winshell_parser(input);
+        if (parsed == NULL) {
+            fprintf(stderr, "Error: Out of memory\n");
+            free(input);
+            continue;
+        }
+
         // execute given command
         if (parsed[0] != NULL) {
-            strcat(parsed[0], ".exe");
-
-            int result = execute(parsed[0], parsed[1], parsed[2], parsed[3], parsed[4]);
-            if (result != 0) {
+            int result = execute(parsed[0], parsed);
+            if (result == -1) {
                 fprintf(stderr, "Error: Failed to execute command '%s'\n", parsed[0]);
             }
         }
 
-        
+        free(parsed);
+        free(input);
     }
     return 0;
 }

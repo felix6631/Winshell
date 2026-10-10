@@ -2,7 +2,6 @@
 #define CONSTANTS_H
 
 #define BUFFERSIZE BUFSIZ
-#define PARSEDSIZE 64
 
 typedef unsigned long long  u64;
 typedef unsigned int        u32;

@@ -1,41 +1,30 @@
 #include <string.h>
 #include <stdlib.h>
 #include "parser.h"
-#include "constants.h"
-#include "winshellError.h"
-#include <wtypesbase.h>
+#include <windef.h>
 
-#include <stdio.h>
+#define DELIMITERS " \t\r\n"
 
 LPSTR* winshell_parser(CHAR* cmdline) {
-    DWORD length = 0, capacity = 4;
+    size_t length = 0, capacity = 8;
+    LPSTR* parsed = malloc(capacity * sizeof *parsed);
+    if (parsed == NULL)
+        return NULL;
 
-    LPSTR *parsed = calloc(capacity, sizeof *parsed);
-    
-    parsed[length++] = strtok(cmdline, " \n");
-    if (parsed[0] == NULL)
-        return parsed;
-    
-    
-
-    while ((parsed[length++] = strtok(NULL, " \n"))) {
-        if (length >= PARSEDSIZE) {
-            goto err_parseLimitExceed;
-            return NULL;
-        }
-        if (length >= capacity) {
+    for (LPSTR word = strtok(cmdline, DELIMITERS); word != NULL; word = strtok(NULL, DELIMITERS)) {
+        // keep room for this word and the terminating NULL
+        if (length + 2 > capacity) {
             capacity *= 2;
-            parsed = realloc(parsed, capacity * sizeof(*parsed));
+            LPSTR* grown = realloc(parsed, capacity * sizeof *parsed);
+            if (grown == NULL) {
+                free(parsed);
+                return NULL;
+            }
+            parsed = grown;
         }
+        parsed[length++] = word;
     }
 
-    for(size_t i = length; i < capacity; i++)
-        parsed[i] = NULL;
-    
+    parsed[length] = NULL;
     return parsed;
-
-err_parseLimitExceed:
-    fprintf(stderr, "Error: Parsed limit exceeded. Max limit is %d\n", PARSEDSIZE);
-    free(parsed);
-    return NULL;
 }

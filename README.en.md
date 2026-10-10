@@ -12,9 +12,9 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 
 | Command | Status |
 | --- | --- |
-| `shell` | Basic input loop, runs commands, exits with `quit` |
+| `shell` | Input loop, runs commands with arguments and waits for them, exits with `quit` |
 | `arch` | Done |
-| `echo` | Done (no options) |
+| `echo` | Done (`-n`, `-e`, `-E`, `--help`, `--version`) |
 | `pwd` | Done (currently prints the plain Windows path) |
 
 See [Planned](#planned) for what is still to come.
