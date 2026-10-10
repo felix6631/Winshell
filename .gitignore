@@ -1,4 +1,3 @@
-Makefile
 *.o
 *.exe
 .vscode/
@@ -8,3 +7,4 @@ bin/
 
 *.md
 !README.md
+!README.en.md
