@@ -4,14 +4,16 @@ NAME   = cat
 BINDIR = ..\bin
 OBJDIR = obj
 TARGET = $(BINDIR)\$(NAME).exe
-CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS
+CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common
+SRCS   = main.c ..\common\vpath.c
+HDRS   = ..\common\vpath.h
 
 all: $(TARGET)
 
-$(TARGET): main.c
+$(TARGET): $(SRCS) $(HDRS)
 	@if not exist "$(BINDIR)" mkdir "$(BINDIR)"
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
-	cl $(CFLAGS) /Fo$(OBJDIR)\ /Fe"$(TARGET)" main.c
+	cl $(CFLAGS) /Fo$(OBJDIR)\ /Fe"$(TARGET)" $(SRCS)
 
 clean:
 	@if exist "$(TARGET)" del "$(TARGET)"

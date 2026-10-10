@@ -4,9 +4,9 @@ NAME   = shell
 BINDIR = ..\bin
 OBJDIR = obj
 TARGET = $(BINDIR)\$(NAME).exe
-CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /Iinclude
-SRCS   = src\main.c src\parser.c src\executer.c src\winshellError.c
-HDRS   = include\constants.h include\executer.h include\parser.h include\winshellError.h
+CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /Iinclude /I..\common
+SRCS   = src\main.c src\parser.c src\executer.c src\builtin.c src\winshellError.c ..\common\vpath.c
+HDRS   = include\constants.h include\builtin.h include\executer.h include\parser.h include\winshellError.h ..\common\vpath.h
 
 all: $(TARGET)
 

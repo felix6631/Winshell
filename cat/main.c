@@ -5,6 +5,7 @@
 #include <io.h>
 #include <fcntl.h>
 #include <windows.h>
+#include "vpath.h"
 
 #define VERSION "0.1"
 #define PROGRAM "cat"
@@ -217,9 +218,22 @@ static int cat_file(const char* path, int plain) {
     if (strcmp(path, "-") == 0) {
         in = stdin;
     } else {
-        in = fopen(path, "rb");
+        // paths are those of the virtual file system: /c/Users/me/file
+        char native[VPATH_MAX];
+        int kind = vpath_to_native(path, native, sizeof native);
+
+        if (kind == VPATH_ROOT) {
+            fprintf(stderr, PROGRAM ": %s: Is a directory\n", path);
+            return -1;
+        }
+        if (kind != 0) {
+            fprintf(stderr, PROGRAM ": %s: %s\n", path, strerror(errno));
+            return -1;
+        }
+
+        in = fopen(native, "rb");
         if (in == NULL) {
-            fprintf(stderr, PROGRAM ": %s: %s\n", path, open_error(path));
+            fprintf(stderr, PROGRAM ": %s: %s\n", path, open_error(native));
             return -1;
         }
     }

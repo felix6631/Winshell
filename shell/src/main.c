@@ -5,6 +5,7 @@
 #include "constants.h"
 #include "parser.h"
 #include "executer.h"
+#include "builtin.h"
 
 /** Set when Ctrl+C or Ctrl+Break reached the shell. */
 static volatile LONG interrupted = 0;
@@ -31,6 +32,7 @@ static BOOL WINAPI winshell_ctrlHandler(DWORD type) {
 
 void winshell_terminalInit() {
     SetConsoleCtrlHandler(winshell_ctrlHandler, TRUE);
+    builtin_init();
 }
 
 /**
@@ -103,7 +105,9 @@ int main() {
         // the parser and the executer report their own errors
         Pipeline pipeline;
         if (winshell_parse(input, &pipeline) == 0) {
-            execute_pipeline(&pipeline);
+            // a builtin only makes sense as a command of its own, not inside a pipeline
+            if (pipeline.count == 0 || pipeline.count > 1 || !builtin_run(&pipeline.commands[0]))
+                execute_pipeline(&pipeline);
             winshell_freePipeline(&pipeline);
         }
 

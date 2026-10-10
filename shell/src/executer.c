@@ -1,4 +1,5 @@
 #include "executer.h"
+#include "vpath.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,22 +111,36 @@ static HANDLE duplicate_inheritable(HANDLE handle) {
     return copy;
 }
 
+/*
+ * The file names of redirections are paths of the virtual file system
+ * (/c/Users/me/file); they are converted here for Windows.
+ */
 static HANDLE open_input_file(const char* file) {
     SECURITY_ATTRIBUTES sa;
+    char native[VPATH_MAX];
+
+    if (vpath_to_native(file, native, sizeof native) != 0)
+        return INVALID_HANDLE_VALUE;
+
     sa.nLength = sizeof sa;
     sa.lpSecurityDescriptor = NULL;
     sa.bInheritHandle = TRUE;
-    return CreateFileA(file, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+    return CreateFileA(native, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 }
 
 static HANDLE open_output_file(const char* file, int append) {
     SECURITY_ATTRIBUTES sa;
+    char native[VPATH_MAX];
+
+    if (vpath_to_native(file, native, sizeof native) != 0)
+        return INVALID_HANDLE_VALUE;
+
     sa.nLength = sizeof sa;
     sa.lpSecurityDescriptor = NULL;
     sa.bInheritHandle = TRUE;
     // FILE_APPEND_DATA without FILE_WRITE_DATA makes every write go to the end
-    return CreateFileA(file, append ? FILE_APPEND_DATA : GENERIC_WRITE, FILE_SHARE_READ, &sa,
+    return CreateFileA(native, append ? FILE_APPEND_DATA : GENERIC_WRITE, FILE_SHARE_READ, &sa,
                        append ? OPEN_ALWAYS : CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 }
 

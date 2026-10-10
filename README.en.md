@@ -6,17 +6,17 @@ Winshell is a project and toolchain for using a Linux-style shell and coreutils 
 It is written in plain C on top of the Win32 API, and aims to run as far back as Windows XP.
 
 > **Status: early development.** The shell reads a line and runs `bin\<command>.exe`;
-> the virtual root directory, variable expansion, globbing and more are not implemented yet.
+> variable expansion, globbing and more are not implemented yet.
 
 ## Implemented
 
 | Command | Status |
 | --- | --- |
-| `shell` | Input loop, runs commands with arguments and waits for them, exits with `quit` |
+| `shell` | Input loop, runs commands with arguments and waits for them, pipes/redirection, `cd`, exits with `quit` |
 | `arch` | Done |
 | `cat` | Done (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `echo` | Done (`-n`, `-e`, `-E`, `--help`, `--version`) |
-| `pwd` | Done (currently prints the plain Windows path) |
+| `pwd` | Done (`-L`, `-P`, prints the virtual path) |
 
 See [Planned](#planned) for what is still to come.
 
@@ -65,7 +65,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `echo`, `pwd`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `echo`, `pwd`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -79,6 +79,7 @@ Winshell/
 ├─ cat/            cat command
 ├─ echo/           echo command
 ├─ pwd/            pwd command
+├─ common/         code shared by several commands (vpath: virtual path conversion)
 └─ bin/            build output (not tracked by git)
 ```
 
@@ -92,12 +93,16 @@ A sub-project's `Makefile` must provide `all` and `clean` rules and accept the o
 
 ## Design goals
 
-- **Virtual root directory (planned):** like a UNIX filesystem, a logical root directory will exist with each drive placed beneath it.
+- **Virtual root directory:** like a UNIX filesystem there is a logical root directory `/`, and each drive is placed beneath it as a single lower case letter.
+  - `C:\Users\me` is `/c/Users/me`. Only the drives are below `/`, and `cd /`, `pwd` and `cat /` all follow that.
+  - Windows paths such as `C:\Users\me` keep working everywhere. UNC paths such as `\\server\share` are outside of the virtual tree and are passed to Windows unchanged.
+  - `cd` is a builtin of the shell, which tells its children about the current directory through the environment variable `PWD`. While in `/`, the Windows directory is the root of the system drive, and relative paths do not refer to any file.
+  - Every command converts the paths it receives itself. When a new command opens a file, use `vpath_to_native` from `common/vpath.h`.
 - **Compatibility (goal):** use only basic system calls to stay compatible down to Windows XP. This has not been verified yet.
 
 ## Planned
 
-**Shell features**: `2>&1`, variable expansion, globbing, virtual root directory
+**Shell features**: `2>&1`, variable expansion, globbing
 
 **coreutils**
 
