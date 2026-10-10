@@ -5,33 +5,93 @@
 
 #define DELIMITERS " \t\r\n"
 
-static int is_delimiter(char c) {
+typedef enum {
+    LEX_WORD,
+    LEX_PIPE,
+    LEX_INPUT,        // <
+    LEX_OUTPUT,       // >
+    LEX_APPEND,       // >>
+    LEX_ERROR,        // 2>
+    LEX_ERROR_APPEND  // 2>>
+} LexemeType;
+
+typedef struct {
+    LexemeType type;
+    LPSTR     text;     // only for LEX_WORD
+} Lexeme;
+
+static int is_delimiter(CHAR c) {
     return strchr(DELIMITERS, c) != NULL;
 }
 
-LPSTR* winshell_parser(CHAR* cmdline) {
-    size_t length = 0, capacity = 8;
-    LPSTR* parsed = malloc(capacity * sizeof *parsed);
-    // Words are written back over the line itself. A word is never longer
-    // than the text it comes from, so the write cursor never passes the read cursor.
-    CHAR *read = cmdline, *write = cmdline;
-
-    if (parsed == NULL) {
-        fprintf(stderr, "Error: Out of memory\n");
-        return NULL;
+static int push_lexeme(Lexeme** lexemes, size_t* count, size_t* capacity, LexemeType type, LPSTR text) {
+    if (*count >= *capacity) {
+        Lexeme* grown = realloc(*lexemes, *capacity * 2 * sizeof **lexemes);
+        if (grown == NULL)
+            return -1;
+        *lexemes = grown;
+        *capacity *= 2;
     }
+    (*lexemes)[*count].type = type;
+    (*lexemes)[*count].text = text;
+    (*count)++;
+    return 0;
+}
 
-    for (;;) {
-        CHAR quote = '\0';  // the quote character we are inside of, if any
+/**
+ * Splits line into words and operators. The words are copied into a new
+ * buffer, which the word lexemes point into. Quotes are removed on the way.
+ * A word is never longer than the text it comes from and every word but the
+ * last is followed by a character that is not copied, so strlen(line) + 1
+ * bytes are enough.
+ */
+static int tokenize(const CHAR* line, CHAR** bufferOut, Lexeme** tokensOut, size_t* countOut) {
+    size_t count = 0, capacity = 16;
+    Lexeme* lexemes = malloc(capacity * sizeof *lexemes);
+    CHAR* buffer = malloc(strlen(line) + 2);
+    const CHAR* read = line;
+    CHAR* write = buffer;
+
+    if (lexemes == NULL || buffer == NULL)
+        goto err_memory;
+
+    while (*read != '\0') {
+        CHAR quote = '\0';      // the quote character we are inside of, if any
+        int quoted = 0;         // whether the word contains a quote at all
+        int operatorDone = 0;
         LPSTR word;
 
-        while (*read != '\0' && is_delimiter(*read))
+        if (is_delimiter(*read)) {
             read++;
-        if (*read == '\0')
-            break;
+            continue;
+        }
+
+        if (*read == '|') {
+            if (push_lexeme(&lexemes, &count, &capacity, LEX_PIPE, NULL) != 0)
+                goto err_memory;
+            read++;
+            continue;
+        }
+        if (*read == '<') {
+            if (push_lexeme(&lexemes, &count, &capacity, LEX_INPUT, NULL) != 0)
+                goto err_memory;
+            read++;
+            continue;
+        }
+        if (*read == '>') {
+            LexemeType type = LEX_OUTPUT;
+            if (read[1] == '>') {
+                type = LEX_APPEND;
+                read++;
+            }
+            if (push_lexeme(&lexemes, &count, &capacity, type, NULL) != 0)
+                goto err_memory;
+            read++;
+            continue;
+        }
 
         word = write;
-        while (*read != '\0') {
+        while (*read != '\0' && !operatorDone) {
             CHAR c = *read;
 
             if (quote == '\'') {
@@ -44,28 +104,45 @@ LPSTR* winshell_parser(CHAR* cmdline) {
             } else if (c == '\\') {
                 // a backslash is only special in front of a double quote:
                 // 2n backslashes give n backslashes, 2n+1 give n and a literal quote
-                size_t count = 0, i;
-                while (read[count] == '\\')
-                    count++;
+                size_t backslashes = 0, i;
+                while (read[backslashes] == '\\')
+                    backslashes++;
 
-                if (read[count] == '"') {
-                    for (i = 0; i < count / 2; i++)
+                if (read[backslashes] == '"') {
+                    for (i = 0; i < backslashes / 2; i++)
                         *write++ = '\\';
-                    read += count;
-                    if (count % 2 == 1)
+                    read += backslashes;
+                    if (backslashes % 2 == 1)
                         *write++ = *read++;
                 } else {
-                    for (i = 0; i < count; i++)
+                    for (i = 0; i < backslashes; i++)
                         *write++ = '\\';
-                    read += count;
+                    read += backslashes;
                 }
             } else if (c == '"') {
                 quote = (quote == '"') ? '\0' : '"';
+                quoted = 1;
                 read++;
             } else if (c == '\'' && quote == '\0') {
                 quote = '\'';
+                quoted = 1;
                 read++;
-            } else if (quote == '\0' && is_delimiter(c)) {
+            } else if (quote != '\0') {
+                *write++ = c;
+                read++;
+            } else if (c == '>' && !quoted && write - word == 1 && word[0] == '2') {
+                // "2>" and "2>>": the 2 is a file descriptor, not an argument
+                LexemeType type = LEX_ERROR;
+                if (read[1] == '>') {
+                    type = LEX_ERROR_APPEND;
+                    read++;
+                }
+                read++;
+                write = word;
+                if (push_lexeme(&lexemes, &count, &capacity, type, NULL) != 0)
+                    goto err_memory;
+                operatorDone = 1;
+            } else if (is_delimiter(c) || c == '|' || c == '<' || c == '>') {
                 break;
             } else {
                 *write++ = c;
@@ -75,34 +152,160 @@ LPSTR* winshell_parser(CHAR* cmdline) {
 
         if (quote != '\0') {
             fprintf(stderr, "Error: Unterminated %s quote\n", quote == '"' ? "double" : "single");
-            free(parsed);
-            return NULL;
+            free(lexemes);
+            free(buffer);
+            return -1;
         }
 
-        // keep room for this word and the terminating NULL
-        if (length + 2 > capacity) {
-            LPSTR* grown;
-            capacity *= 2;
-            grown = realloc(parsed, capacity * sizeof *parsed);
-            if (grown == NULL) {
-                fprintf(stderr, "Error: Out of memory\n");
-                free(parsed);
-                return NULL;
-            }
-            parsed = grown;
-        }
-        parsed[length++] = word;
-
-        // terminate the word; this may overwrite the delimiter at *read, so step over it first
-        if (*read != '\0') {
+        // a quoted word may be empty ("" is an argument), an unquoted one never is
+        if (!operatorDone && (write > word || quoted)) {
             *write++ = '\0';
-            read++;
-        } else {
-            *write = '\0';
-            break;
+            if (push_lexeme(&lexemes, &count, &capacity, LEX_WORD, word) != 0)
+                goto err_memory;
         }
     }
 
-    parsed[length] = NULL;
-    return parsed;
+    *bufferOut = buffer;
+    *tokensOut = lexemes;
+    *countOut = count;
+    return 0;
+
+err_memory:
+    fprintf(stderr, "Error: Out of memory\n");
+    free(lexemes);
+    free(buffer);
+    return -1;
+}
+
+static const char* operator_name(LexemeType type) {
+    switch (type) {
+        case LEX_PIPE:         return "|";
+        case LEX_INPUT:        return "<";
+        case LEX_OUTPUT:       return ">";
+        case LEX_APPEND:       return ">>";
+        case LEX_ERROR:        return "2>";
+        case LEX_ERROR_APPEND: return "2>>";
+        default:                 return "";
+    }
+}
+
+/** Appends a new, empty command to the pipeline. */
+static Command* add_command(Pipeline* pipeline, size_t* capacity) {
+    Command* command;
+
+    if (pipeline->count >= *capacity) {
+        size_t newCapacity = *capacity == 0 ? 4 : *capacity * 2;
+        Command* grown = realloc(pipeline->commands, newCapacity * sizeof *grown);
+        if (grown == NULL)
+            return NULL;
+        pipeline->commands = grown;
+        *capacity = newCapacity;
+    }
+
+    command = &pipeline->commands[pipeline->count++];
+    memset(command, 0, sizeof *command);
+    return command;
+}
+
+/** Appends a word to the arguments of a command, keeping argv NULL-terminated. */
+static int add_argument(Command* command, size_t* argc, size_t* capacity, LPSTR word) {
+    if (*argc + 2 > *capacity) {
+        size_t newCapacity = *capacity == 0 ? 8 : *capacity * 2;
+        LPSTR* grown = realloc(command->argv, newCapacity * sizeof *grown);
+        if (grown == NULL)
+            return -1;
+        command->argv = grown;
+        *capacity = newCapacity;
+    }
+    command->argv[(*argc)++] = word;
+    command->argv[*argc] = NULL;
+    return 0;
+}
+
+int winshell_parse(const CHAR* line, Pipeline* pipeline) {
+    Lexeme* lexemes;
+    size_t lexemeCount, i;
+    size_t commandCapacity = 0, argc = 0, argvCapacity = 0;
+    Command* current = NULL;
+
+    memset(pipeline, 0, sizeof *pipeline);
+    if (tokenize(line, &pipeline->buffer, &lexemes, &lexemeCount) != 0)
+        return -1;
+
+    for (i = 0; i < lexemeCount; i++) {
+        Lexeme* lexeme = &lexemes[i];
+
+        if (lexeme->type == LEX_WORD) {
+            if (current == NULL) {
+                current = add_command(pipeline, &commandCapacity);
+                if (current == NULL)
+                    goto err_memory;
+                argc = argvCapacity = 0;
+            }
+            if (add_argument(current, &argc, &argvCapacity, lexeme->text) != 0)
+                goto err_memory;
+        } else if (lexeme->type == LEX_PIPE) {
+            if (current == NULL || current->argv == NULL) {
+                fprintf(stderr, "Error: Syntax error: missing command before '|'\n");
+                goto err_syntax;
+            }
+            current = NULL;
+        } else {
+            // a redirection: the next lexeme has to be the file name
+            LPSTR* target;
+            int* append = NULL;
+
+            if (i + 1 >= lexemeCount || lexemes[i + 1].type != LEX_WORD) {
+                fprintf(stderr, "Error: Syntax error: file name expected after '%s'\n", operator_name(lexeme->type));
+                goto err_syntax;
+            }
+
+            if (current == NULL) {
+                current = add_command(pipeline, &commandCapacity);
+                if (current == NULL)
+                    goto err_memory;
+                argc = argvCapacity = 0;
+            }
+
+            switch (lexeme->type) {
+                case LEX_INPUT:        target = &current->input;  break;
+                case LEX_OUTPUT:       target = &current->output;  append = &current->append;    *append = 0; break;
+                case LEX_APPEND:       target = &current->output;  append = &current->append;    *append = 1; break;
+                case LEX_ERROR:        target = &current->errput;  append = &current->errAppend; *append = 0; break;
+                default:                 target = &current->errput;  append = &current->errAppend; *append = 1; break;
+            }
+            *target = lexemes[++i].text;
+        }
+    }
+
+    // a trailing '|' leaves an unfinished command behind it
+    if (lexemeCount > 0 && lexemes[lexemeCount - 1].type == LEX_PIPE) {
+        fprintf(stderr, "Error: Syntax error: missing command after '|'\n");
+        goto err_syntax;
+    }
+    for (i = 0; i < pipeline->count; i++) {
+        if (pipeline->commands[i].argv == NULL) {
+            fprintf(stderr, "Error: Syntax error: missing command\n");
+            goto err_syntax;
+        }
+    }
+
+    free(lexemes);
+    return 0;
+
+err_memory:
+    fprintf(stderr, "Error: Out of memory\n");
+err_syntax:
+    free(lexemes);
+    winshell_freePipeline(pipeline);
+    return -1;
+}
+
+void winshell_freePipeline(Pipeline* pipeline) {
+    size_t i;
+    for (i = 0; i < pipeline->count; i++)
+        free(pipeline->commands[i].argv);
+    free(pipeline->commands);
+    free(pipeline->buffer);
+    memset(pipeline, 0, sizeof *pipeline);
 }

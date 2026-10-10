@@ -6,7 +6,7 @@ Winshell is a project and toolchain for using a Linux-style shell and coreutils 
 It is written in plain C on top of the Win32 API, and aims to run as far back as Windows XP.
 
 > **Status: early development.** The shell reads a line and runs `bin\<command>.exe`;
-> pipes, redirection and the virtual root directory are not implemented yet.
+> the virtual root directory, variable expansion, globbing and more are not implemented yet.
 
 ## Implemented
 
@@ -29,6 +29,14 @@ See [Planned](#planned) for what is still to come.
   - They can be mixed, as in `a"b c"d`, and `""` gives an empty argument.
   - A backslash is only special in front of a double quote, so paths such as `C:\bin\echo` can be typed as they are.
   - An unclosed quote prints an error and nothing is executed.
+- **Pipes and redirection**
+  - `a | b`: connects the standard output of a to the standard input of b. All commands run at the same time.
+  - `< file`: read standard input from a file.
+  - `> file`, `>> file`: write standard output to a file (replacing it), or append to it.
+  - `2> file`, `2>> file`: write standard error to a file, or append to it.
+  - Spaces around operators are optional (`echo hi>out.txt`). Operators have no meaning inside quotes.
+  - A redirection takes precedence over a pipe. The exit code of the last command is the result.
+  - `2>&1`, `&`, `&&`, `||` and `;` are not supported yet.
 - **Ctrl+C / Ctrl+Break**
   - While a program is running, only that program is interrupted and the shell keeps running.
   - At the prompt the shell does not exit; it discards the line being typed.
@@ -85,7 +93,7 @@ A sub-project's `Makefile` must provide `all` and `clean` rules and accept the o
 
 ## Planned
 
-**Shell features**: pipes (`|`), redirection (`<`, `>`), virtual root directory
+**Shell features**: `2>&1`, variable expansion, globbing, virtual root directory
 
 **coreutils**
 

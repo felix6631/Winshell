@@ -100,22 +100,13 @@ int main() {
             break;
         }
 
-        // the parser reports its own errors
-        LPSTR* parsed = winshell_parser(input);
-        if (parsed == NULL) {
-            free(input);
-            continue;
+        // the parser and the executer report their own errors
+        Pipeline pipeline;
+        if (winshell_parse(input, &pipeline) == 0) {
+            execute_pipeline(&pipeline);
+            winshell_freePipeline(&pipeline);
         }
 
-        // execute given command
-        if (parsed[0] != NULL) {
-            int result = execute(parsed[0], parsed);
-            if (result == -1) {
-                fprintf(stderr, "Error: Failed to execute command '%s'\n", parsed[0]);
-            }
-        }
-
-        free(parsed);
         free(input);
     }
     return 0;

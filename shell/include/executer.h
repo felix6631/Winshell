@@ -1,18 +1,25 @@
 #ifndef EXECUTER_H
 #define EXECUTER_H
 
+#include "parser.h"
+
 /**
- * execute runs the program located in the same directory as the shell
- * (the project's bin directory), passes argv to it, and waits for it to exit.
+ * execute_pipeline runs every command of the pipeline and waits for all of
+ * them to exit.
  *
- * program is the command name; ".exe" is appended when missing.
- * argv is a NULL-terminated array, argv[0] being the program name by
- * convention. The number of arguments is only bounded by the Windows
- * command line limit (32767 characters).
+ * Programs are looked up in the directory of the shell (the project's bin
+ * directory); ".exe" is appended when missing. All commands run at the same
+ * time, the standard output of each being connected to the standard input of
+ * the next one. Redirections of a command take precedence over the pipe.
+ * Without any, standard input, output and error are those of the shell.
  *
- * It returns the exit code of the program, or -1 when the program could not
- * be started.
+ * A command that cannot be started, or a redirection whose file cannot be
+ * opened, is reported on standard error. The rest of the pipeline still runs;
+ * the neighbours of the failed command see an empty input or a closed output.
+ *
+ * It returns the exit code of the last command, or -1 when that command
+ * could not be started.
  */
-int execute(const char* program, char* const argv[]);
+int execute_pipeline(const Pipeline* pipeline);
 
 #endif //EXECUTER_H
