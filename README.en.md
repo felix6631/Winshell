@@ -14,6 +14,7 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | --- | --- |
 | `shell` | Input loop, runs commands with arguments and waits for them, exits with `quit` |
 | `arch` | Done |
+| `cat` | Done (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `echo` | Done (`-n`, `-e`, `-E`, `--help`, `--version`) |
 | `pwd` | Done (currently prints the plain Windows path) |
 
@@ -22,6 +23,8 @@ See [Planned](#planned) for what is still to come.
 ## Using the shell
 
 - Programs are only looked up in the directory of `shell.exe` (`bin\`); the `.exe` extension may be omitted.
+- The goal is to do the same job as the Linux commands; only what does not work as is on Windows is adapted to Windows.
+  (For example, `cat` does not translate bytes and treats a CR LF pair as one line ending.)
 - Exit with `quit`. End of input (Ctrl+Z, Enter) also exits.
 - **Quoting**
   - `"a b"`: keeps the spaces. `\"` inside is a literal double quote.
@@ -73,6 +76,7 @@ Winshell/
 ├─ Makefile        top-level build rules
 ├─ shell/          the shell itself (include/, src/)
 ├─ arch/           arch command
+├─ cat/            cat command
 ├─ echo/           echo command
 ├─ pwd/            pwd command
 └─ bin/            build output (not tracked by git)
@@ -100,7 +104,7 @@ A sub-project's `Makefile` must provide `all` and `clean` rules and accept the o
 <details>
 <summary>Show list</summary>
 
-`[`, b2sum, base32, base64, basename, cat, chgrp, chmod, chown, cksum, comm, cp, csplit, cut, date, dd, df, dir,
+`[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, cp, csplit, cut, date, dd, df, dir,
 dircolors, dirname, du, env, expand, expr, factor, false, fmt, fold, groups, head, hostid, hostname, id, install,
 join, kill, link, ln, logname, ls, md5sum, mkfifo, mknod, mktemp, mv, nice, nl, nohup, nproc, numfmt, od, paste,
 pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, rm, rmdir, seq, sha1sum, sha224sum, sha256sum,

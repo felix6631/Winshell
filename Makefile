@@ -14,7 +14,7 @@
 
 BINDIR = $(MAKEDIR)\bin
 
-all: bindir build-shell build-arch build-echo build-pwd
+all: bindir build-shell build-arch build-cat build-echo build-pwd
 
 bindir:
 	@if not exist "$(BINDIR)" mkdir "$(BINDIR)"
@@ -23,17 +23,21 @@ build-shell:
 	@cd shell && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-arch:
 	@cd arch && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-cat:
+	@cd cat && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-echo:
 	@cd echo && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-pwd:
 	@cd pwd && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 
-clean: clean-shell clean-arch clean-echo clean-pwd
+clean: clean-shell clean-arch clean-cat clean-echo clean-pwd
 
 clean-shell:
 	@cd shell && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-arch:
 	@cd arch && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-cat:
+	@cd cat && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-echo:
 	@cd echo && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-pwd:

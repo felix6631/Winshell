@@ -14,6 +14,7 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | --- | --- |
 | `shell` | 입력 루프, 인자 전달 및 명령 실행(종료 대기), `quit` 로 종료 |
 | `arch` | 완료 |
+| `cat` | 완료 (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `echo` | 완료 (`-n`, `-e`, `-E`, `--help`, `--version`) |
 | `pwd` | 완료 (현재는 Windows 경로를 그대로 출력) |
 
@@ -22,6 +23,8 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 ## 쉘 사용법
 
 - 프로그램은 `shell.exe`가 있는 디렉터리(`bin\`)에서만 찾으며, 확장자 `.exe`는 생략할 수 있습니다.
+- 이 프로젝트는 리눅스 명령과 같은 역할을 하는 것을 목표로 하며, Windows에서 그대로 동작하지 않는 부분만 Windows에 맞게 조정합니다.
+  (예: `cat` 은 바이트를 변환하지 않고, CRLF 한 쌍을 하나의 줄 끝으로 취급합니다.)
 - `quit` 으로 종료합니다. 입력 끝(Ctrl+Z, Enter)에서도 종료합니다.
 - **따옴표**
   - `"a b"` : 공백을 유지합니다. 안에서 `\"` 는 따옴표 문자입니다.
@@ -73,6 +76,7 @@ Winshell/
 ├─ Makefile        최상위 빌드 규칙
 ├─ shell/          쉘 본체 (include/, src/)
 ├─ arch/           arch 명령
+├─ cat/            cat 명령
 ├─ echo/           echo 명령
 ├─ pwd/            pwd 명령
 └─ bin/            빌드 결과물 (git 추적 제외)
@@ -100,7 +104,7 @@ Winshell/
 <details>
 <summary>목록 펼치기</summary>
 
-`[`, b2sum, base32, base64, basename, cat, chgrp, chmod, chown, cksum, comm, cp, csplit, cut, date, dd, df, dir,
+`[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, cp, csplit, cut, date, dd, df, dir,
 dircolors, dirname, du, env, expand, expr, factor, false, fmt, fold, groups, head, hostid, hostname, id, install,
 join, kill, link, ln, logname, ls, md5sum, mkfifo, mknod, mktemp, mv, nice, nl, nohup, nproc, numfmt, od, paste,
 pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, rm, rmdir, seq, sha1sum, sha224sum, sha256sum,
