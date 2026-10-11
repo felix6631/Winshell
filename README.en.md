@@ -108,20 +108,40 @@ nmake clean    :: remove build output (bin\, obj\)
 ## Tests
 
 ```bat
-nmake test     :: build every program, then build and run the tests
+nmake test      :: build every program, then build and run the tests
+nmake asan      :: the same suite with the programs and the tests built with AddressSanitizer (bin-asan\)
+nmake gnu       :: compare the output bytes with the GNU tools (needs bash and GNU coreutils: MSYS2, Git for Windows)
 ```
+
+The test programs are divided by feature (`test\`).
 
 | Test | What it covers |
 | --- | --- |
 | `vpath_test` | unit tests of `common/vpath.c`: virtual path conversion, `..`, the root, buffer limits |
-| `parser_test` | unit tests of the shell parser: words, quotes, pipes, redirection, syntax errors |
-| `commands_test` | runs `echo`, `arch`, `pwd`, `cat`, `ls`, `rm`, `cp`, `mv`, `mkdir`, `rmdir`, `touch`, `head`, `tail`, `wc`, `sort`, `uniq`, `cut` and `tr` as programs and checks output, resulting files and exit codes |
-| `shell_test` | feeds scripts to `shell.exe`: running commands, quoting, pipes, redirection, wildcards, `cd`, lists and exit status, variable expansion |
+| `parser_test` | unit tests of the shell parser: words, quotes, variables, lists of commands, pipes, redirection, syntax errors |
+| `basic_test` | `echo`, `arch`, `pwd` |
+| `cat_test` | `cat`: bytes kept, options, CR LF |
+| `ls_test` | `ls`: sorting, hidden names, the long format, the virtual root |
+| `fileops_test` | `rm`, `cp`, `mv`: files and trees, read-only files, the protection of roots |
+| `dirs_test` | `mkdir`, `rmdir`, `touch` |
+| `text_test` | `head`, `tail`, `wc` |
+| `filter_test` | `sort`, `uniq`, `cut`, `tr` |
+| `shell_run_test` | shell: running commands, quoting, pipes, redirection |
+| `shell_cd_test` | shell: `cd`, the virtual file system, wildcards |
+| `shell_lists_test` | shell: `; && \|\|`, exit status, variables, `exit` |
+| `shell_pipeline_test` | shell: the commands together with pipes, redirection and wildcards |
+| `equiv_test` | **property test**: random inputs give the same results with LF, CR LF and mixed line endings (`WS_ITER`, `WS_SEED`) |
+| `limits_test` | **limits**: sorting 500,000 lines, one line of 20 MB, sizes around the buffers (65536 +- 1), 2,000,000 empty lines, deep paths, many files (`WS_STRESS=1`: ten times larger) |
+| `sharing_test` | **sharing violations**: `rm`/`mv`/`cp` of files and directories another process holds open, moves between volumes |
+| `async_test` | **asynchronous**: input that comes in pieces, programs that wait for the end of their input, `tail -f` |
 
-- `nmake test` ends with 0 when everything passes; a failing check is reported with its location and the expected and actual values.
+- `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
+- **AddressSanitizer:** `nmake asan` rebuilds all tools and tests with `/fsanitize=address` (`bin-asan\`, `test\out-asan\`) and runs them. Memory errors are reported with their location and fail the test. The environment variable `WINSHELL_BIN` selects the directory of tools the tests use.
+- **Comparison with GNU:** `test\gnu_compare.sh` compares `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr` and `cat` with the GNU tools in about a thousand combinations of options and inputs (`LC_ALL=C`). What is meant to differ (a CR LF ending is not part of the line, `sort -z/-h/-M/-V` are refused, characters are UTF-8) is not compared.
+- **`mv` to another drive:** with the environment variable `WINSHELL_TEST_CROSS_DEVICE` set, `mv` does not try the rename and takes the copy-and-remove path. The tests run that code on one volume with it, and for real when a second fixed drive that can be written to exists.
+- When adding a command, add its cases to the `*_test.c` of its feature. The shared parts are `testlib.h` (checks, running programs) and `testtools.h` (work directory, running tools, fixtures). Output is compared without telling LF and CRLF apart (`lf_only`).
 - Ctrl+C handling is not part of the automatic tests because it needs a real console.
-- When adding a command, add its cases to `test\commands_test.c`. Output is compared without telling LF and CRLF apart (`lf_only`).
 
 ## Layout
 

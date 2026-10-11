@@ -9,3 +9,8 @@ bin/
 !README.md
 !README.en.md
 out/
+*.pdb
+*.ilk
+*.obj
+bin-asan/
+out-asan/

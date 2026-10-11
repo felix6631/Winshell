@@ -4,7 +4,7 @@ NAME   = arch
 BINDIR = ..\bin
 OBJDIR = obj
 TARGET = $(BINDIR)\$(NAME).exe
-CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS
+CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS $(EXTRA_CFLAGS)
 
 all: $(TARGET)
 

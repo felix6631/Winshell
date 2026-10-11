@@ -1,44 +1,74 @@
 ## 테스트 빌드/실행 규칙 (NMAKE / MSVC). 보통은 최상위 Makefile의 `nmake test` 로 호출됩니다.
 ##
-## 테스트 프로그램:
-##   vpath_test      common\vpath.c 의 단위 테스트 (가상 경로 변환)
-##   parser_test     쉘 파서의 단위 테스트 (따옴표, 파이프, 리다이렉션)
-##   commands_test   bin\ 의 명령(echo, arch, pwd, cat)을 프로그램으로 실행해서 확인
-##   shell_test      bin\shell.exe 에 스크립트를 입력해 쉘 전체를 확인
+## 단위 테스트
+##   vpath_test          common\vpath.c 의 단위 테스트 (가상 경로 변환)
+##   parser_test         쉘 파서의 단위 테스트 (따옴표, 변수, 목록, 파이프, 리다이렉션)
+## 명령을 프로그램으로 실행해서 확인하는 테스트 (bin\ 의 프로그램이 필요)
+##   basic_test          echo, arch, pwd
+##   cat_test            cat
+##   ls_test             ls
+##   fileops_test        rm, cp, mv
+##   dirs_test           mkdir, rmdir, touch
+##   text_test           head, tail, wc
+##   filter_test         sort, uniq, cut, tr
+##   shell_run_test      쉘: 명령 실행, 따옴표, 파이프, 리다이렉션
+##   shell_cd_test       쉘: cd, 가상 파일 시스템, 와일드카드
+##   shell_lists_test    쉘: ; && ||, 종료 상태, 변수, exit
+##   shell_pipeline_test 쉘: 명령들을 파이프, 리다이렉션, 와일드카드와 함께
+## 성질과 한계를 확인하는 테스트
+##   equiv_test          LF 와 CRLF 입력의 동등성을 무작위 입력으로 확인 (속성 테스트)
+##   limits_test         큰 입력과 경계 (버퍼 크기, 긴 줄, 많은 줄, 깊은 경로)
+##   sharing_test        열려 있는 파일에 대한 rm/mv/cp, 다른 드라이브로의 mv
+##   async_test          계속 실행되는 프로그램 (tail -f, 늦게 닫히는 표준 입력)
 ##
-## commands_test, shell_test 는 bin\ 에 빌드된 프로그램이 필요합니다.
-## 결과물은 test\out\ 에 만들어지고(git 추적 제외), 작업 파일은 test\out\work\ 에 만들어집니다.
+## 사용법
+##   nmake check         빌드하고 모두 실행
+##   nmake check-asan    AddressSanitizer 로 빌드한 프로그램과 테스트로 모두 실행
+##                       (먼저 루트에서 nmake asan 으로 bin-asan\ 을 만들어야 합니다; nmake asan 이 둘 다 합니다)
+##
+## 결과물은 test\out\ (asan 은 test\out-asan\) 에 만들어지고(git 추적 제외),
+## 작업 파일은 그 아래 work\ 에 만들어집니다.
 
 OUT    = out
-CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common /I..\shell\include
-TESTS  = $(OUT)\vpath_test.exe $(OUT)\parser_test.exe $(OUT)\commands_test.exe $(OUT)\shell_test.exe
+EXTRA  =
+CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common /I..\shell\include $(EXTRA)
+
+TESTS = $(OUT)\vpath_test.exe $(OUT)\parser_test.exe \
+        $(OUT)\basic_test.exe $(OUT)\cat_test.exe $(OUT)\ls_test.exe $(OUT)\fileops_test.exe \
+        $(OUT)\dirs_test.exe $(OUT)\text_test.exe $(OUT)\filter_test.exe \
+        $(OUT)\shell_run_test.exe $(OUT)\shell_cd_test.exe $(OUT)\shell_lists_test.exe \
+        $(OUT)\shell_pipeline_test.exe \
+        $(OUT)\equiv_test.exe $(OUT)\limits_test.exe $(OUT)\sharing_test.exe $(OUT)\async_test.exe
 
 all: $(TESTS)
 
 check: all
-	@$(OUT)\vpath_test.exe
-	@$(OUT)\parser_test.exe
-	@$(OUT)\commands_test.exe
-	@$(OUT)\shell_test.exe
+	@.\runall.bat $(OUT)
 
-$(OUT):
+check-asan:
+	@$(MAKE) /nologo OUT=out-asan EXTRA="/fsanitize=address /Zi" all
+	@.\runasan.bat
+
+.SUFFIXES: .c .exe
+
+# a test program of one file that runs the programs of the project
+{.}.c{$(OUT)}.exe:
 	@if not exist $(OUT) mkdir $(OUT)
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ $<
+
+$(OUT)\basic_test.exe $(OUT)\cat_test.exe $(OUT)\ls_test.exe $(OUT)\fileops_test.exe $(OUT)\dirs_test.exe \
+$(OUT)\text_test.exe $(OUT)\filter_test.exe $(OUT)\shell_run_test.exe $(OUT)\shell_cd_test.exe \
+$(OUT)\shell_lists_test.exe $(OUT)\shell_pipeline_test.exe $(OUT)\equiv_test.exe $(OUT)\limits_test.exe \
+$(OUT)\sharing_test.exe $(OUT)\async_test.exe: testlib.h testtools.h
 
 $(OUT)\vpath_test.exe: vpath_test.c testlib.h ..\common\vpath.c ..\common\vpath.h
 	@if not exist $(OUT) mkdir $(OUT)
-	cl $(CFLAGS) /Fo$(OUT)\ /Fe$(OUT)\vpath_test.exe vpath_test.c ..\common\vpath.c
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ vpath_test.c ..\common\vpath.c
 
 $(OUT)\parser_test.exe: parser_test.c testlib.h ..\shell\src\parser.c ..\shell\include\parser.h ..\common\vpath.c
 	@if not exist $(OUT) mkdir $(OUT)
-	cl $(CFLAGS) /Fo$(OUT)\ /Fe$(OUT)\parser_test.exe parser_test.c ..\shell\src\parser.c ..\common\vpath.c
-
-$(OUT)\commands_test.exe: commands_test.c testlib.h
-	@if not exist $(OUT) mkdir $(OUT)
-	cl $(CFLAGS) /Fo$(OUT)\ /Fe$(OUT)\commands_test.exe commands_test.c
-
-$(OUT)\shell_test.exe: shell_test.c testlib.h
-	@if not exist $(OUT) mkdir $(OUT)
-	cl $(CFLAGS) /Fo$(OUT)\ /Fe$(OUT)\shell_test.exe shell_test.c
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ parser_test.c ..\shell\src\parser.c ..\common\vpath.c
 
 clean:
-	@if exist $(OUT) rmdir /s /q $(OUT)
+	@if exist out rmdir /s /q out
+	@if exist out-asan rmdir /s /q out-asan

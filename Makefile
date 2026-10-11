@@ -9,6 +9,8 @@
 ## 사용법 (cl.exe와 nmake.exe가 PATH에 등록된 터미널에서 실행)
 ##   nmake          모든 서브 프로젝트 빌드 (결과물: bin\)
 ##   nmake test     빌드한 뒤 테스트(test\) 실행
+##   nmake asan     AddressSanitizer 로 빌드해서 테스트 실행 (bin-asan\)
+##   nmake gnu      GNU 도구와 출력 대조 (bash 와 GNU coreutils 필요)
 ##   nmake clean    모든 빌드 결과물 삭제
 ##
 ## 새 명령어를 추가하려면 디렉터리와 Makefile을 만든 뒤, 아래 목록에 이름을 추가하세요.
@@ -62,6 +64,16 @@ build-wc:
 ## 테스트: 먼저 모든 프로그램을 빌드한 뒤 test\ 의 테스트를 빌드하고 실행합니다.
 test: all
 	@cd test && $(MAKE) /nologo check
+
+## AddressSanitizer: 모든 프로그램을 bin-asan\ 에 /fsanitize=address 로 빌드하고, 같은 방식으로 빌드한
+## 테스트로 전체를 실행합니다. 오류가 있으면 프로그램이 오류 위치와 함께 중단됩니다.
+asan:
+	@$(MAKE) /nologo BINDIR="$(MAKEDIR)\bin-asan" EXTRA_CFLAGS="/fsanitize=address /Zi" all
+	@cd test && $(MAKE) /nologo check-asan
+
+## GNU 도구(MSYS2 의 bash 가 있는 환경)와 출력을 대조합니다: bash test/gnu_compare.sh
+gnu: all
+	@bash test/gnu_compare.sh
 
 clean: clean-shell clean-arch clean-cat clean-cp clean-echo clean-head clean-ls clean-mkdir clean-mv clean-pwd clean-rm clean-rmdir clean-tail clean-touch clean-wc clean-test clean-cut clean-sort clean-tr clean-uniq
 

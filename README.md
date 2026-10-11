@@ -108,20 +108,40 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 ## 테스트
 
 ```bat
-nmake test     :: 모든 프로그램을 빌드한 뒤 테스트를 빌드하고 실행합니다
+nmake test      :: 모든 프로그램을 빌드한 뒤 테스트를 빌드하고 실행합니다
+nmake asan      :: AddressSanitizer 로 빌드한 프로그램과 테스트로 같은 스위트를 실행합니다 (bin-asan\)
+nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 GNU coreutils 필요: MSYS2, Git for Windows)
 ```
+
+테스트 프로그램은 기능별로 나뉘어 있습니다(`test\`).
 
 | 테스트 | 대상 |
 | --- | --- |
 | `vpath_test` | `common/vpath.c` 단위 테스트: 가상 경로 변환, `..` 처리, 루트, 버퍼 경계 |
-| `parser_test` | 쉘 파서 단위 테스트: 단어, 따옴표, 파이프, 리다이렉션, 구문 오류 |
-| `commands_test` | `echo`, `arch`, `pwd`, `cat`, `ls`, `rm`, `cp`, `mv`, `mkdir`, `rmdir`, `touch`, `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr` 를 프로그램으로 실행해 출력, 파일 결과, 종료 코드 확인 |
-| `shell_test` | `shell.exe` 에 스크립트를 입력해 명령 실행, 따옴표, 파이프, 리다이렉션, 글롭, `cd`, 명령 목록과 종료 상태, 변수 확장 확인 |
+| `parser_test` | 쉘 파서 단위 테스트: 단어, 따옴표, 변수, 명령 목록, 파이프, 리다이렉션, 구문 오류 |
+| `basic_test` | `echo`, `arch`, `pwd` |
+| `cat_test` | `cat`: 바이트 보존, 옵션, CRLF |
+| `ls_test` | `ls`: 정렬, 숨김, 긴 형식, 가상 루트 |
+| `fileops_test` | `rm`, `cp`, `mv`: 파일과 트리, 읽기 전용, 루트 보호 |
+| `dirs_test` | `mkdir`, `rmdir`, `touch` |
+| `text_test` | `head`, `tail`, `wc` |
+| `filter_test` | `sort`, `uniq`, `cut`, `tr` |
+| `shell_run_test` | 쉘: 명령 실행, 따옴표, 파이프, 리다이렉션 |
+| `shell_cd_test` | 쉘: `cd`, 가상 파일 시스템, 와일드카드 |
+| `shell_lists_test` | 쉘: `; && \|\|`, 종료 상태, 변수, `exit` |
+| `shell_pipeline_test` | 쉘: 명령들을 파이프, 리다이렉션, 와일드카드와 함께 |
+| `equiv_test` | **속성 테스트**: 무작위 입력에서 LF, CRLF, 혼합 줄 끝이 같은 결과를 내는지 (`WS_ITER`, `WS_SEED`) |
+| `limits_test` | **한계**: 50만 줄 정렬, 20MB 한 줄, 버퍼 경계(65536±1), 200만 빈 줄, 깊은 경로, 많은 파일 (`WS_STRESS=1` 이면 10배) |
+| `sharing_test` | **공유 위반**: 다른 프로세스가 연 파일/디렉터리에 대한 `rm`/`mv`/`cp`, 다른 볼륨으로의 `mv` |
+| `async_test` | **비동기**: 조각으로 들어오는 입력, 입력이 닫히길 기다리는 프로그램, `tail -f` |
 
-- 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 실패한 검사의 위치와 기대값/실제값을 출력합니다.
+- 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
+- **AddressSanitizer:** `nmake asan` 은 모든 도구와 테스트를 `/fsanitize=address` 로 다시 빌드해서(`bin-asan\`, `test\out-asan\`) 실행합니다. 메모리 오류는 위치와 함께 보고되고 테스트가 실패합니다. 환경 변수 `WINSHELL_BIN` 으로 테스트가 쓰는 도구 디렉터리를 바꿀 수 있습니다.
+- **GNU 대조:** `test\gnu_compare.sh` 는 `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr`, `cat` 을 1천여 가지 옵션/입력 조합으로 GNU 도구와 비교합니다(`LC_ALL=C`). 의도적으로 다른 부분(CRLF 줄 끝은 줄 내용이 아님, `sort -z/-h/-M/-V` 거부, UTF-8 문자 수)은 비교에서 빠져 있습니다.
+- **다른 드라이브로의 `mv`:** 환경 변수 `WINSHELL_TEST_CROSS_DEVICE` 가 설정되면 `mv` 는 이름 변경을 시도하지 않고 복사 후 삭제 경로를 탑니다. 테스트는 이것으로 한 볼륨에서도 같은 코드를 실행하고, 쓸 수 있는 고정 드라이브가 하나 더 있으면 실제로도 시험합니다.
+- 새 명령을 추가하면 해당 기능의 `*_test.c` 에 항목을 추가하세요. 공통 도구는 `testlib.h`(검사, 프로세스 실행), `testtools.h`(작업 디렉터리, 도구 실행, 픽스처) 에 있습니다. 줄 끝은 LF 와 CRLF 를 구별하지 않고 비교합니다(`lf_only`).
 - Ctrl+C 처리는 실제 콘솔이 필요해서 자동 테스트에 포함하지 않았습니다.
-- 새 명령을 추가하면 `test\commands_test.c` 에 항목을 추가하세요. 줄 끝은 LF 와 CRLF 를 구별하지 않고 비교합니다(`lf_only`).
 
 ## 디렉터리 구조
 
