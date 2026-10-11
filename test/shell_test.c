@@ -490,6 +490,56 @@ static void test_file_commands(void) {
                "dest\nkeep.txt\nlogs\none.txt\ntwo.txt\n"); // after removing it
 }
 
+/** head, tail and wc in pipelines: the reason they read standard input. */
+static void test_text_pipelines(void) {
+    char dir[MAX_PATH * 2];
+    char text[512];
+    int i;
+
+    printf("head, tail and wc in pipelines\n");
+
+    snprintf(dir, sizeof dir, "%s\\textcmd", workDir);
+    CreateDirectoryA(dir, NULL);
+    text[0] = '\0';
+    for (i = 1; i <= 20; i++) {
+        char one[16];
+        snprintf(one, sizeof one, "n%d\n", i);
+        strcat(text, one);
+    }
+    write_text(dir, "numbers.txt", text);
+    write_text(dir, "a.txt", "1");
+    write_text(dir, "b.txt", "2");
+    write_text(dir, "c.log", "3");
+    {
+        // what an earlier run left behind
+        RunResult r;
+        script("cd textcmd\nrm -f first.txt\n", &r);
+        run_result_free(&r);
+    }
+
+    SCRIPT_OUT("cd textcmd\ncat numbers.txt | head -n 3\n", "n1\nn2\nn3\n");
+    SCRIPT_OUT("cd textcmd\ncat numbers.txt | tail -n 2\n", "n19\nn20\n");
+    SCRIPT_OUT("cd textcmd\ncat numbers.txt | tail -n +19 | head -n 1\n", "n19\n");
+    SCRIPT_OUT("cd textcmd\ncat numbers.txt | wc -l\n", "20\n");
+    SCRIPT_OUT("cd textcmd\ncat numbers.txt | head -n -17 | wc -l\n", "3\n");
+
+    // how many files: ls into wc
+    SCRIPT_OUT("cd textcmd\nls | wc -l\n", "4\n");
+    SCRIPT_OUT("cd textcmd\nls *.txt | wc -l\n", "3\n");
+
+    // the line count does not depend on the line endings of the input
+    SCRIPT_OUT("cd textcmd\necho one | cat | wc -l\n", "1\n");
+
+    // numbered, then the last of them
+    SCRIPT_OUT("cd textcmd\ncat -n numbers.txt | tail -n 1\n", "    20\tn20\n");
+
+    // redirection into and out of them
+    SCRIPT_OUT("cd textcmd\nhead -n 2 numbers.txt > first.txt\nwc -l < first.txt\n", "2\n");
+    // the files in the order the shell expands them; a.txt and b.txt have no line feed
+    SCRIPT_OUT("cd textcmd\nhead -n 2 numbers.txt > first.txt\nwc -l *.txt\n",
+               " 0 a.txt\n 0 b.txt\n 2 first.txt\n20 numbers.txt\n22 total\n");
+}
+
 int main(void) {
     make_work_dir("shell", workDir, sizeof workDir);
     expected_virtual(workDir, virtualWorkDir, sizeof virtualWorkDir);
@@ -502,5 +552,6 @@ int main(void) {
     test_cd();
     test_glob();
     test_file_commands();
+    test_text_pipelines();
     return test_summary("shell_test");
 }

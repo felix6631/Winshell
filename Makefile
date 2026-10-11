@@ -15,7 +15,7 @@
 
 BINDIR = $(MAKEDIR)\bin
 
-all: bindir build-shell build-arch build-cat build-cp build-echo build-ls build-mkdir build-mv build-pwd build-rm build-rmdir build-touch
+all: bindir build-shell build-arch build-cat build-cp build-echo build-head build-ls build-mkdir build-mv build-pwd build-rm build-rmdir build-tail build-touch build-wc
 
 bindir:
 	@if not exist "$(BINDIR)" mkdir "$(BINDIR)"
@@ -30,6 +30,8 @@ build-cp:
 	@cd cp && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-echo:
 	@cd echo && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-head:
+	@cd head && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-ls:
 	@cd ls && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-mkdir:
@@ -42,14 +44,18 @@ build-rm:
 	@cd rm && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-rmdir:
 	@cd rmdir && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-tail:
+	@cd tail && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-touch:
 	@cd touch && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-wc:
+	@cd wc && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 
 ## 테스트: 먼저 모든 프로그램을 빌드한 뒤 test\ 의 테스트를 빌드하고 실행합니다.
 test: all
 	@cd test && $(MAKE) /nologo check
 
-clean: clean-shell clean-arch clean-cat clean-cp clean-echo clean-ls clean-mkdir clean-mv clean-pwd clean-rm clean-rmdir clean-touch clean-test
+clean: clean-shell clean-arch clean-cat clean-cp clean-echo clean-head clean-ls clean-mkdir clean-mv clean-pwd clean-rm clean-rmdir clean-tail clean-touch clean-wc clean-test
 
 clean-shell:
 	@cd shell && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
@@ -61,6 +67,8 @@ clean-cp:
 	@cd cp && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-echo:
 	@cd echo && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-head:
+	@cd head && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-ls:
 	@cd ls && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-mkdir:
@@ -73,7 +81,11 @@ clean-rm:
 	@cd rm && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-rmdir:
 	@cd rmdir && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-tail:
+	@cd tail && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-touch:
 	@cd touch && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-wc:
+	@cd wc && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-test:
 	@cd test && $(MAKE) /nologo clean
