@@ -490,6 +490,37 @@ static void test_file_commands(void) {
                "dest\nkeep.txt\nlogs\none.txt\ntwo.txt\n"); // after removing it
 }
 
+/** sort, uniq, cut and tr in pipelines: what they are for. */
+static void test_filter_pipelines(void) {
+    char dir[MAX_PATH * 2];
+
+    printf("sort, uniq, cut and tr in pipelines\n");
+
+    snprintf(dir, sizeof dir, "%s\\filters", workDir);
+    CreateDirectoryA(dir, NULL);
+    write_text(dir, "fruit.txt", "pear\napple\npear\nfig\napple\npear\n");
+    write_text(dir, "people.csv", "bob,30,sales\nalice,25,dev\ncarol,35,dev\n");
+    write_text(dir, "crlf.csv", "bob,30\r\nalice,25\r\n");
+
+    // the classic: how often does each word occur, most frequent first
+    SCRIPT_OUT("cd filters\nsort fruit.txt | uniq -c | sort -rn | head -n 1\n", "      3 pear\n");
+    SCRIPT_OUT("cd filters\nsort -u fruit.txt\n", "apple\nfig\npear\n");
+    SCRIPT_OUT("cd filters\ncat fruit.txt | sort | uniq -d\n", "apple\npear\n");
+
+    // fields, sorted and counted
+    SCRIPT_OUT("cd filters\ncut -d, -f3 people.csv | sort | uniq -c\n", "      2 dev\n      1 sales\n");
+    SCRIPT_OUT("cd filters\nsort -t, -k2 -n people.csv | cut -d, -f1\n", "alice\nbob\ncarol\n");
+
+    // tr in a pipeline, and with a file as input
+    SCRIPT_OUT("cd filters\ncat fruit.txt | tr a-z A-Z | head -n 2\n", "PEAR\nAPPLE\n");
+    SCRIPT_OUT("cd filters\ntr a-z A-Z < fruit.txt | sort -u | head -n 1\n", "APPLE\n");
+    SCRIPT_OUT("cd filters\ncut -d, -f1 people.csv | tr \"\\n\" \" \"\n", "bob alice carol ");
+
+    // a CR LF file goes through the same tools and keeps its line endings
+    SCRIPT_OUT("cd filters\nsort crlf.csv | cut -d, -f2 | wc -l\n", "2\n");
+    SCRIPT_OUT("cd filters\nsort crlf.csv | tr -d \"\\r\" | cat -E\n", "alice,25$\nbob,30$\n");
+}
+
 /** head, tail and wc in pipelines: the reason they read standard input. */
 static void test_text_pipelines(void) {
     char dir[MAX_PATH * 2];
@@ -553,5 +584,6 @@ int main(void) {
     test_glob();
     test_file_commands();
     test_text_pipelines();
+    test_filter_pipelines();
     return test_summary("shell_test");
 }

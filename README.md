@@ -16,6 +16,7 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `arch` | 완료 |
 | `cat` | 완료 (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `cp` | 완료 (`-a -f -i -n -p -r -R -t -v`) |
+| `cut` | 완료 (`-b -c -f -d -s --complement --output-delimiter`) |
 | `echo` | 완료 (`-n`, `-e`, `-E`, `--help`, `--version`) |
 | `head` | 완료 (`-n -c -q -v -NUM`, `-n -K` 는 끝의 K줄만 빼고) |
 | `ls` | 완료 (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` 는 드라이브 목록) |
@@ -24,8 +25,11 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `pwd` | 완료 (`-L`, `-P`, 가상 경로로 출력) |
 | `rm` | 완료 (`-f -i -r -R -d -v`, `/`, 드라이브, 공유의 루트는 `--no-preserve-root` 로도 삭제 불가) |
 | `rmdir` | 완료 (`-p -v --ignore-fail-on-non-empty`) |
+| `sort` | 완료 (`-b -d -f -g -i -n -r -s -u -c -C -k -t -o`, 바이트 순서(C 로캘), `-h -M -V -z` 는 미지원) |
 | `tail` | 완료 (`-n -c -f -s -q -v -NUM`, `-n +K`) |
 | `touch` | 완료 (`-a -c -d -m -r -t`) |
+| `tr` | 완료 (`-c -C -d -s -t`, `[:alpha:]` 등의 문자 클래스, 범위, 이스케이프) |
+| `uniq` | 완료 (`-c -d -D -u -i -f -s -w`) |
 | `wc` | 완료 (`-l -w -m -c -L`) |
 
 구현 예정 목록은 [아래](#구현-예정)를 참고하세요.
@@ -82,7 +86,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `cp`, `echo`, `head`, `ls`, `mkdir`, `mv`, `pwd`, `rm`, `rmdir`, `tail`, `touch`, `wc`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `head`, `ls`, `mkdir`, `mv`, `pwd`, `rm`, `rmdir`, `sort`, `tail`, `touch`, `tr`, `uniq`, `wc`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -96,7 +100,7 @@ nmake test     :: 모든 프로그램을 빌드한 뒤 테스트를 빌드하고
 | --- | --- |
 | `vpath_test` | `common/vpath.c` 단위 테스트: 가상 경로 변환, `..` 처리, 루트, 버퍼 경계 |
 | `parser_test` | 쉘 파서 단위 테스트: 단어, 따옴표, 파이프, 리다이렉션, 구문 오류 |
-| `commands_test` | `echo`, `arch`, `pwd`, `cat`, `ls`, `rm`, `cp`, `mv`, `mkdir`, `rmdir`, `touch`, `head`, `tail`, `wc` 를 프로그램으로 실행해 출력, 파일 결과, 종료 코드 확인 |
+| `commands_test` | `echo`, `arch`, `pwd`, `cat`, `ls`, `rm`, `cp`, `mv`, `mkdir`, `rmdir`, `touch`, `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr` 를 프로그램으로 실행해 출력, 파일 결과, 종료 코드 확인 |
 | `shell_test` | `shell.exe` 에 스크립트를 입력해 명령 실행, 따옴표, 파이프, 리다이렉션, `cd` 확인 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 실패한 검사의 위치와 기대값/실제값을 출력합니다.
@@ -113,6 +117,7 @@ Winshell/
 ├─ arch/           arch 명령
 ├─ cat/            cat 명령
 ├─ cp/             cp 명령
+├─ cut/            cut 명령
 ├─ echo/           echo 명령
 ├─ head/           head 명령
 ├─ ls/             ls 명령
@@ -121,10 +126,13 @@ Winshell/
 ├─ pwd/            pwd 명령
 ├─ rm/             rm 명령
 ├─ rmdir/          rmdir 명령
+├─ sort/           sort 명령
 ├─ tail/           tail 명령
 ├─ touch/          touch 명령
+├─ tr/             tr 명령
+├─ uniq/           uniq 명령
 ├─ wc/             wc 명령
-├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력)
+├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)
 ```
@@ -155,12 +163,12 @@ Winshell/
 <details>
 <summary>목록 펼치기</summary>
 
-`[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, cut, date, dd, df, dir,
+`[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, date, dd, df, dir,
 dircolors, dirname, du, env, expand, expr, factor, false, fmt, fold, groups, hostid, hostname, id, install,
 join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nl, nohup, nproc, numfmt, od, paste,
 pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
-sha384sum, sha512sum, shred, shuf, sleep, sort, split, stat, stdbuf, sum, sync, tac, tee, test, tr, true,
-truncate, tsort, tty, uname, unexpand, uniq, unlink, uptime, users, vdir, who, whoami, yes
+sha384sum, sha512sum, shred, shuf, sleep, split, stat, stdbuf, sum, sync, tac, tee, test, true,
+truncate, tsort, tty, uname, unexpand, unlink, uptime, users, vdir, who, whoami, yes
 
 </details>
 

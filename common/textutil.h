@@ -38,4 +38,24 @@ int text_open(const char* program, const char* path, int plainMessage, FILE** ou
 /** Puts standard input and standard output into binary mode. */
 void text_binary_streams(void);
 
+/** Reads a stream completely. The result has to be freed; NULL when out of memory. */
+unsigned char* text_slurp(FILE* in, size_t* length);
+
+/**
+ * One line of a text. The content is what stands before the line ending; a
+ * CR in front of the line feed is part of the line ending, not of the
+ * content, so "a\r\n" and "a\n" have the same content "a".
+ */
+typedef struct {
+    const unsigned char* content;
+    size_t               length;        // of the content
+    int                  ending;        // 0 none (last line), 1 LF, 2 CR LF
+} TextLine;
+
+/** Where the line that starts at text + *offset ends; fills line and moves *offset. Returns 0 at the end. */
+int text_next_line(const unsigned char* text, size_t length, size_t* offset, TextLine* line);
+
+/** Writes the content and then the ending of the line (a missing one is written as LF). */
+int text_write_line(const TextLine* line, FILE* out);
+
 #endif //TEXTUTIL_H

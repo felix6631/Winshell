@@ -16,6 +16,7 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `arch` | Done |
 | `cat` | Done (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `cp` | Done (`-a -f -i -n -p -r -R -t -v`) |
+| `cut` | Done (`-b -c -f -d -s --complement --output-delimiter`) |
 | `echo` | Done (`-n`, `-e`, `-E`, `--help`, `--version`) |
 | `head` | Done (`-n -c -q -v -NUM`, `-n -K` leaves out the last K lines) |
 | `ls` | Done (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` lists the drives) |
@@ -24,8 +25,11 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `pwd` | Done (`-L`, `-P`, prints the virtual path) |
 | `rm` | Done (`-f -i -r -R -d -v`, `/` and the roots of drives and shares are never removed, not even with `--no-preserve-root`) |
 | `rmdir` | Done (`-p -v --ignore-fail-on-non-empty`) |
+| `sort` | Done (`-b -d -f -g -i -n -r -s -u -c -C -k -t -o`; byte order as in the C locale; `-h -M -V -z` are not supported) |
 | `tail` | Done (`-n -c -f -s -q -v -NUM`, `-n +K`) |
 | `touch` | Done (`-a -c -d -m -r -t`) |
+| `tr` | Done (`-c -C -d -s -t`, classes `[:alpha:]` etc.) |
+| `uniq` | Done (`-c -d -D -u -i -f -s -w`) |
 | `wc` | Done (`-l -w -m -c -L`) |
 
 See [Planned](#planned) for what is still to come.
@@ -82,7 +86,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `echo`, `head`, `ls`, `mkdir`, `mv`, `pwd`, `rm`, `rmdir`, `tail`, `touch`, `wc`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `head`, `ls`, `mkdir`, `mv`, `pwd`, `rm`, `rmdir`, `sort`, `tail`, `touch`, `tr`, `uniq`, `wc`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -96,7 +100,7 @@ nmake test     :: build every program, then build and run the tests
 | --- | --- |
 | `vpath_test` | unit tests of `common/vpath.c`: virtual path conversion, `..`, the root, buffer limits |
 | `parser_test` | unit tests of the shell parser: words, quotes, pipes, redirection, syntax errors |
-| `commands_test` | runs `echo`, `arch`, `pwd`, `cat`, `ls`, `rm`, `cp`, `mv`, `mkdir`, `rmdir`, `touch`, `head`, `tail` and `wc` as programs and checks output, resulting files and exit codes |
+| `commands_test` | runs `echo`, `arch`, `pwd`, `cat`, `ls`, `rm`, `cp`, `mv`, `mkdir`, `rmdir`, `touch`, `head`, `tail`, `wc`, `sort`, `uniq`, `cut` and `tr` as programs and checks output, resulting files and exit codes |
 | `shell_test` | feeds scripts to `shell.exe`: running commands, quoting, pipes, redirection, `cd` |
 
 - `nmake test` ends with 0 when everything passes; a failing check is reported with its location and the expected and actual values.
@@ -113,6 +117,7 @@ Winshell/
 ├─ arch/           arch command
 ├─ cat/            cat command
 ├─ cp/             cp command
+├─ cut/            cut command
 ├─ echo/           echo command
 ├─ head/           head command
 ├─ ls/             ls command
@@ -121,10 +126,13 @@ Winshell/
 ├─ pwd/            pwd command
 ├─ rm/             rm command
 ├─ rmdir/          rmdir command
+├─ sort/           sort command
 ├─ tail/           tail command
 ├─ touch/          touch command
+├─ tr/             tr command
+├─ uniq/           uniq command
 ├─ wc/             wc command
-├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input)
+├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
 ```
@@ -155,12 +163,12 @@ A sub-project's `Makefile` must provide `all` and `clean` rules and accept the o
 <details>
 <summary>Show list</summary>
 
-`[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, cut, date, dd, df, dir,
+`[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, date, dd, df, dir,
 dircolors, dirname, du, env, expand, expr, factor, false, fmt, fold, groups, hostid, hostname, id, install,
 join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nl, nohup, nproc, numfmt, od, paste,
 pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
-sha384sum, sha512sum, shred, shuf, sleep, sort, split, stat, stdbuf, sum, sync, tac, tee, test, tr, true,
-truncate, tsort, tty, uname, unexpand, uniq, unlink, uptime, users, vdir, who, whoami, yes
+sha384sum, sha512sum, shred, shuf, sleep, split, stat, stdbuf, sum, sync, tac, tee, test, true,
+truncate, tsort, tty, uname, unexpand, unlink, uptime, users, vdir, who, whoami, yes
 
 </details>
 

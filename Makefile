@@ -15,7 +15,7 @@
 
 BINDIR = $(MAKEDIR)\bin
 
-all: bindir build-shell build-arch build-cat build-cp build-echo build-head build-ls build-mkdir build-mv build-pwd build-rm build-rmdir build-tail build-touch build-wc
+all: bindir build-shell build-arch build-cat build-cp build-cut build-echo build-head build-ls build-mkdir build-mv build-pwd build-rm build-rmdir build-sort build-tail build-touch build-tr build-uniq build-wc
 
 bindir:
 	@if not exist "$(BINDIR)" mkdir "$(BINDIR)"
@@ -46,6 +46,14 @@ build-rmdir:
 	@cd rmdir && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-tail:
 	@cd tail && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-cut:
+	@cd cut && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-sort:
+	@cd sort && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-tr:
+	@cd tr && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-uniq:
+	@cd uniq && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-touch:
 	@cd touch && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-wc:
@@ -55,7 +63,7 @@ build-wc:
 test: all
 	@cd test && $(MAKE) /nologo check
 
-clean: clean-shell clean-arch clean-cat clean-cp clean-echo clean-head clean-ls clean-mkdir clean-mv clean-pwd clean-rm clean-rmdir clean-tail clean-touch clean-wc clean-test
+clean: clean-shell clean-arch clean-cat clean-cp clean-echo clean-head clean-ls clean-mkdir clean-mv clean-pwd clean-rm clean-rmdir clean-tail clean-touch clean-wc clean-test clean-cut clean-sort clean-tr clean-uniq
 
 clean-shell:
 	@cd shell && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
@@ -83,6 +91,14 @@ clean-rmdir:
 	@cd rmdir && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-tail:
 	@cd tail && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-cut:
+	@cd cut && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-sort:
+	@cd sort && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-tr:
+	@cd tr && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-uniq:
+	@cd uniq && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-touch:
 	@cd touch && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-wc:

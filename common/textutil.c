@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <io.h>
+#include <stdlib.h>
 #include <string.h>
 #include <windows.h>
 #include "vpath.h"
@@ -113,4 +114,64 @@ int text_open(const char* program, const char* path, int plainMessage, FILE** ou
 void text_binary_streams(void) {
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
+}
+
+unsigned char* text_slurp(FILE* in, size_t* length) {
+    size_t capacity = 65536, used = 0;
+    unsigned char* data = malloc(capacity);
+
+    while (data != NULL) {
+        size_t got;
+        if (used == capacity) {
+            unsigned char* grown = realloc(data, capacity * 2);
+            if (grown == NULL) {
+                free(data);
+                data = NULL;
+                break;
+            }
+            data = grown;
+            capacity *= 2;
+        }
+        got = fread(data + used, 1, capacity - used, in);
+        if (got == 0)
+            break;
+        used += got;
+    }
+    *length = used;
+    return data;
+}
+
+int text_next_line(const unsigned char* text, size_t length, size_t* offset, TextLine* line) {
+    size_t start = *offset, i = start;
+
+    if (start >= length)
+        return 0;
+    while (i < length && text[i] != '\n')
+        i++;
+
+    line->content = text + start;
+    if (i < length) {
+        // a line feed ends the line; a CR in front of it belongs to the ending
+        if (i > start && text[i - 1] == '\r') {
+            line->length = i - start - 1;
+            line->ending = 2;
+        } else {
+            line->length = i - start;
+            line->ending = 1;
+        }
+        *offset = i + 1;
+    } else {
+        line->length = i - start;
+        line->ending = 0;
+        *offset = length;
+    }
+    return 1;
+}
+
+int text_write_line(const TextLine* line, FILE* out) {
+    if (line->length > 0 && fwrite(line->content, 1, line->length, out) != line->length)
+        return -1;
+    if (line->ending == 2)
+        return fputs("\r\n", out) < 0 ? -1 : 0;
+    return fputc('\n', out) == EOF ? -1 : 0;
 }
