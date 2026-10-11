@@ -69,6 +69,24 @@ nmake clean    :: remove build output (bin\, obj\)
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
+## Tests
+
+```bat
+nmake test     :: build every program, then build and run the tests
+```
+
+| Test | What it covers |
+| --- | --- |
+| `vpath_test` | unit tests of `common/vpath.c`: virtual path conversion, `..`, the root, buffer limits |
+| `parser_test` | unit tests of the shell parser: words, quotes, pipes, redirection, syntax errors |
+| `commands_test` | runs `echo`, `arch`, `pwd` and `cat` as programs and checks output and exit codes |
+| `shell_test` | feeds scripts to `shell.exe`: running commands, quoting, pipes, redirection, `cd` |
+
+- `nmake test` ends with 0 when everything passes; a failing check is reported with its location and the expected and actual values.
+- Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
+- Ctrl+C handling is not part of the automatic tests because it needs a real console.
+- When adding a command, add its cases to `test\commands_test.c`. Output is compared without telling LF and CRLF apart (`lf_only`).
+
 ## Layout
 
 ```
@@ -80,6 +98,7 @@ Winshell/
 ├─ echo/           echo command
 ├─ pwd/            pwd command
 ├─ common/         code shared by several commands (vpath: virtual path conversion)
+├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
 ```
 

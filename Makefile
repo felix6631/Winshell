@@ -8,6 +8,7 @@
 ##
 ## 사용법 (cl.exe와 nmake.exe가 PATH에 등록된 터미널에서 실행)
 ##   nmake          모든 서브 프로젝트 빌드 (결과물: bin\)
+##   nmake test     빌드한 뒤 테스트(test\) 실행
 ##   nmake clean    모든 빌드 결과물 삭제
 ##
 ## 새 명령어를 추가하려면 디렉터리와 Makefile을 만든 뒤, 아래 목록에 이름을 추가하세요.
@@ -30,7 +31,11 @@ build-echo:
 build-pwd:
 	@cd pwd && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 
-clean: clean-shell clean-arch clean-cat clean-echo clean-pwd
+## 테스트: 먼저 모든 프로그램을 빌드한 뒤 test\ 의 테스트를 빌드하고 실행합니다.
+test: all
+	@cd test && $(MAKE) /nologo check
+
+clean: clean-shell clean-arch clean-cat clean-echo clean-pwd clean-test
 
 clean-shell:
 	@cd shell && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
@@ -42,3 +47,5 @@ clean-echo:
 	@cd echo && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-pwd:
 	@cd pwd && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-test:
+	@cd test && $(MAKE) /nologo clean
