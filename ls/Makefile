@@ -1,0 +1,21 @@
+## ls 빌드 규칙 (NMAKE / MSVC). 보통은 최상위 Makefile을 통해 호출됩니다.
+
+NAME   = ls
+BINDIR = ..\bin
+OBJDIR = obj
+TARGET = $(BINDIR)\$(NAME).exe
+CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common
+SRCS   = main.c ..\common\vpath.c
+HDRS   = ..\common\vpath.h
+LIBS   = advapi32.lib
+
+all: $(TARGET)
+
+$(TARGET): $(SRCS) $(HDRS)
+	@if not exist "$(BINDIR)" mkdir "$(BINDIR)"
+	@if not exist $(OBJDIR) mkdir $(OBJDIR)
+	cl $(CFLAGS) /Fo$(OBJDIR)\ /Fe"$(TARGET)" $(SRCS) $(LIBS)
+
+clean:
+	@if exist "$(TARGET)" del "$(TARGET)"
+	@if exist $(OBJDIR) rmdir /s /q $(OBJDIR)

@@ -16,6 +16,7 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `arch` | Done |
 | `cat` | Done (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `echo` | Done (`-n`, `-e`, `-E`, `--help`, `--version`) |
+| `ls` | Done (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` lists the drives) |
 | `pwd` | Done (`-L`, `-P`, prints the virtual path) |
 
 See [Planned](#planned) for what is still to come.
@@ -65,7 +66,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `echo`, `pwd`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `echo`, `ls`, `pwd`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -96,6 +97,7 @@ Winshell/
 ├─ arch/           arch command
 ├─ cat/            cat command
 ├─ echo/           echo command
+├─ ls/             ls command
 ├─ pwd/            pwd command
 ├─ common/         code shared by several commands (vpath: virtual path conversion)
 ├─ test/           tests (nmake test)
@@ -130,7 +132,7 @@ A sub-project's `Makefile` must provide `all` and `clean` rules and accept the o
 
 `[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, cp, csplit, cut, date, dd, df, dir,
 dircolors, dirname, du, env, expand, expr, factor, false, fmt, fold, groups, head, hostid, hostname, id, install,
-join, kill, link, ln, logname, ls, md5sum, mkfifo, mknod, mktemp, mv, nice, nl, nohup, nproc, numfmt, od, paste,
+join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, mv, nice, nl, nohup, nproc, numfmt, od, paste,
 pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, rm, rmdir, seq, sha1sum, sha224sum, sha256sum,
 sha384sum, sha512sum, shred, shuf, sleep, sort, split, stat, stdbuf, sum, sync, tac, tail, tee, test, tr, true,
 truncate, tsort, tty, uname, unexpand, uniq, unlink, uptime, users, vdir, wc, who, whoami, yes

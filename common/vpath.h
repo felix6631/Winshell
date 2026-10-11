@@ -65,6 +65,13 @@ int vpath_getcwd(char* out, size_t size);
  */
 int vpath_to_native(const char* path, char* out, size_t size);
 
+/**
+ * Lists the drives that exist, which are the entries of the virtual root.
+ * letters receives lower case letters in alphabetical order, with a
+ * terminating NUL, so it has to hold 27 characters. Returns their number.
+ */
+size_t vpath_drives(char letters[27]);
+
 /** The directory of the Windows installation's drive root, which the current directory is while in "/". */
 int vpath_root_native(char* out, size_t size);
 

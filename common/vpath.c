@@ -127,6 +127,18 @@ int vpath_absolute_to_native(const char* absolute, char* out, size_t size) {
     return 0;
 }
 
+size_t vpath_drives(char letters[27]) {
+    DWORD mask = GetLogicalDrives();
+    size_t count = 0;
+    int i;
+
+    for (i = 0; i < 26; i++)
+        if (mask & ((DWORD)1 << i))
+            letters[count++] = (char)('a' + i);
+    letters[count] = '\0';
+    return count;
+}
+
 int vpath_root_native(char* out, size_t size) {
     char windows[MAX_PATH];
     UINT length = GetWindowsDirectoryA(windows, sizeof windows);

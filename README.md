@@ -16,6 +16,7 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `arch` | 완료 |
 | `cat` | 완료 (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `echo` | 완료 (`-n`, `-e`, `-E`, `--help`, `--version`) |
+| `ls` | 완료 (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` 는 드라이브 목록) |
 | `pwd` | 완료 (`-L`, `-P`, 가상 경로로 출력) |
 
 구현 예정 목록은 [아래](#구현-예정)를 참고하세요.
@@ -65,7 +66,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `echo`, `pwd`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `echo`, `ls`, `pwd`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -96,6 +97,7 @@ Winshell/
 ├─ arch/           arch 명령
 ├─ cat/            cat 명령
 ├─ echo/           echo 명령
+├─ ls/             ls 명령
 ├─ pwd/            pwd 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환)
 ├─ test/           테스트 (nmake test)
@@ -130,7 +132,7 @@ Winshell/
 
 `[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, cp, csplit, cut, date, dd, df, dir,
 dircolors, dirname, du, env, expand, expr, factor, false, fmt, fold, groups, head, hostid, hostname, id, install,
-join, kill, link, ln, logname, ls, md5sum, mkfifo, mknod, mktemp, mv, nice, nl, nohup, nproc, numfmt, od, paste,
+join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, mv, nice, nl, nohup, nproc, numfmt, od, paste,
 pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, rm, rmdir, seq, sha1sum, sha224sum, sha256sum,
 sha384sum, sha512sum, shred, shuf, sleep, sort, split, stat, stdbuf, sum, sync, tac, tail, tee, test, tr, true,
 truncate, tsort, tty, uname, unexpand, uniq, unlink, uptime, users, vdir, wc, who, whoami, yes
