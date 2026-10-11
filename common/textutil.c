@@ -116,6 +116,14 @@ void text_binary_streams(void) {
     _setmode(_fileno(stdout), _O_BINARY);
 }
 
+long text_read_some(FILE* in, void* buffer, size_t size) {
+    int got;
+    if (size > 0x7FFF0000U)
+        size = 0x7FFF0000U;
+    got = _read(_fileno(in), buffer, (unsigned int)size);
+    return got < 0 ? -1 : (long)got;
+}
+
 unsigned char* text_slurp(FILE* in, size_t* length) {
     size_t capacity = 65536, used = 0;
     unsigned char* data = malloc(capacity);

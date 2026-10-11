@@ -93,13 +93,18 @@ static int move_one(const FsOptions* o, const char* srcDisplay, const char* srcN
         }
     }
 
-    if (MoveFileExA(srcNative, dstNative, MOVEFILE_REPLACE_EXISTING)) {
+    if (getenv("WINSHELL_TEST_CROSS_DEVICE") != NULL) {
+        // The tests set this to run the code of a move between volumes on a single one:
+        // the rename is not tried, and the copy that follows a refused one is done.
+        error = ERROR_NOT_SAME_DEVICE;
+    } else if (MoveFileExA(srcNative, dstNative, MOVEFILE_REPLACE_EXISTING)) {
         if (o->verbose)
             printf("renamed '%s' -> '%s'\n", srcDisplay, dstDisplay);
         return 0;
+    } else {
+        error = GetLastError();
     }
 
-    error = GetLastError();
     if (error == ERROR_NOT_SAME_DEVICE) {
         // another drive: copy, then remove what was copied
         FsOptions copy = *o;

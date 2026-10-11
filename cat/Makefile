@@ -4,9 +4,9 @@ NAME   = cat
 BINDIR = ..\bin
 OBJDIR = obj
 TARGET = $(BINDIR)\$(NAME).exe
-CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common
-SRCS   = main.c ..\common\vpath.c
-HDRS   = ..\common\vpath.h
+CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common $(EXTRA_CFLAGS)
+SRCS   = main.c ..\common\vpath.c ..\common\fsutil.c ..\common\textutil.c
+HDRS   = ..\common\vpath.h ..\common\fsutil.h ..\common\textutil.h
 
 all: $(TARGET)
 

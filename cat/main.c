@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <windows.h>
 #include "vpath.h"
+#include "textutil.h"
 
 #define VERSION "0.1"
 #define PROGRAM "cat"
@@ -189,9 +190,12 @@ static void finish(void) {
 /** Copies one stream to standard output. Returns 0, or -1 after a read error. */
 static int copy_stream(FILE* in, int plain) {
     static unsigned char buffer[65536];
+    long got;
     size_t length, i;
 
-    while ((length = fread(buffer, 1, sizeof buffer, in)) > 0) {
+    // what is there is passed on at once, so that "tail -f log | cat" shows lines as they come
+    while ((got = text_read_some(in, buffer, sizeof buffer)) > 0) {
+        length = (size_t)got;
         if (plain) {
             if (fwrite(buffer, 1, length, stdout) != length)
                 return -1;
@@ -199,8 +203,9 @@ static int copy_stream(FILE* in, int plain) {
             for (i = 0; i < length; i++)
                 process_char(buffer[i]);
         }
+        fflush(stdout);
     }
-    return ferror(in) ? -1 : 0;
+    return got < 0 ? -1 : 0;
 }
 
 /** Windows reports a directory opened as a file as "Permission denied"; Linux says what it is. */

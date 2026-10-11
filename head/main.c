@@ -71,12 +71,15 @@ static int head_first(FILE* in, const Mode* mode) {
 
     while (remaining > 0) {
         size_t want = sizeof buffer, got, i, take;
+        long read;
 
         if (mode->bytes && (long long)want > remaining)
             want = (size_t)remaining;
-        got = fread(buffer, 1, want, in);
-        if (got == 0)
+        // what is there, not more: the lines wanted may be all that will ever come
+        read = text_read_some(in, buffer, want);
+        if (read <= 0)
             break;
+        got = (size_t)read;
 
         take = got;
         if (mode->bytes) {
@@ -91,6 +94,7 @@ static int head_first(FILE* in, const Mode* mode) {
         }
         if (fwrite(buffer, 1, take, stdout) != take)
             return -1;
+        fflush(stdout);
         if (take < got)
             break;
     }

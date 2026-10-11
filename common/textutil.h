@@ -38,6 +38,14 @@ int text_open(const char* program, const char* path, int plainMessage, FILE** ou
 /** Puts standard input and standard output into binary mode. */
 void text_binary_streams(void);
 
+/**
+ * Reads what is there, up to size bytes, and does not wait for more: from a pipe or a console
+ * that is what the writer has written so far, which is what a filter that passes its input on
+ * has to work with. fread would wait until the buffer is full, and a program such as
+ * "tail -f log | head -n 2" would never end. Returns 0 at the end of the input, or -1 on an error.
+ */
+long text_read_some(FILE* in, void* buffer, size_t size);
+
 /** Reads a stream completely. The result has to be freed; NULL when out of memory. */
 unsigned char* text_slurp(FILE* in, size_t* length);
 

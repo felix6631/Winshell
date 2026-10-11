@@ -388,7 +388,14 @@ int main(int argc, char* argv[]) {
 
     text_binary_streams();
 
-    while ((got = fread(buffer, 1, sizeof buffer, stdin)) > 0) {
+    // what is there is translated and written at once, so that it works in the middle of a pipeline
+    // of programs that produce their output slowly
+    for (;;) {
+        long read = text_read_some(stdin, buffer, sizeof buffer);
+        if (read <= 0)
+            break;
+        got = (size_t)read;
+
         for (j = 0; j < got; j++) {
             unsigned char b = buffer[j];
 
@@ -406,6 +413,12 @@ int main(int argc, char* argv[]) {
                 used = 0;
             }
         }
+        if (used > 0) {
+            if (fwrite(out, 1, used, stdout) != used)
+                return 1;
+            used = 0;
+        }
+        fflush(stdout);
     }
     if (used > 0 && fwrite(out, 1, used, stdout) != used)
         return 1;

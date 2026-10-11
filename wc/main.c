@@ -88,6 +88,14 @@ static int count_stream(FILE* in, Counts* counts) {
     return ferror(in) ? -1 : 0;
 }
 
+static int has_stdin_operand(const char** operands, int count) {
+    int i;
+    for (i = 0; i < count; i++)
+        if (strcmp(operands[i], "-") == 0)
+            return 1;
+    return 0;
+}
+
 static int digits_of(unsigned long long value) {
     int digits = 1;
     while (value >= 10) {
@@ -184,14 +192,21 @@ int main(int argc, char* argv[]) {
 
     // How wide the numbers are: as many digits as the sizes of the files add up to, or 7 when
     // input of unknown size (standard input) is involved. One number of one file is not padded.
-    if (operandCount == 0)
-        stdinInvolved = 1;
+    // standard input that is a file has a size too; a pipe or a console has none
+    if (operandCount == 0 || has_stdin_operand(operands, operandCount)) {
+        HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+        LARGE_INTEGER size;
+        if (in != INVALID_HANDLE_VALUE && GetFileType(in) == FILE_TYPE_DISK && GetFileSizeEx(in, &size))
+            totalSize += (unsigned long long)size.QuadPart;
+        else
+            stdinInvolved = 1;
+    }
     for (i = 0; i < operandCount; i++) {
         char native[VPATH_MAX];
         WIN32_FILE_ATTRIBUTE_DATA data;
 
         if (strcmp(operands[i], "-") == 0) {
-            stdinInvolved = 1;
+            continue;       // counted above
         } else if (vpath_to_native(operands[i], native, sizeof native) == 0 &&
                    GetFileAttributesExA(native, GetFileExInfoStandard, &data)) {
             if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)

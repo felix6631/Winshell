@@ -93,10 +93,12 @@ static int tail_from(FILE* in, const Mode* mode) {
     long long toSkip = mode->count > 0 ? mode->count - 1 : 0;
 
     for (;;) {
-        size_t got = fread(buffer, 1, sizeof buffer, in), start = 0, i;
+        long read = text_read_some(in, buffer, sizeof buffer);
+        size_t got, start = 0, i;
 
-        if (got == 0)
+        if (read <= 0)
             break;
+        got = (size_t)read;
         if (toSkip > 0) {
             if (mode->bytes) {
                 if ((long long)got <= toSkip) {
@@ -116,6 +118,7 @@ static int tail_from(FILE* in, const Mode* mode) {
         }
         if (fwrite(buffer + start, 1, got - start, stdout) != got - start)
             return -1;
+        fflush(stdout);
     }
     return 0;
 }
