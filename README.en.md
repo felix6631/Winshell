@@ -18,9 +18,12 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `cp` | Done (`-a -f -i -n -p -r -R -t -v`) |
 | `echo` | Done (`-n`, `-e`, `-E`, `--help`, `--version`) |
 | `ls` | Done (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` lists the drives) |
+| `mkdir` | Done (`-p -v -m`; `-m` is accepted and ignored) |
 | `mv` | Done (`-f -i -n -t -v`, to another drive it copies and then removes) |
 | `pwd` | Done (`-L`, `-P`, prints the virtual path) |
 | `rm` | Done (`-f -i -r -R -d -v`, `/` and the roots of drives and shares are never removed, not even with `--no-preserve-root`) |
+| `rmdir` | Done (`-p -v --ignore-fail-on-non-empty`) |
+| `touch` | Done (`-a -c -d -m -r -t`) |
 
 See [Planned](#planned) for what is still to come.
 
@@ -76,7 +79,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `echo`, `ls`, `mv`, `pwd`, `rm`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `echo`, `ls`, `mkdir`, `mv`, `pwd`, `rm`, `rmdir`, `touch`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -90,7 +93,7 @@ nmake test     :: build every program, then build and run the tests
 | --- | --- |
 | `vpath_test` | unit tests of `common/vpath.c`: virtual path conversion, `..`, the root, buffer limits |
 | `parser_test` | unit tests of the shell parser: words, quotes, pipes, redirection, syntax errors |
-| `commands_test` | runs `echo`, `arch`, `pwd`, `cat`, `ls`, `rm`, `cp` and `mv` as programs and checks output, resulting files and exit codes |
+| `commands_test` | runs `echo`, `arch`, `pwd`, `cat`, `ls`, `rm`, `cp`, `mv`, `mkdir`, `rmdir` and `touch` as programs and checks output, resulting files and exit codes |
 | `shell_test` | feeds scripts to `shell.exe`: running commands, quoting, pipes, redirection, `cd` |
 
 - `nmake test` ends with 0 when everything passes; a failing check is reported with its location and the expected and actual values.
@@ -109,9 +112,12 @@ Winshell/
 ├─ cp/             cp command
 ├─ echo/           echo command
 ├─ ls/             ls command
+├─ mkdir/          mkdir command
 ├─ mv/             mv command
 ├─ pwd/            pwd command
 ├─ rm/             rm command
+├─ rmdir/          rmdir command
+├─ touch/          touch command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
@@ -146,7 +152,7 @@ A sub-project's `Makefile` must provide `all` and `clean` rules and accept the o
 `[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, cut, date, dd, df, dir,
 dircolors, dirname, du, env, expand, expr, factor, false, fmt, fold, groups, head, hostid, hostname, id, install,
 join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nl, nohup, nproc, numfmt, od, paste,
-pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, rmdir, seq, sha1sum, sha224sum, sha256sum,
+pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
 sha384sum, sha512sum, shred, shuf, sleep, sort, split, stat, stdbuf, sum, sync, tac, tail, tee, test, tr, true,
 truncate, tsort, tty, uname, unexpand, uniq, unlink, uptime, users, vdir, wc, who, whoami, yes
 

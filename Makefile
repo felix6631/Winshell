@@ -15,7 +15,7 @@
 
 BINDIR = $(MAKEDIR)\bin
 
-all: bindir build-shell build-arch build-cat build-cp build-echo build-ls build-mv build-pwd build-rm
+all: bindir build-shell build-arch build-cat build-cp build-echo build-ls build-mkdir build-mv build-pwd build-rm build-rmdir build-touch
 
 bindir:
 	@if not exist "$(BINDIR)" mkdir "$(BINDIR)"
@@ -32,18 +32,24 @@ build-echo:
 	@cd echo && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-ls:
 	@cd ls && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-mkdir:
+	@cd mkdir && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-mv:
 	@cd mv && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-pwd:
 	@cd pwd && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-rm:
 	@cd rm && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-rmdir:
+	@cd rmdir && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-touch:
+	@cd touch && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 
 ## 테스트: 먼저 모든 프로그램을 빌드한 뒤 test\ 의 테스트를 빌드하고 실행합니다.
 test: all
 	@cd test && $(MAKE) /nologo check
 
-clean: clean-shell clean-arch clean-cat clean-cp clean-echo clean-ls clean-mv clean-pwd clean-rm clean-test
+clean: clean-shell clean-arch clean-cat clean-cp clean-echo clean-ls clean-mkdir clean-mv clean-pwd clean-rm clean-rmdir clean-touch clean-test
 
 clean-shell:
 	@cd shell && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
@@ -57,11 +63,17 @@ clean-echo:
 	@cd echo && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-ls:
 	@cd ls && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-mkdir:
+	@cd mkdir && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-mv:
 	@cd mv && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-pwd:
 	@cd pwd && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-rm:
 	@cd rm && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-rmdir:
+	@cd rmdir && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-touch:
+	@cd touch && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-test:
 	@cd test && $(MAKE) /nologo clean
