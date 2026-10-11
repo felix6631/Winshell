@@ -450,6 +450,46 @@ static void test_glob(void) {
     SCRIPT_OUT(line, expected);
 }
 
+/** rm, cp and mv together with wildcards, which is what the shell expands them for. */
+static void test_file_commands(void) {
+    RunResult r;
+    char dir[MAX_PATH * 2], path[MAX_PATH * 3];
+
+    printf("rm, cp and mv with wildcards\n");
+
+    snprintf(dir, sizeof dir, "%s\\fscmd", workDir);
+    // a clean directory: the shell itself removes what an earlier run left
+    CreateDirectoryA(dir, NULL);
+    script("cd fscmd\nrm -rf *\nrm -rf .?*\n", &r);
+    run_result_free(&r);
+
+    write_text(dir, "a.tmp", "1");
+    write_text(dir, "b.tmp", "2");
+    write_text(dir, "keep.txt", "3");
+    write_text(dir, "one.txt", "4");
+    write_text(dir, "two.txt", "5");
+    write_text(dir, "x.log", "6");
+    write_text(dir, "y.log", "7");
+    snprintf(path, sizeof path, "%s\\dest", dir);
+    CreateDirectoryA(path, NULL);
+    snprintf(path, sizeof path, "%s\\logs", dir);
+    CreateDirectoryA(path, NULL);
+
+    SCRIPT_OUT("cd fscmd\nrm *.tmp\nls\n", "dest\nkeep.txt\nlogs\none.txt\ntwo.txt\nx.log\ny.log\n");
+    SCRIPT_OUT("cd fscmd\ncp *.txt dest\nls dest\n", "keep.txt\none.txt\ntwo.txt\n");
+    SCRIPT_OUT("cd fscmd\nmv *.log logs\nls logs\nls *.log\n", "x.log\ny.log\n");
+
+    // a pattern without a match stays, and the tool says so
+    script("cd fscmd\nrm *.nothing\n", &r);
+    CHECK(strstr(r.err, "rm: cannot remove '*.nothing': No such file or directory") != NULL);
+    run_result_free(&r);
+
+    // recursion with a directory name given by a pattern
+    SCRIPT_OUT("cd fscmd\ncp -r d* copy\nls copy\nrm -r copy\nls\n",
+               "keep.txt\none.txt\ntwo.txt\n"             // the copy of dest
+               "dest\nkeep.txt\nlogs\none.txt\ntwo.txt\n"); // after removing it
+}
+
 int main(void) {
     make_work_dir("shell", workDir, sizeof workDir);
     expected_virtual(workDir, virtualWorkDir, sizeof virtualWorkDir);
@@ -461,5 +501,6 @@ int main(void) {
     test_redirection();
     test_cd();
     test_glob();
+    test_file_commands();
     return test_summary("shell_test");
 }

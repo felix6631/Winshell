@@ -15,9 +15,12 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `shell` | 입력 루프, 인자 전달 및 명령 실행(종료 대기), 파이프/리다이렉션, `cd`, `quit` 로 종료 |
 | `arch` | 완료 |
 | `cat` | 완료 (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
+| `cp` | 완료 (`-a -f -i -n -p -r -R -t -v`) |
 | `echo` | 완료 (`-n`, `-e`, `-E`, `--help`, `--version`) |
 | `ls` | 완료 (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` 는 드라이브 목록) |
+| `mv` | 완료 (`-f -i -n -t -v`, 다른 드라이브로는 복사 후 삭제) |
 | `pwd` | 완료 (`-L`, `-P`, 가상 경로로 출력) |
+| `rm` | 완료 (`-f -i -r -R -d -v`, `/`, 드라이브, 공유의 루트는 `--no-preserve-root` 로도 삭제 불가) |
 
 구현 예정 목록은 [아래](#구현-예정)를 참고하세요.
 
@@ -73,7 +76,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `echo`, `ls`, `pwd`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `cp`, `echo`, `ls`, `mv`, `pwd`, `rm`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -87,7 +90,7 @@ nmake test     :: 모든 프로그램을 빌드한 뒤 테스트를 빌드하고
 | --- | --- |
 | `vpath_test` | `common/vpath.c` 단위 테스트: 가상 경로 변환, `..` 처리, 루트, 버퍼 경계 |
 | `parser_test` | 쉘 파서 단위 테스트: 단어, 따옴표, 파이프, 리다이렉션, 구문 오류 |
-| `commands_test` | `echo`, `arch`, `pwd`, `cat` 을 프로그램으로 실행해 출력과 종료 코드 확인 |
+| `commands_test` | `echo`, `arch`, `pwd`, `cat`, `ls`, `rm`, `cp`, `mv` 를 프로그램으로 실행해 출력, 파일 결과, 종료 코드 확인 |
 | `shell_test` | `shell.exe` 에 스크립트를 입력해 명령 실행, 따옴표, 파이프, 리다이렉션, `cd` 확인 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 실패한 검사의 위치와 기대값/실제값을 출력합니다.
@@ -103,10 +106,13 @@ Winshell/
 ├─ shell/          쉘 본체 (include/, src/)
 ├─ arch/           arch 명령
 ├─ cat/            cat 명령
+├─ cp/             cp 명령
 ├─ echo/           echo 명령
 ├─ ls/             ls 명령
+├─ mv/             mv 명령
 ├─ pwd/            pwd 명령
-├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환)
+├─ rm/             rm 명령
+├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)
 ```
@@ -137,10 +143,10 @@ Winshell/
 <details>
 <summary>목록 펼치기</summary>
 
-`[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, cp, csplit, cut, date, dd, df, dir,
+`[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, cut, date, dd, df, dir,
 dircolors, dirname, du, env, expand, expr, factor, false, fmt, fold, groups, head, hostid, hostname, id, install,
-join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, mv, nice, nl, nohup, nproc, numfmt, od, paste,
-pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, rm, rmdir, seq, sha1sum, sha224sum, sha256sum,
+join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nl, nohup, nproc, numfmt, od, paste,
+pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, rmdir, seq, sha1sum, sha224sum, sha256sum,
 sha384sum, sha512sum, shred, shuf, sleep, sort, split, stat, stdbuf, sum, sync, tac, tail, tee, test, tr, true,
 truncate, tsort, tty, uname, unexpand, uniq, unlink, uptime, users, vdir, wc, who, whoami, yes
 
