@@ -18,13 +18,41 @@ typedef enum {
 typedef struct {
     LexemeType type;
     LPSTR     text;     // only for LEX_WORD
+    LPSTR     pattern;  // only for LEX_WORD: the glob pattern when the word has wildcards, else NULL
 } Lexeme;
 
 static int is_delimiter(CHAR c) {
     return strchr(DELIMITERS, c) != NULL;
 }
 
-static int push_lexeme(Lexeme** lexemes, size_t* count, size_t* capacity, LexemeType type, LPSTR text) {
+static int is_glob_meta(CHAR c) {
+    return c == '*' || c == '?' || c == '[';
+}
+
+/** Whether the pattern has a wildcard that is not escaped; "[" counts only with a closing "]". */
+static int pattern_is_active(const CHAR* pattern) {
+    const CHAR* p;
+    for (p = pattern; *p != '\0'; p++) {
+        if (*p == GLOB_ESCAPE) {
+            if (p[1] == '\0')
+                break;
+            p++;
+        } else if (*p == '*' || *p == '?') {
+            return 1;
+        } else if (*p == '[') {
+            const CHAR* q;
+            for (q = p + 1; *q != '\0'; q++) {
+                if (*q == GLOB_ESCAPE && q[1] != '\0')
+                    q++;
+                else if (*q == ']')
+                    return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int push_lexeme(Lexeme** lexemes, size_t* count, size_t* capacity, LexemeType type, LPSTR text, LPSTR pattern) {
     if (*count >= *capacity) {
         Lexeme* grown = realloc(*lexemes, *capacity * 2 * sizeof **lexemes);
         if (grown == NULL)
@@ -34,6 +62,7 @@ static int push_lexeme(Lexeme** lexemes, size_t* count, size_t* capacity, Lexeme
     }
     (*lexemes)[*count].type = type;
     (*lexemes)[*count].text = text;
+    (*lexemes)[*count].pattern = pattern;
     (*count)++;
     return 0;
 }
@@ -44,22 +73,38 @@ static int push_lexeme(Lexeme** lexemes, size_t* count, size_t* capacity, Lexeme
  * A word is never longer than the text it comes from and every word but the
  * last is followed by a character that is not copied, so strlen(line) + 1
  * bytes are enough.
+ *
+ * Next to each word its glob pattern is written to a second buffer. It
+ * differs only by the GLOB_ESCAPE in front of quoted wildcards, so it is at
+ * most twice as long.
  */
-static int tokenize(const CHAR* line, CHAR** bufferOut, Lexeme** tokensOut, size_t* countOut) {
+static int tokenize(const CHAR* line, CHAR** bufferOut, CHAR** patternsOut, Lexeme** tokensOut, size_t* countOut) {
     size_t count = 0, capacity = 16;
     Lexeme* lexemes = malloc(capacity * sizeof *lexemes);
     CHAR* buffer = malloc(strlen(line) + 2);
+    CHAR* patterns = malloc(strlen(line) * 2 + 2);
     const CHAR* read = line;
     CHAR* write = buffer;
+    CHAR* pwrite = patterns;
 
-    if (lexemes == NULL || buffer == NULL)
+    // adds a character to the word and to its pattern; literal ones are the quoted ones
+#define PUT(character, literal) \
+    do { \
+        CHAR put_ = (character); \
+        *write++ = put_; \
+        if ((literal) && is_glob_meta(put_)) \
+            *pwrite++ = GLOB_ESCAPE; \
+        *pwrite++ = put_; \
+    } while (0)
+
+    if (lexemes == NULL || buffer == NULL || patterns == NULL)
         goto err_memory;
 
     while (*read != '\0') {
         CHAR quote = '\0';      // the quote character we are inside of, if any
         int quoted = 0;         // whether the word contains a quote at all
         int operatorDone = 0;
-        LPSTR word;
+        LPSTR word, pword;
 
         if (is_delimiter(*read)) {
             read++;
@@ -67,13 +112,13 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, Lexeme** tokensOut, size
         }
 
         if (*read == '|') {
-            if (push_lexeme(&lexemes, &count, &capacity, LEX_PIPE, NULL) != 0)
+            if (push_lexeme(&lexemes, &count, &capacity, LEX_PIPE, NULL, NULL) != 0)
                 goto err_memory;
             read++;
             continue;
         }
         if (*read == '<') {
-            if (push_lexeme(&lexemes, &count, &capacity, LEX_INPUT, NULL) != 0)
+            if (push_lexeme(&lexemes, &count, &capacity, LEX_INPUT, NULL, NULL) != 0)
                 goto err_memory;
             read++;
             continue;
@@ -84,13 +129,14 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, Lexeme** tokensOut, size
                 type = LEX_APPEND;
                 read++;
             }
-            if (push_lexeme(&lexemes, &count, &capacity, type, NULL) != 0)
+            if (push_lexeme(&lexemes, &count, &capacity, type, NULL, NULL) != 0)
                 goto err_memory;
             read++;
             continue;
         }
 
         word = write;
+        pword = pwrite;
         while (*read != '\0' && !operatorDone) {
             CHAR c = *read;
 
@@ -99,7 +145,7 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, Lexeme** tokensOut, size
                 if (c == '\'')
                     quote = '\0';
                 else
-                    *write++ = c;
+                    PUT(c, 1);
                 read++;
             } else if (c == '\\') {
                 // a backslash is only special in front of a double quote:
@@ -110,13 +156,15 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, Lexeme** tokensOut, size
 
                 if (read[backslashes] == '"') {
                     for (i = 0; i < backslashes / 2; i++)
-                        *write++ = '\\';
+                        PUT('\\', 1);
                     read += backslashes;
-                    if (backslashes % 2 == 1)
-                        *write++ = *read++;
+                    if (backslashes % 2 == 1) {
+                        PUT(*read, 1);
+                        read++;
+                    }
                 } else {
                     for (i = 0; i < backslashes; i++)
-                        *write++ = '\\';
+                        PUT('\\', 1);
                     read += backslashes;
                 }
             } else if (c == '"') {
@@ -128,7 +176,7 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, Lexeme** tokensOut, size
                 quoted = 1;
                 read++;
             } else if (quote != '\0') {
-                *write++ = c;
+                PUT(c, 1);
                 read++;
             } else if (c == '>' && !quoted && write - word == 1 && word[0] == '2') {
                 // "2>" and "2>>": the 2 is a file descriptor, not an argument
@@ -139,13 +187,14 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, Lexeme** tokensOut, size
                 }
                 read++;
                 write = word;
-                if (push_lexeme(&lexemes, &count, &capacity, type, NULL) != 0)
+                pwrite = pword;
+                if (push_lexeme(&lexemes, &count, &capacity, type, NULL, NULL) != 0)
                     goto err_memory;
                 operatorDone = 1;
             } else if (is_delimiter(c) || c == '|' || c == '<' || c == '>') {
                 break;
             } else {
-                *write++ = c;
+                PUT(c, 0);
                 read++;
             }
         }
@@ -154,18 +203,22 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, Lexeme** tokensOut, size
             fprintf(stderr, "Error: Unterminated %s quote\n", quote == '"' ? "double" : "single");
             free(lexemes);
             free(buffer);
+            free(patterns);
             return -1;
         }
 
         // a quoted word may be empty ("" is an argument), an unquoted one never is
         if (!operatorDone && (write > word || quoted)) {
             *write++ = '\0';
-            if (push_lexeme(&lexemes, &count, &capacity, LEX_WORD, word) != 0)
+            *pwrite++ = '\0';
+            if (push_lexeme(&lexemes, &count, &capacity, LEX_WORD, word,
+                            pattern_is_active(pword) ? pword : NULL) != 0)
                 goto err_memory;
         }
     }
 
     *bufferOut = buffer;
+    *patternsOut = patterns;
     *tokensOut = lexemes;
     *countOut = count;
     return 0;
@@ -174,8 +227,10 @@ err_memory:
     fprintf(stderr, "Error: Out of memory\n");
     free(lexemes);
     free(buffer);
+    free(patterns);
     return -1;
 }
+#undef PUT
 
 static const char* operator_name(LexemeType type) {
     switch (type) {
@@ -208,17 +263,24 @@ static Command* add_command(Pipeline* pipeline, size_t* capacity) {
 }
 
 /** Appends a word to the arguments of a command, keeping argv NULL-terminated. */
-static int add_argument(Command* command, size_t* argc, size_t* capacity, LPSTR word) {
+static int add_argument(Command* command, size_t* argc, size_t* capacity, LPSTR word, LPSTR pattern) {
     if (*argc + 2 > *capacity) {
         size_t newCapacity = *capacity == 0 ? 8 : *capacity * 2;
         LPSTR* grown = realloc(command->argv, newCapacity * sizeof *grown);
         if (grown == NULL)
             return -1;
         command->argv = grown;
+        grown = realloc(command->patterns, newCapacity * sizeof *grown);
+        if (grown == NULL)
+            return -1;
+        command->patterns = grown;
         *capacity = newCapacity;
     }
-    command->argv[(*argc)++] = word;
+    command->argv[*argc] = word;
+    command->patterns[*argc] = pattern;
+    (*argc)++;
     command->argv[*argc] = NULL;
+    command->patterns[*argc] = NULL;
     return 0;
 }
 
@@ -229,7 +291,7 @@ int winshell_parse(const CHAR* line, Pipeline* pipeline) {
     Command* current = NULL;
 
     memset(pipeline, 0, sizeof *pipeline);
-    if (tokenize(line, &pipeline->buffer, &lexemes, &lexemeCount) != 0)
+    if (tokenize(line, &pipeline->buffer, &pipeline->patterns, &lexemes, &lexemeCount) != 0)
         return -1;
 
     for (i = 0; i < lexemeCount; i++) {
@@ -242,7 +304,7 @@ int winshell_parse(const CHAR* line, Pipeline* pipeline) {
                     goto err_memory;
                 argc = argvCapacity = 0;
             }
-            if (add_argument(current, &argc, &argvCapacity, lexeme->text) != 0)
+            if (add_argument(current, &argc, &argvCapacity, lexeme->text, lexeme->pattern) != 0)
                 goto err_memory;
         } else if (lexeme->type == LEX_PIPE) {
             if (current == NULL || current->argv == NULL) {
@@ -303,9 +365,15 @@ err_syntax:
 
 void winshell_freePipeline(Pipeline* pipeline) {
     size_t i;
-    for (i = 0; i < pipeline->count; i++)
+    for (i = 0; i < pipeline->count; i++) {
         free(pipeline->commands[i].argv);
+        free(pipeline->commands[i].patterns);
+    }
+    for (i = 0; i < pipeline->ownedCount; i++)
+        free(pipeline->owned[i]);
+    free(pipeline->owned);
     free(pipeline->commands);
     free(pipeline->buffer);
+    free(pipeline->patterns);
     memset(pipeline, 0, sizeof *pipeline);
 }

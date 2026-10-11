@@ -254,7 +254,67 @@ static void test_redirections(void) {
     CHECK_INT(parse("echo hi | > out.txt", &p), -1);
 }
 
+static void test_patterns(void) {
+    Pipeline p;
+
+    printf("glob patterns\n");
+
+    // an unquoted wildcard makes the word a pattern; the word itself is kept
+    CHECK_INT(parse("ls *.c file", &p), 0);
+    CHECK(p.commands[0].patterns != NULL);
+    CHECK(p.commands[0].patterns[0] == NULL);
+    CHECK_STR(p.commands[0].argv[1], "*.c");
+    CHECK_STR(p.commands[0].patterns[1], "*.c");
+    CHECK(p.commands[0].patterns[2] == NULL);
+    CHECK(p.commands[0].patterns[3] == NULL);
+    winshell_freePipeline(&p);
+
+    CHECK_INT(parse("ls a?b [a-c]x [!a]", &p), 0);
+    CHECK_STR(p.commands[0].patterns[1], "a?b");
+    CHECK_STR(p.commands[0].patterns[2], "[a-c]x");
+    CHECK_STR(p.commands[0].patterns[3], "[!a]");
+    winshell_freePipeline(&p);
+
+    // quoted wildcards are not patterns
+    CHECK_INT(parse("ls \"*.c\" '?' a\"*\"", &p), 0);
+    CHECK(p.commands[0].patterns[1] == NULL);
+    CHECK(p.commands[0].patterns[2] == NULL);
+    CHECK(p.commands[0].patterns[3] == NULL);
+    CHECK_STR(p.commands[0].argv[3], "a*");
+    winshell_freePipeline(&p);
+
+    // ... but they stay escaped inside a word that has an unquoted one
+    CHECK_INT(parse("ls \"a*\"*", &p), 0);
+    CHECK_STR(p.commands[0].argv[1], "a**");
+    CHECK(p.commands[0].patterns[1] != NULL);
+    CHECK_INT(p.commands[0].patterns[1][0], 'a');
+    CHECK_INT(p.commands[0].patterns[1][1], GLOB_ESCAPE);
+    CHECK_INT(p.commands[0].patterns[1][2], '*');
+    CHECK_INT(p.commands[0].patterns[1][3], '*');
+    CHECK_INT(p.commands[0].patterns[1][4], 0);
+    winshell_freePipeline(&p);
+
+    // a [ without ] is an ordinary character
+    CHECK_INT(parse("ls a[b [ x]", &p), 0);
+    CHECK(p.commands[0].patterns[1] == NULL);
+    CHECK(p.commands[0].patterns[2] == NULL);
+    CHECK(p.commands[0].patterns[3] == NULL);
+    winshell_freePipeline(&p);
+
+    // file names of redirections are never patterns
+    CHECK_INT(parse("echo hi > *.out", &p), 0);
+    CHECK_STR(p.commands[0].output, "*.out");
+    winshell_freePipeline(&p);
+
+    // many words with patterns
+    CHECK_INT(parse("a *1 *2 *3 *4 *5 *6 *7 *8 *9 *10", &p), 0);
+    CHECK_STR(p.commands[0].patterns[10], "*10");
+    CHECK(p.commands[0].patterns[11] == NULL);
+    winshell_freePipeline(&p);
+}
+
 int main(void) {
+    test_patterns();
     test_words();
     test_many_arguments();
     test_quotes();

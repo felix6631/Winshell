@@ -4,11 +4,19 @@
 #include <windows.h>
 
 /**
+ * In a glob pattern, this character in front of another one makes that one
+ * an ordinary character: the quoted "*" of  echo "*"  is stored as
+ * GLOB_ESCAPE followed by '*'.
+ */
+#define GLOB_ESCAPE '\001'
+
+/**
  * One command of a pipeline: the program with its arguments and the
  * redirections written next to it.
  */
 typedef struct {
     LPSTR* argv;        // NULL-terminated; argv[0] is the program name
+    LPSTR* patterns;    // same length as argv: the glob pattern of a word, or NULL
     LPSTR  input;       // "< file"   or NULL
     LPSTR  output;      // "> file" / ">> file"   or NULL
     int    append;      // non-zero for ">>"
@@ -21,6 +29,10 @@ typedef struct {
     Command* commands;
     size_t   count;
     LPSTR    buffer;    // owns the text the commands point into
+    LPSTR    patterns;  // owns the text of the glob patterns
+    LPSTR*   owned;     // strings created by glob expansion, which argv points into
+    size_t   ownedCount;
+    size_t   ownedCapacity;
 } Pipeline;
 
 /**
@@ -35,7 +47,7 @@ typedef struct {
  *   2>> file  append standard error to file
  * Operators need no surrounding spaces: "a>b|c" works.
  *
- * Quoting (operators lose their meaning inside quotes):
+ * Quoting (operators and wildcards lose their meaning inside quotes):
  *   'text'   everything inside is taken literally
  *   "text"   spaces are kept; \" gives a literal double quote
  *   Quoted parts can be mixed with unquoted ones: a"b c"d is one word "ab cd".
@@ -43,12 +55,25 @@ typedef struct {
  *   Backslashes are only special in front of a double quote (as in
  *   CommandLineToArgvW), so Windows paths such as C:\bin\echo work as typed.
  *
+ * Wildcards: a word with an unquoted * ? or [...] is a glob pattern.
+ * The parser only records it, in Command.patterns, next to the word as it
+ * reads without wildcards; winshell_glob expands it. The pattern is the
+ * word's text with GLOB_ESCAPE in front of each quoted * ? and [.
+ *
  * Returns 0 on success. On error (unclosed quote, missing command or file
  * name, out of memory) a message is printed, -1 is returned and nothing has
  * to be freed. A successful result has to be released with
  * winshell_freePipeline.
  */
 int winshell_parse(const CHAR* line, Pipeline* pipeline);
+
+/**
+ * Replaces the words that have a glob pattern by the paths that match it.
+ * It is meant to be called after winshell_parse, in the shell that owns the
+ * current directory. See glob.h.
+ * Returns 0, or -1 when out of memory (a message is printed).
+ */
+int winshell_glob(Pipeline* pipeline);
 
 void winshell_freePipeline(Pipeline* pipeline);
 

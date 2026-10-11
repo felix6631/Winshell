@@ -338,6 +338,118 @@ static void test_cd(void) {
     run_result_free(&r);
 }
 
+static void test_glob(void) {
+    RunResult r;
+    char line[MAX_PATH * 3], expected[MAX_PATH * 4];
+    char dir[MAX_PATH * 2];
+
+    printf("wildcards\n");
+
+    snprintf(dir, sizeof dir, "%s\\globdir", workDir);
+    CreateDirectoryA(dir, NULL);
+    snprintf(line, sizeof line, "%s\\globdir\\sub", workDir);
+    CreateDirectoryA(line, NULL);
+    snprintf(line, sizeof line, "%s\\globdir\\other", workDir);
+    CreateDirectoryA(line, NULL);
+    write_text(dir, "a.txt", "1");
+    write_text(dir, "b.txt", "2");
+    write_text(dir, "c.dat", "3");
+    write_text(dir, ".hidden.txt", "4");
+    write_text(dir, "Z.TXT", "5");
+    snprintf(line, sizeof line, "%s\\sub", dir);
+    write_text(line, "x.txt", "6");
+    write_text(line, "y.dat", "7");
+    snprintf(line, sizeof line, "%s\\other", dir);
+    write_text(line, "x.log", "8");
+
+    write_text(dir, "with space.txt", "9");
+
+    // every script starts in the directory with the fixtures
+    {
+        char text[2048];
+        #define GLOB_OUT(commands, expectedText) \
+            do { \
+                snprintf(text, sizeof text, "cd globdir\n%s", commands); \
+                SCRIPT_OUT(text, expectedText); \
+            } while (0)
+
+        // the basics: *, ?, [..], ranges and negation
+        GLOB_OUT("echo *.txt\n", "a.txt b.txt with space.txt Z.TXT\n");
+        GLOB_OUT("echo ?.txt\n", "a.txt b.txt Z.TXT\n");
+        GLOB_OUT("echo [ab].txt\n", "a.txt b.txt\n");
+        GLOB_OUT("echo [a-b].*\n", "a.txt b.txt\n");
+        GLOB_OUT("echo [!a].txt\n", "b.txt Z.TXT\n");
+        GLOB_OUT("echo [^ab].*\n", "c.dat Z.TXT\n");
+        GLOB_OUT("echo a.*\n", "a.txt\n");
+        GLOB_OUT("echo *\n", "a.txt b.txt c.dat other sub with space.txt Z.TXT\n");
+
+        // names are matched without regard to case
+        GLOB_OUT("echo *.TXT\n", "a.txt b.txt with space.txt Z.TXT\n");
+        GLOB_OUT("echo z*\n", "Z.TXT\n");
+
+        // dot names only by a pattern that starts with a dot
+        GLOB_OUT("echo .*\n", ".hidden.txt\n");
+        GLOB_OUT("echo .h*\n", ".hidden.txt\n");
+
+        // quoting takes the wildcards away
+        GLOB_OUT("echo \"*.txt\"\n", "*.txt\n");
+        GLOB_OUT("echo '*.txt' \"?\"\n", "*.txt ?\n");
+        GLOB_OUT("echo a\"*\"\n", "a*\n");
+        GLOB_OUT("echo \"a\"*\n", "a.txt\n");
+
+        // no match: the word is left as it was typed; an unclosed [ is no wildcard
+        GLOB_OUT("echo *.zzz\n", "*.zzz\n");
+        GLOB_OUT("echo x[ [ a[b\n", "x[ [ a[b\n");
+
+        // in subdirectories, with the path as typed
+        GLOB_OUT("echo sub/*\n", "sub/x.txt sub/y.dat\n");
+        GLOB_OUT("echo sub\\*.dat\n", "sub\\y.dat\n");
+        GLOB_OUT("echo */*.txt\n", "sub/x.txt\n");
+        GLOB_OUT("echo s*/x.*\n", "sub/x.txt\n");
+        GLOB_OUT("echo */\n", "other/ sub/\n");
+        GLOB_OUT("echo ./*.dat ../globdir/c.*\n", "./c.dat ../globdir/c.dat\n");
+        GLOB_OUT("echo sub/nothing*\n", "sub/nothing*\n");
+
+        // a pattern is one word, a match is a word each: spaces in names survive
+        GLOB_OUT("echo w*\n", "with space.txt\n");
+        GLOB_OUT("cat w* | cat -n\n", "     1\t9");     // the file has no line feed at its end
+        GLOB_OUT("ls w*\n", "with space.txt\n");
+
+        // the programs get the names, so ls and cat work with them
+        GLOB_OUT("ls *.dat\n", "c.dat\n");
+        GLOB_OUT("cat sub/*.txt\n", "6");
+        GLOB_OUT("ls sub/*\n", "sub/x.txt\nsub/y.dat\n");
+
+        // wildcards in the file name of a redirection are not expanded
+        script("cd globdir\necho hi > *.out\n", &r);
+        CHECK(strstr(r.err, "Cannot open '*.out' for writing") != NULL);
+        run_result_free(&r);
+
+        #undef GLOB_OUT
+    }
+
+    // virtual paths: absolute, and through the root
+    snprintf(line, sizeof line, "echo %s/globdir/*.dat\n", virtualWorkDir);
+    snprintf(expected, sizeof expected, "%s/globdir/c.dat\n", virtualWorkDir);
+    SCRIPT_OUT(line, expected);
+
+    {
+        char drive = virtualWorkDir[1];
+        snprintf(line, sizeof line, "echo /%c*\n", drive);
+        snprintf(expected, sizeof expected, "/%c\n", drive);
+        SCRIPT_OUT(line, expected);
+    }
+
+    // Windows notation as well
+    snprintf(line, sizeof line, "echo \"%s\\globdir\"\\*.dat\n", workDir);
+    {
+        char* backslashed = _strdup(workDir);
+        snprintf(expected, sizeof expected, "%s\\globdir\\c.dat\n", backslashed);
+        free(backslashed);
+    }
+    SCRIPT_OUT(line, expected);
+}
+
 int main(void) {
     make_work_dir("shell", workDir, sizeof workDir);
     expected_virtual(workDir, virtualWorkDir, sizeof virtualWorkDir);
@@ -348,5 +460,6 @@ int main(void) {
     test_pipes();
     test_redirection();
     test_cd();
+    test_glob();
     return test_summary("shell_test");
 }

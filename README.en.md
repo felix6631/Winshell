@@ -6,7 +6,7 @@ Winshell is a project and toolchain for using a Linux-style shell and coreutils 
 It is written in plain C on top of the Win32 API, and aims to run as far back as Windows XP.
 
 > **Status: early development.** The shell reads a line and runs `bin\<command>.exe`;
-> variable expansion, globbing and more are not implemented yet.
+> variable expansion and more are not implemented yet.
 
 ## Implemented
 
@@ -33,6 +33,13 @@ See [Planned](#planned) for what is still to come.
   - They can be mixed, as in `a"b c"d`, and `""` gives an empty argument.
   - A backslash is only special in front of a double quote, so paths such as `C:\bin\echo` can be typed as they are.
   - An unclosed quote prints an error and nothing is executed.
+- **Wildcards (globbing)**
+  - `*` is any string, including none, `?` one character, and `[abc]`, `[a-z]`, `[!abc]` a set of characters.
+  - The shell expands them to the matching paths before the program starts, so programs get the expanded names (`ls *.txt`, `cat sub/*.c`).
+  - Virtual paths, Windows paths and subdirectories all work (`/c/Users/*`, `*/*.c`, `sub\*.dat`). The matches are written the way the pattern was.
+  - A pattern that matches nothing is passed as typed. A wildcard in quotes (`"*.txt"`) is not expanded.
+  - Adapted to Windows: names are matched without regard to case, a name starting with a dot is matched only by a pattern that starts with a dot (`.*`), and files with the hidden or system attribute are never matched (so `rm *` does not touch system files).
+  - The file names of redirections are not expanded.
 - **Pipes and redirection**
   - `a | b`: connects the standard output of a to the standard input of b. All commands run at the same time.
   - `< file`: read standard input from a file.
@@ -123,7 +130,7 @@ A sub-project's `Makefile` must provide `all` and `clean` rules and accept the o
 
 ## Planned
 
-**Shell features**: `2>&1`, variable expansion, globbing
+**Shell features**: `2>&1`, variable expansion
 
 **coreutils**
 

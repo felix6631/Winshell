@@ -105,9 +105,12 @@ int main() {
         // the parser and the executer report their own errors
         Pipeline pipeline;
         if (winshell_parse(input, &pipeline) == 0) {
-            // a builtin only makes sense as a command of its own, not inside a pipeline
-            if (pipeline.count == 0 || pipeline.count > 1 || !builtin_run(&pipeline.commands[0]))
-                execute_pipeline(&pipeline);
+            // wildcards are expanded here, so that the programs get the names
+            if (winshell_glob(&pipeline) == 0) {
+                // a builtin only makes sense as a command of its own, not inside a pipeline
+                if (pipeline.count == 0 || pipeline.count > 1 || !builtin_run(&pipeline.commands[0]))
+                    execute_pipeline(&pipeline);
+            }
             winshell_freePipeline(&pipeline);
         }
 
