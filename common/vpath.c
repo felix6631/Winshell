@@ -114,11 +114,14 @@ int vpath_absolute_to_native(const char* absolute, char* out, size_t size) {
     }
     out[0] = (char)toupper((unsigned char)p[1]);
     out[1] = ':';
-    out[2] = '\\';
     {
+        // p[2] is the '/' after the drive, or the end of the path for the drive's root;
+        // the characters from p[2] on land at the same index in out
         size_t i;
-        for (i = 3; p[i] != '\0'; i++)
+        for (i = 2; p[i] != '\0'; i++)
             out[i] = (p[i] == '/') ? '\\' : p[i];
+        if (i == 2)
+            out[i++] = '\\';
         out[i] = '\0';
     }
     return 0;
