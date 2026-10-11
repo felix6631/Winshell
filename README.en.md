@@ -6,13 +6,13 @@ Winshell is a project and toolchain for using a Linux-style shell and coreutils 
 It is written in plain C on top of the Win32 API, and aims to run as far back as Windows XP.
 
 > **Status: early development.** The shell reads a line and runs `bin\<command>.exe`;
-> variable expansion and more are not implemented yet.
+> `2>&1`, background jobs (`&`), control structures and shell functions are not implemented yet.
 
 ## Implemented
 
 | Command | Status |
 | --- | --- |
-| `shell` | Input loop, runs commands with arguments and waits for them, pipes/redirection, `cd`, exits with `quit` |
+| `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion, wildcards, `cd` `export` `unset` `exit` |
 | `arch` | Done |
 | `cat` | Done (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `cp` | Done (`-a -f -i -n -p -r -R -t -v`) |
@@ -39,7 +39,22 @@ See [Planned](#planned) for what is still to come.
 - Programs are only looked up in the directory of `shell.exe` (`bin\`); the `.exe` extension may be omitted.
 - The goal is to do the same job as the Linux commands; only what does not work as is on Windows is adapted to Windows.
   (For example, `cat` does not translate bytes and treats a CR LF pair as one line ending.)
-- Exit with `quit`. End of input (Ctrl+Z, Enter) also exits.
+- Exit with `exit [N]` or `quit`; without N the status of the last command is used. End of input (Ctrl+Z, Enter) also exits.
+- **Builtins:** `cd [DIR]`, `export NAME=VALUE...` (alone it lists the variables), `unset NAME...`, `exit [N]`, `quit`.
+- **Lists of commands**
+  - `a ; b`: run b after a, always.
+  - `a && b`: run b only when a succeeded (status 0).
+  - `a || b`: run b only when a failed.
+  - They are evaluated from left to right (`a && b || c` is `(a && b) || c`), and a command that is skipped does not change the status.
+  - Each command is parsed when its turn has come, so `cd dir && ls *` sees the directory and the variables the previous command left.
+  - The status of a pipeline is that of its last command. A program that is not found gives 127, a syntax error 2, a program stopped with Ctrl+C 130.
+- **Variables**
+  - `$NAME` and `${NAME}` are replaced by the value of the environment variable, `$?` by the status of the last command. Names are not case sensitive, like Windows names.
+  - In double quotes the value stays one word; outside of quotes it is cut at blanks into words, and wildcards in it act. Inside single quotes nothing is expanded. A variable that is not set makes no word when it stands alone outside of quotes.
+  - A `$` that starts no name is just a `$`. Write a literal `$NAME` in single quotes (`\` is the path separator and is no escape).
+  - `|`, `>`, `;` and the like in a value are not operators.
+  - `PWD` and `OLDPWD` are kept by `cd` as virtual paths. `HOME` and `USER` come from the Windows profile (`USERPROFILE`, `USERNAME`) when they are not defined; `HOME` is a virtual path.
+  - A `~` at the start of a word is `$HOME` (`~`, `~/docs`).
 - **Quoting**
   - `"a b"`: keeps the spaces. `\"` inside is a literal double quote.
   - `'a b'`: everything inside is taken literally.
@@ -60,7 +75,7 @@ See [Planned](#planned) for what is still to come.
   - `2> file`, `2>> file`: write standard error to a file, or append to it.
   - Spaces around operators are optional (`echo hi>out.txt`). Operators have no meaning inside quotes.
   - A redirection takes precedence over a pipe. The exit code of the last command is the result.
-  - `2>&1`, `&`, `&&`, `||` and `;` are not supported yet.
+  - `2>&1` and `&` (background jobs) are not supported yet; a lone `&` is a syntax error.
 - **Ctrl+C / Ctrl+Break**
   - While a program is running, only that program is interrupted and the shell keeps running.
   - At the prompt the shell does not exit; it discards the line being typed.
@@ -101,7 +116,7 @@ nmake test     :: build every program, then build and run the tests
 | `vpath_test` | unit tests of `common/vpath.c`: virtual path conversion, `..`, the root, buffer limits |
 | `parser_test` | unit tests of the shell parser: words, quotes, pipes, redirection, syntax errors |
 | `commands_test` | runs `echo`, `arch`, `pwd`, `cat`, `ls`, `rm`, `cp`, `mv`, `mkdir`, `rmdir`, `touch`, `head`, `tail`, `wc`, `sort`, `uniq`, `cut` and `tr` as programs and checks output, resulting files and exit codes |
-| `shell_test` | feeds scripts to `shell.exe`: running commands, quoting, pipes, redirection, `cd` |
+| `shell_test` | feeds scripts to `shell.exe`: running commands, quoting, pipes, redirection, wildcards, `cd`, lists and exit status, variable expansion |
 
 - `nmake test` ends with 0 when everything passes; a failing check is reported with its location and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -156,7 +171,7 @@ A sub-project's `Makefile` must provide `all` and `clean` rules and accept the o
 
 ## Planned
 
-**Shell features**: `2>&1`, variable expansion
+**Shell features**: `2>&1`, background jobs (`&`), variable assignment (`NAME=value`), brace expansion, command substitution (`$(...)`), `if`/`for`/`while`
 
 **coreutils**
 

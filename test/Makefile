@@ -28,9 +28,9 @@ $(OUT)\vpath_test.exe: vpath_test.c testlib.h ..\common\vpath.c ..\common\vpath.
 	@if not exist $(OUT) mkdir $(OUT)
 	cl $(CFLAGS) /Fo$(OUT)\ /Fe$(OUT)\vpath_test.exe vpath_test.c ..\common\vpath.c
 
-$(OUT)\parser_test.exe: parser_test.c testlib.h ..\shell\src\parser.c ..\shell\include\parser.h
+$(OUT)\parser_test.exe: parser_test.c testlib.h ..\shell\src\parser.c ..\shell\include\parser.h ..\common\vpath.c
 	@if not exist $(OUT) mkdir $(OUT)
-	cl $(CFLAGS) /Fo$(OUT)\ /Fe$(OUT)\parser_test.exe parser_test.c ..\shell\src\parser.c
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$(OUT)\parser_test.exe parser_test.c ..\shell\src\parser.c ..\common\vpath.c
 
 $(OUT)\commands_test.exe: commands_test.c testlib.h
 	@if not exist $(OUT) mkdir $(OUT)

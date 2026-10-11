@@ -36,6 +36,41 @@ typedef struct {
 } Pipeline;
 
 /**
+ * The status the last command ended with, which $? is. The shell sets it
+ * after each command of a line.
+ */
+void winshell_setLastStatus(int status);
+
+/** How a command of a list depends on the one before it. */
+#define LIST_FIRST 0    // the first command of the line
+#define LIST_SEQ   1    // ;   always runs
+#define LIST_AND   2    // &&  runs when the one before succeeded
+#define LIST_OR    3    // ||  runs when the one before failed
+
+typedef struct {
+    char* text;         // the command line of one pipeline
+    int   op;           // how it is connected to the previous one
+} ListItem;
+
+typedef struct {
+    ListItem* items;
+    size_t    count;
+} CommandList;
+
+/**
+ * winshell_parse_list cuts a line into pipelines at ;  &&  and ||  outside of
+ * quotes. Each item is parsed with winshell_parse when its turn has come,
+ * because what a command does can change what the next one reads: the
+ * current directory, the variables.
+ * An empty line gives an empty list; a ; at the end is fine.
+ * Returns 0, or -1 after a message for a missing command, a lone '&' (not
+ * supported), or out of memory.
+ */
+int winshell_parse_list(const CHAR* line, CommandList* list);
+
+void winshell_freeList(CommandList* list);
+
+/**
  * winshell_parse splits the input line into a pipeline. The line is not modified.
  *
  * Words are separated by space, tab and line feed. These are operators:
@@ -54,6 +89,14 @@ typedef struct {
  *   "" and '' give an empty word.
  *   Backslashes are only special in front of a double quote (as in
  *   CommandLineToArgvW), so Windows paths such as C:\bin\echo work as typed.
+ *
+ * Variables: $NAME, ${NAME} and $? are replaced by their values, in double
+ * quotes as well, but not in single quotes. In double quotes the value stays
+ * one word, as it does in the quotes of "$HOME"; outside of them it is cut at
+ * blanks into words, which are then subject to wildcards. A variable that is
+ * not set is nothing: it adds no word when it stands alone. ~ at the start of
+ * a word, alone or in front of a / or \, is $HOME. A $ that starts no name is
+ * an ordinary character. A backslash is no escape for the $; use single quotes.
  *
  * Wildcards: a word with an unquoted * ? or [...] is a glob pattern.
  * The parser only records it, in Command.patterns, next to the word as it

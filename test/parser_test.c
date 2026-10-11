@@ -313,7 +313,198 @@ static void test_patterns(void) {
     winshell_freePipeline(&p);
 }
 
+static void test_variables(void) {
+    Pipeline p;
+
+    printf("variables\n");
+    _putenv_s("PT_VAR", "hello world");
+    _putenv_s("PT_SPACES", "a   b");
+    _putenv_s("PT_GLOB", "*.c");
+    _putenv_s("PT_OP", "a|b>c");
+    _putenv_s("PT_NAME", "name");
+
+    // outside of quotes: cut at blanks into words
+    CHECK_INT(parse("echo $PT_VAR", &p), 0);
+    CHECK_INT(argument_count(&p.commands[0]), 3);
+    CHECK_STR(p.commands[0].argv[1], "hello");
+    CHECK_STR(p.commands[0].argv[2], "world");
+    winshell_freePipeline(&p);
+
+    // in double quotes: one word
+    CHECK_INT(parse("echo \"$PT_VAR\" x", &p), 0);
+    CHECK_INT(argument_count(&p.commands[0]), 3);
+    CHECK_STR(p.commands[0].argv[1], "hello world");
+    CHECK_STR(p.commands[0].argv[2], "x");
+    winshell_freePipeline(&p);
+
+    CHECK_INT(parse("echo \"$PT_SPACES\"", &p), 0);
+    CHECK_STR(p.commands[0].argv[1], "a   b");
+    winshell_freePipeline(&p);
+
+    // in single quotes: as it is
+    CHECK_INT(parse("echo '$PT_VAR'", &p), 0);
+    CHECK_INT(argument_count(&p.commands[0]), 2);
+    CHECK_STR(p.commands[0].argv[1], "$PT_VAR");
+    winshell_freePipeline(&p);
+
+    // braces, and text around the variable
+    CHECK_INT(parse("echo ${PT_NAME}x pre$PT_NAME-post", &p), 0);
+    CHECK_STR(p.commands[0].argv[1], "namex");
+    CHECK_STR(p.commands[0].argv[2], "prename-post");
+    winshell_freePipeline(&p);
+
+    CHECK_INT(parse("echo \"[$PT_NAME]\"", &p), 0);
+    CHECK_STR(p.commands[0].argv[1], "[name]");
+    winshell_freePipeline(&p);
+
+    // a variable that is not set is nothing; in quotes it is an empty word
+    CHECK_INT(parse("echo $PT_NOT_SET x", &p), 0);
+    CHECK_INT(argument_count(&p.commands[0]), 2);
+    CHECK_STR(p.commands[0].argv[1], "x");
+    winshell_freePipeline(&p);
+
+    CHECK_INT(parse("echo \"$PT_NOT_SET\" x", &p), 0);
+    CHECK_INT(argument_count(&p.commands[0]), 3);
+    CHECK_STR(p.commands[0].argv[1], "");
+    winshell_freePipeline(&p);
+
+    CHECK_INT(parse("echo [$PT_NOT_SET]", &p), 0);
+    CHECK_STR(p.commands[0].argv[1], "[]");
+    winshell_freePipeline(&p);
+
+    // a $ that starts no name is a $
+    CHECK_INT(parse("echo $ a$ $1 \"$\" ${ ${} $-", &p), 0);
+    CHECK_STR(p.commands[0].argv[1], "$");
+    CHECK_STR(p.commands[0].argv[2], "a$");
+    CHECK_STR(p.commands[0].argv[3], "$1");
+    CHECK_STR(p.commands[0].argv[4], "$");
+    CHECK_STR(p.commands[0].argv[5], "${");
+    CHECK_STR(p.commands[0].argv[6], "${}");
+    CHECK_STR(p.commands[0].argv[7], "$-");
+    winshell_freePipeline(&p);
+
+    // the status of the last command
+    winshell_setLastStatus(7);
+    CHECK_INT(parse("echo $?", &p), 0);
+    CHECK_STR(p.commands[0].argv[1], "7");
+    winshell_freePipeline(&p);
+    winshell_setLastStatus(0);
+
+    // the value is text: operators and quotes in it are nothing
+    CHECK_INT(parse("echo $PT_OP", &p), 0);
+    CHECK_INT(p.count, 1);
+    CHECK_INT(argument_count(&p.commands[0]), 2);
+    CHECK_STR(p.commands[0].argv[1], "a|b>c");
+    CHECK(p.commands[0].output == NULL);
+    winshell_freePipeline(&p);
+
+    // wildcards in a value act, unless it is quoted
+    CHECK_INT(parse("ls $PT_GLOB \"$PT_GLOB\"", &p), 0);
+    CHECK(p.commands[0].patterns[1] != NULL);
+    CHECK(p.commands[0].patterns[2] == NULL);
+    CHECK_STR(p.commands[0].argv[2], "*.c");
+    winshell_freePipeline(&p);
+
+    // the home directory
+    _putenv_s("HOME", "/c/home/me");
+    CHECK_INT(parse("cd ~ ~/docs ~x a~ \"~\"", &p), 0);
+    CHECK_STR(p.commands[0].argv[1], "/c/home/me");
+    CHECK_STR(p.commands[0].argv[2], "/c/home/me/docs");
+    CHECK_STR(p.commands[0].argv[3], "~x");
+    CHECK_STR(p.commands[0].argv[4], "a~");
+    CHECK_STR(p.commands[0].argv[5], "~");
+    winshell_freePipeline(&p);
+    CHECK_INT(parse("echo $HOME", &p), 0);
+    CHECK_STR(p.commands[0].argv[1], "/c/home/me");
+    winshell_freePipeline(&p);
+
+    // in a redirection
+    CHECK_INT(parse("echo hi > $PT_NAME.txt", &p), 0);
+    CHECK_STR(p.commands[0].output, "name.txt");
+    winshell_freePipeline(&p);
+
+    // in a quoted word with a quote in front of it
+    CHECK_INT(parse("echo \"say $PT_NAME\"", &p), 0);
+    CHECK_STR(p.commands[0].argv[1], "say name");
+    winshell_freePipeline(&p);
+}
+
+/** Cuts a line into its list and checks the number of items and their operators. */
+static void test_lists(void) {
+    CommandList list;
+
+    printf("lists\n");
+
+    CHECK_INT(winshell_parse_list("echo a; echo b", &list), 0);
+    CHECK_INT(list.count, 2);
+    CHECK_INT(list.items[0].op, LIST_FIRST);
+    CHECK_INT(list.items[1].op, LIST_SEQ);
+    CHECK_STR(list.items[0].text, "echo a");
+    CHECK_STR(list.items[1].text, " echo b");
+    winshell_freeList(&list);
+
+    CHECK_INT(winshell_parse_list("a && b || c ; d", &list), 0);
+    CHECK_INT(list.count, 4);
+    CHECK_INT(list.items[0].op, LIST_FIRST);
+    CHECK_INT(list.items[1].op, LIST_AND);
+    CHECK_INT(list.items[2].op, LIST_OR);
+    CHECK_INT(list.items[3].op, LIST_SEQ);
+    winshell_freeList(&list);
+
+    // no blanks needed
+    CHECK_INT(winshell_parse_list("a;b&&c||d", &list), 0);
+    CHECK_INT(list.count, 4);
+    CHECK_STR(list.items[3].text, "d");
+    winshell_freeList(&list);
+
+    // a pipe is part of its command
+    CHECK_INT(winshell_parse_list("a | b && c | d", &list), 0);
+    CHECK_INT(list.count, 2);
+    CHECK_STR(list.items[0].text, "a | b ");
+    winshell_freeList(&list);
+
+    // quotes keep the operators
+    CHECK_INT(winshell_parse_list("echo \"a;b\" 'c&&d' \"e||f\"", &list), 0);
+    CHECK_INT(list.count, 1);
+    winshell_freeList(&list);
+
+    CHECK_INT(winshell_parse_list("echo \"a\\\";b\" ; x", &list), 0);       // an escaped quote does not end it
+    CHECK_INT(list.count, 2);
+    winshell_freeList(&list);
+
+    CHECK_INT(winshell_parse_list("echo 'it\"s;' ; x", &list), 0);
+    CHECK_INT(list.count, 2);
+    winshell_freeList(&list);
+
+    // empty lines, a ; at the end
+    CHECK_INT(winshell_parse_list("", &list), 0);
+    CHECK_INT(list.count, 0);
+    winshell_freeList(&list);
+    CHECK_INT(winshell_parse_list("   ", &list), 0);
+    CHECK_INT(list.count, 0);
+    winshell_freeList(&list);
+    CHECK_INT(winshell_parse_list("echo a ;", &list), 0);
+    CHECK_INT(list.count, 1);
+    winshell_freeList(&list);
+    CHECK_INT(winshell_parse_list("echo a ; ", &list), 0);
+    CHECK_INT(list.count, 1);
+    winshell_freeList(&list);
+
+    // errors
+    mute_stderr();
+    CHECK_INT(winshell_parse_list(";", &list), -1);
+    CHECK_INT(winshell_parse_list("a ;; b", &list), -1);
+    CHECK_INT(winshell_parse_list("&& a", &list), -1);
+    CHECK_INT(winshell_parse_list("a &&", &list), -1);
+    CHECK_INT(winshell_parse_list("a ||", &list), -1);
+    CHECK_INT(winshell_parse_list("a && && b", &list), -1);
+    CHECK_INT(winshell_parse_list("a & b", &list), -1);
+    CHECK_INT(winshell_parse_list("a 2>&1", &list), -1);
+}
+
 int main(void) {
+    test_variables();
+    test_lists();
     test_patterns();
     test_words();
     test_many_arguments();

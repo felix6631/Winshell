@@ -73,9 +73,45 @@ static char* read_line(void) {
     return line;
 }
 
+/**
+ * Runs one pipeline: variables and wildcards are expanded, then the command is
+ * run, as a builtin or as the programs of the pipeline. Returns its status.
+ * *exitShell is set when the shell has to end.
+ */
+static int run_item(const char* text, int* exitShell, int status) {
+    Pipeline pipeline;
+
+    // the parser and the executer report their own errors
+    if (winshell_parse(text, &pipeline) != 0)
+        return 2;
+
+    if (pipeline.count > 0 && winshell_glob(&pipeline) == 0) {
+        int builtinStatus = status;
+
+        // a builtin only makes sense as a command of its own, not inside a pipeline
+        if (pipeline.count == 1 && builtin_run(&pipeline.commands[0], &builtinStatus, exitShell)) {
+            status = builtinStatus;
+        } else {
+            int result = execute_pipeline(&pipeline);
+            // a program that could not be started is a command that was not found
+            status = result == -1 ? 127 : result;
+        }
+    } else if (pipeline.count > 0) {
+        status = 1;
+    }
+
+    winshell_freePipeline(&pipeline);
+    return status;
+}
+
 int main() {
+    int status = 0, exitShell = 0;
+
     winshell_terminalInit();
-    while(1) {
+    while(!exitShell) {
+        CommandList list;
+        size_t i;
+
         printf(" > ");
         fflush(stdout);
 
@@ -96,25 +132,30 @@ int main() {
         // strip linefeed
         input[strcspn(input, "\r\n")] = '\0';
 
-        // quit command
-        if (strcmp(input, "quit") == 0) {
+        if (winshell_parse_list(input, &list) != 0) {
+            status = 2;
+            winshell_setLastStatus(status);
             free(input);
-            break;
+            continue;
         }
 
-        // the parser and the executer report their own errors
-        Pipeline pipeline;
-        if (winshell_parse(input, &pipeline) == 0) {
-            // wildcards are expanded here, so that the programs get the names
-            if (winshell_glob(&pipeline) == 0) {
-                // a builtin only makes sense as a command of its own, not inside a pipeline
-                if (pipeline.count == 0 || pipeline.count > 1 || !builtin_run(&pipeline.commands[0]))
-                    execute_pipeline(&pipeline);
-            }
-            winshell_freePipeline(&pipeline);
+        // The commands of the line are run one after the other, each one parsed when its
+        // turn has come: it sees the directory and the variables the one before left.
+        for (i = 0; i < list.count && !exitShell; i++) {
+            int op = list.items[i].op;
+            int run = op == LIST_FIRST || op == LIST_SEQ ||
+                      (op == LIST_AND && status == 0) || (op == LIST_OR && status != 0);
+
+            if (!run)
+                continue;           // the status stays that of the last command that ran
+
+            winshell_setLastStatus(status);
+            status = run_item(list.items[i].text, &exitShell, status);
+            winshell_setLastStatus(status);
         }
 
+        winshell_freeList(&list);
         free(input);
     }
-    return 0;
+    return status;
 }
