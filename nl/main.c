@@ -130,13 +130,99 @@ static int on_option(int id, const char* value, void* context) {
     return set_option((char)id, value);
 }
 
+/** Where the numbering is: the style of the section being read, the next number and the empty lines seen. */
+typedef struct {
+    char      style;            // 'a', 't' or 'n'
+    long long number;
+    long long blankCount;
+} Numbering;
+
+/**
+ * 1 for a footer delimiter, 2 for a body one and 3 for a header one: a line that is only the
+ * section delimiter once, twice or three times. 0 for any other line.
+ */
+static int delimiter_section(const TextLine* line) {
+    size_t k;
+
+    if (line->length < 2 || line->length % 2 != 0 || line->length > 6)
+        return 0;
+    for (k = 0; k < line->length; k++)
+        if (line->content[k] != (unsigned char)delimiter[k % 2])
+            return 0;
+    return (int)(line->length / 2);
+}
+
+/** Whether the line gets a number in the section being read; counts the empty lines for -l. */
+static int is_numbered(Numbering* state, const TextLine* line) {
+    int isBlank = line->length == 0;
+
+    if (state->style == 'a') {
+        if (isBlank && joinBlank > 1) {
+            if (++state->blankCount < joinBlank)
+                return 0;
+        }
+        state->blankCount = 0;
+        return 1;
+    }
+    return state->style == 't' && !isBlank;
+}
+
+/** The number, in its format and width, and the separator; spaces of that width for a line without one. */
+static void print_number(int numbered, long long number) {
+    int columns = (int)(width > 1000000 ? 1000000 : width);
+
+    if (!numbered) {
+        printf("%*s", (int)(columns + (long long)strlen(separator)), "");
+        return;
+    }
+    if (strcmp(format, "ln") == 0)
+        printf("%-*lld", columns, number);
+    else if (strcmp(format, "rz") == 0)
+        printf("%0*lld", columns, number);
+    else
+        printf("%*lld", columns, number);
+    fputs(separator, stdout);
+}
+
+/** Numbers the lines of one input. Returns 0, or 1 when it could not be read. */
+static int number_lines(LineReader* reader, Numbering* state) {
+    TextLine line;
+
+    while (text_reader_next(reader, &line)) {
+        int section = delimiter_section(&line);
+        int numbered;
+
+        // a delimiter starts a section and is written as an empty line
+        if (section > 0) {
+            state->style = section == 3 ? headerStyle : (section == 2 ? bodyStyle : footerStyle);
+            if (renumber)
+                state->number = startNumber;
+            state->blankCount = 0;
+            fputs(line.ending == 2 ? "\r\n" : "\n", stdout);
+            continue;
+        }
+
+        numbered = is_numbered(state, &line);
+        print_number(numbered, state->number);
+        if (numbered)
+            state->number += increment;
+
+        fwrite(line.content, 1, line.length, stdout);
+        // a last line without an ending gets one, as GNU nl does
+        fputs(line.ending == 2 ? "\r\n" : "\n", stdout);
+
+        // a pipe's data is passed on when the reader has nothing more of it for now
+        if (reader->start >= reader->length)
+            fflush(stdout);
+    }
+    return reader->failed ? 1 : 0;
+}
+
 int main(int argc, char* argv[]) {
     const char** operands;
     size_t operandCount, i;
     int status = 0, count, result;
-    long long number, blankCount = 0;
-    char style;
-    size_t separatorLength;
+    Numbering state;
 
     result = args_parse(&spec, argc, argv, on_option, NULL, &operands, &count);
     if (result != ARGS_OK)
@@ -147,81 +233,20 @@ int main(int argc, char* argv[]) {
     if (operandCount == 0)
         operands[operandCount++] = "-";
 
-    separatorLength = strlen(separator);
-    number = startNumber;
-    style = bodyStyle;
+    state.style = bodyStyle;
+    state.number = startNumber;
+    state.blankCount = 0;
 
     for (i = 0; i < operandCount; i++) {
         FILE* in;
         LineReader reader;
-        TextLine line;
 
         if (text_open(PROGRAM, operands[i], 1, &in) != 0) {
             status = 1;
             continue;
         }
         text_reader_init(&reader, in, '\n');
-
-        while (text_reader_next(&reader, &line)) {
-            int isBlank = line.length == 0;
-            int numbered;
-            size_t d = 0;
-
-            // a line of only the delimiter, two or three times, starts a section and is written empty
-            if (line.length >= 2 && line.length % 2 == 0 && line.length <= 6) {
-                int match = 1;
-                size_t k;
-                for (k = 0; k < line.length; k++)
-                    if (line.content[k] != (unsigned char)delimiter[k % 2])
-                        match = 0;
-                if (match)
-                    d = line.length / 2;
-            }
-            if (d >= 1) {
-                style = d == 3 ? headerStyle : (d == 2 ? bodyStyle : footerStyle);
-                if (renumber)
-                    number = startNumber;
-                blankCount = 0;
-                fputs(line.ending == 2 ? "\r\n" : "\n", stdout);
-                continue;
-            }
-
-            if (style == 'a') {
-                if (isBlank && joinBlank > 1) {
-                    numbered = ++blankCount >= joinBlank;
-                    if (numbered)
-                        blankCount = 0;
-                } else {
-                    numbered = 1;
-                    blankCount = 0;
-                }
-            } else {
-                numbered = style == 't' && !isBlank;
-            }
-
-            if (numbered) {
-                if (strcmp(format, "ln") == 0)
-                    printf("%-*lld", (int)(width > 1000000 ? 1000000 : width), number);
-                else if (strcmp(format, "rz") == 0)
-                    printf("%0*lld", (int)(width > 1000000 ? 1000000 : width), number);
-                else
-                    printf("%*lld", (int)(width > 1000000 ? 1000000 : width), number);
-                fputs(separator, stdout);
-                number += increment;
-            } else {
-                printf("%*s", (int)((width > 1000000 ? 1000000 : width) + (long long)separatorLength), "");
-            }
-
-            fwrite(line.content, 1, line.length, stdout);
-            // a last line without an ending gets one, as GNU nl does
-            fputs(line.ending == 2 ? "\r\n" : "\n", stdout);
-
-            // a pipe's data is passed on when the reader has nothing more of it for now
-            if (reader.start >= reader.length)
-                fflush(stdout);
-        }
-
-        if (reader.failed) {
+        if (number_lines(&reader, &state) != 0) {
             fprintf(stderr, PROGRAM ": %s: read error\n", operands[i]);
             status = 1;
         }

@@ -29,10 +29,6 @@ static void print_usage(void) {
          "Paths are those of the virtual file system; wildcards are expanded by the shell.");
 }
 
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
-}
-
 enum { OPT_ARCHIVE = 1, OPT_FORCE, OPT_INTERACTIVE, OPT_NO_CLOBBER, OPT_PRESERVE, OPT_RECURSIVE, OPT_VERBOSE,
        OPT_TARGET };
 
@@ -80,8 +76,7 @@ int main(int argc, char* argv[]) {
     int count, status = 0, i, result;
     const char* target;
     char targetNative[VPATH_MAX];
-    DWORD targetAttributes = 0;
-    int targetIsDirectory = 0, targetExists = 0, sourceCount;
+    int targetIsDirectory, sourceCount, kind;
 
     memset(&options, 0, sizeof options);
     options.program = PROGRAM;
@@ -93,59 +88,28 @@ int main(int argc, char* argv[]) {
         return ARGS_STATUS(spec, result);
     targetDirectory = parsed.targetDirectory;
 
-    // find the target and how many sources there are
-    if (targetDirectory != NULL) {
-        target = targetDirectory;
-        sourceCount = count;
-        if (sourceCount == 0) {
-            fprintf(stderr, PROGRAM ": missing file operand\n");
-            try_help();
-            return 1;
-        }
-    } else {
-        if (count == 0) {
-            fprintf(stderr, PROGRAM ": missing file operand\n");
-            try_help();
-            return 1;
-        }
-        if (count == 1) {
-            fprintf(stderr, PROGRAM ": missing destination file operand after '%s'\n", operands[0]);
-            try_help();
-            return 1;
-        }
-        target = operands[count - 1];
-        sourceCount = count - 1;
-    }
+    if (fs_split_operands(PROGRAM, operands, count, targetDirectory, &target, &sourceCount) != 0)
+        return 1;
 
-    {
-        int kind = vpath_to_native(target, targetNative, sizeof targetNative);
-        if (kind == VPATH_ROOT) {
-            fprintf(stderr, PROGRAM ": cannot create '%s': Operation not permitted\n", target);
-            return 1;
-        }
-        if (kind != 0) {
-            fprintf(stderr, PROGRAM ": cannot create '%s': No such file or directory\n", target);
-            return 1;
-        }
-    }
-    targetExists = fs_attributes(targetNative, &targetAttributes) == 0;
-    targetIsDirectory = targetExists && (targetAttributes & FILE_ATTRIBUTE_DIRECTORY);
-
-    if (targetDirectory != NULL && !targetIsDirectory) {
-        fprintf(stderr, PROGRAM ": target '%s' is not a directory\n", target);
+    kind = vpath_to_native(target, targetNative, sizeof targetNative);
+    if (kind == VPATH_ROOT) {
+        fprintf(stderr, PROGRAM ": cannot create '%s': Operation not permitted\n", target);
         return 1;
     }
-    if (sourceCount > 1 && !targetIsDirectory) {
-        fprintf(stderr, PROGRAM ": target '%s' is not a directory\n", target);
+    if (kind != 0) {
+        fprintf(stderr, PROGRAM ": cannot create '%s': No such file or directory\n", target);
         return 1;
     }
+    targetIsDirectory = fs_target_is_directory(PROGRAM, target, targetNative, targetDirectory != NULL || sourceCount > 1);
+    if (targetIsDirectory < 0)
+        return 1;
 
     for (i = 0; i < sourceCount; i++) {
         const char* source = operands[i];
         char sourceNative[VPATH_MAX];
-        char dstDisplay[VPATH_MAX], dstNative[VPATH_MAX], name[VPATH_MAX];
-        int kind = vpath_to_native(source, sourceNative, sizeof sourceNative);
+        char dstDisplay[VPATH_MAX], dstNative[VPATH_MAX];
 
+        kind = vpath_to_native(source, sourceNative, sizeof sourceNative);
         if (kind == VPATH_ROOT) {
             fprintf(stderr, PROGRAM ": cannot copy '%s': Operation not permitted\n", source);
             status = 1;
@@ -157,32 +121,11 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        if (targetIsDirectory) {
-            fs_basename(source, name, sizeof name);
-            if (name[0] == '\0' || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
-                // "cp -r dir/. target" copies the contents: the target itself is the destination
-                if (strcmp(name, ".") == 0) {
-                    snprintf(dstDisplay, sizeof dstDisplay, "%s", target);
-                    snprintf(dstNative, sizeof dstNative, "%s", targetNative);
-                } else {
-                    fprintf(stderr, PROGRAM ": cannot copy '%s': Invalid argument\n", source);
-                    status = 1;
-                    continue;
-                }
-            } else {
-                fs_join(target, name, dstDisplay, sizeof dstDisplay);
-                fs_join(targetNative, name, dstNative, sizeof dstNative);
-                // fs_join writes '/' ; Windows takes it as well, but keep the native form tidy
-                {
-                    char* c;
-                    for (c = dstNative; *c != '\0'; c++)
-                        if (*c == '/')
-                            *c = '\\';
-                }
-            }
-        } else {
-            snprintf(dstDisplay, sizeof dstDisplay, "%s", target);
-            snprintf(dstNative, sizeof dstNative, "%s", targetNative);
+        if (fs_destination(source, target, targetNative, targetIsDirectory, 1,
+                           dstDisplay, sizeof dstDisplay, dstNative, sizeof dstNative) != 0) {
+            fprintf(stderr, PROGRAM ": cannot copy '%s': Invalid argument\n", source);
+            status = 1;
+            continue;
         }
 
         if (fs_copy(&options, source, sourceNative, dstDisplay, dstNative) != 0)

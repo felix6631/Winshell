@@ -1,4 +1,5 @@
 #include "fsutil.h"
+#include "vpath.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -444,5 +445,67 @@ int fs_remove(const FsOptions* o, const char* display, const char* native) {
     }
     if (o->verbose)
         printf("removed '%s'\n", display);
+    return 0;
+}
+
+int fs_split_operands(const char* program, const char** operands, int count, const char* targetDirectory,
+                      const char** target, int* sourceCount) {
+    if (targetDirectory != NULL) {
+        *target = targetDirectory;
+        *sourceCount = count;
+        if (count == 0) {
+            fprintf(stderr, "%s: missing file operand\n", program);
+            fprintf(stderr, "Try '%s --help' for more information.\n", program);
+            return -1;
+        }
+        return 0;
+    }
+
+    if (count == 0) {
+        fprintf(stderr, "%s: missing file operand\n", program);
+    } else if (count == 1) {
+        fprintf(stderr, "%s: missing destination file operand after '%s'\n", program, operands[0]);
+    } else {
+        *target = operands[count - 1];
+        *sourceCount = count - 1;
+        return 0;
+    }
+    fprintf(stderr, "Try '%s --help' for more information.\n", program);
+    return -1;
+}
+
+int fs_target_is_directory(const char* program, const char* target, const char* targetNative, int mustBeDirectory) {
+    DWORD attributes = 0;
+    int isDirectory = fs_attributes(targetNative, &attributes) == 0 && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+
+    if (mustBeDirectory && !isDirectory) {
+        fprintf(stderr, "%s: target '%s' is not a directory\n", program, target);
+        return -1;
+    }
+    return isDirectory;
+}
+
+int fs_destination(const char* source, const char* target, const char* targetNative, int targetIsDirectory,
+                   int dotIsTarget, char* display, size_t displaySize, char* native, size_t nativeSize) {
+    char name[VPATH_MAX];
+
+    if (!targetIsDirectory) {
+        snprintf(display, displaySize, "%s", target);
+        snprintf(native, nativeSize, "%s", targetNative);
+        return 0;
+    }
+
+    fs_basename(source, name, sizeof name);
+    if (dotIsTarget && strcmp(name, ".") == 0) {
+        // "cp -r dir/. target" copies the contents: the target itself is the destination
+        snprintf(display, displaySize, "%s", target);
+        snprintf(native, nativeSize, "%s", targetNative);
+        return 0;
+    }
+    if (name[0] == '\0' || strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+        return -1;
+
+    fs_join(target, name, display, displaySize);
+    join_native(targetNative, name, native, nativeSize);
     return 0;
 }

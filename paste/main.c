@@ -101,21 +101,158 @@ static int on_option(int id, const char* value, void* context) {
     return 0;
 }
 
+/** The inputs of paste: a reader for each operand ("-" operands share one) and how the lines end. */
+typedef struct {
+    LineReader** readers;
+    const char** names;
+    size_t       count;
+    LineReader   stdinReader;
+    int          haveStdin;
+    int          terminator;    // '\n', or NUL with -z
+    int          interactive;   // standard input is involved: write each line at once
+} Inputs;
+
+/** Opens the files. Returns 0, or 1 after a message (nothing is written then, as with GNU paste). */
+static int open_inputs(Inputs* inputs, const char** names, size_t count, int terminator) {
+    size_t i;
+
+    inputs->names = names;
+    inputs->count = count;
+    inputs->terminator = terminator;
+    inputs->haveStdin = 0;
+    inputs->readers = calloc(count, sizeof *inputs->readers);
+    if (inputs->readers == NULL) {
+        fprintf(stderr, PROGRAM ": out of memory\n");
+        return 1;
+    }
+
+    for (i = 0; i < count; i++) {
+        if (strcmp(names[i], "-") == 0) {
+            if (!inputs->haveStdin) {
+                text_reader_init(&inputs->stdinReader, stdin, terminator);
+                inputs->haveStdin = 1;
+            }
+            inputs->readers[i] = &inputs->stdinReader;
+        } else {
+            FILE* in;
+            if (text_open(PROGRAM, names[i], 1, &in) != 0)
+                return 1;
+            inputs->readers[i] = malloc(sizeof **inputs->readers);
+            if (inputs->readers[i] == NULL) {
+                fprintf(stderr, PROGRAM ": out of memory\n");
+                return 1;
+            }
+            text_reader_init(inputs->readers[i], in, terminator);
+        }
+    }
+    inputs->interactive = inputs->haveStdin;
+    return 0;
+}
+
+/** Reports the inputs that failed to be read. Returns the exit status: 0 or 1. */
+static int read_errors(const Inputs* inputs) {
+    size_t i;
+    int status = 0;
+
+    for (i = 0; i < inputs->count; i++) {
+        if (inputs->readers[i] != NULL && inputs->readers[i]->failed) {
+            fprintf(stderr, PROGRAM ": %s: read error\n", inputs->names[i]);
+            status = 1;
+        }
+    }
+    return status;
+}
+
+/** -s: the lines of each file are joined into one line. */
+static void paste_serial(const Inputs* inputs, int zero) {
+    size_t i;
+
+    for (i = 0; i < inputs->count; i++) {
+        TextLine line;
+        size_t position = 0;
+        int first = 1, crlf = 0;
+
+        while (inputs->readers[i] != NULL && text_reader_next(inputs->readers[i], &line)) {
+            if (!first) {
+                const char* text;
+                size_t length;
+                next_delimiter(delimiters, &position, &text, &length);
+                fwrite(text, 1, length, stdout);
+            }
+            fwrite(line.content, 1, line.length, stdout);
+            if (line.ending == 2)
+                crlf = 1;
+            first = 0;
+        }
+        if (crlf && !zero)
+            fputc('\r', stdout);
+        fputc(inputs->terminator, stdout);
+        if (inputs->interactive)
+            fflush(stdout);
+    }
+}
+
+/**
+ * The lines of the files side by side. The line is put together first: lines of one shared reader
+ * do not stay valid, and a round in which every file is at its end writes nothing.
+ * Returns 0, or 1 when out of memory.
+ */
+static int paste_parallel(const Inputs* inputs, int zero) {
+    unsigned char* assembled = NULL;
+    size_t assembledCapacity = 0;
+
+    for (;;) {
+        size_t position = 0, assembledLength = 0, i;
+        int any = 0, crlf = 0;
+
+        for (i = 0; i < inputs->count; i++) {
+            TextLine line;
+            int got = inputs->readers[i] != NULL && text_reader_next(inputs->readers[i], &line);
+            const char* text = NULL;
+            size_t length = 0, need;
+
+            if (i > 0)
+                next_delimiter(delimiters, &position, &text, &length);
+            need = assembledLength + length + (got ? line.length : 0) + 2;
+            if (VEC_RESERVE(assembled, assembledCapacity, need) != 0) {
+                fprintf(stderr, PROGRAM ": out of memory\n");
+                free(assembled);
+                return 1;
+            }
+            if (length > 0) {
+                memcpy(assembled + assembledLength, text, length);
+                assembledLength += length;
+            }
+            if (got) {
+                any = 1;
+                memcpy(assembled + assembledLength, line.content, line.length);
+                assembledLength += line.length;
+                if (line.ending == 2)
+                    crlf = 1;
+            }
+        }
+        if (!any)
+            break;
+        if (crlf && !zero)
+            assembled[assembledLength++] = '\r';
+        assembled[assembledLength++] = (unsigned char)inputs->terminator;
+        fwrite(assembled, 1, assembledLength, stdout);
+        if (inputs->interactive)
+            fflush(stdout);
+    }
+    free(assembled);
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     Options o = { 0, 0 };
     const char** operands;
-    size_t operandCount, i;
-    int serial, zero, status = 0, count, result;
-    LineReader** readers;
-    LineReader stdinReader;
-    int haveStdin = 0, terminator;
+    Inputs inputs;
+    int count, result, status;
 
     result = args_parse(&spec, argc, argv, on_option, &o, &operands, &count);
     if (result != ARGS_OK)
         return ARGS_STATUS(spec, result);
-    operandCount = (size_t)count;
-    serial = o.serial;
-    zero = o.zero;
 
     if (delimiters[0] == '\0')
         delimiters = "\\0";            // an empty list is the same as \0: no delimiter at all
@@ -123,119 +260,18 @@ int main(int argc, char* argv[]) {
         return 1;
 
     text_binary_streams();
-    if (operandCount == 0)
-        operands[operandCount++] = "-";
-    terminator = zero ? '\0' : '\n';
+    if (count == 0)
+        operands[count++] = "-";
 
-    readers = calloc(operandCount, sizeof *readers);
-    if (readers == NULL) {
-        fprintf(stderr, PROGRAM ": out of memory\n");
+    if (open_inputs(&inputs, operands, (size_t)count, o.zero ? '\0' : '\n') != 0)
+        return 1;
+
+    if (o.serial) {
+        paste_serial(&inputs, o.zero);
+    } else if (paste_parallel(&inputs, o.zero) != 0) {
         return 1;
     }
-
-    // every file has its reader; the several "-" share the one of standard input
-    for (i = 0; i < operandCount; i++) {
-        if (strcmp(operands[i], "-") == 0) {
-            if (!haveStdin) {
-                text_reader_init(&stdinReader, stdin, terminator);
-                haveStdin = 1;
-            }
-            readers[i] = &stdinReader;
-        } else {
-            FILE* in;
-            if (text_open(PROGRAM, operands[i], 1, &in) != 0)
-                return 1;               // as GNU paste: nothing is written when a file is missing
-            readers[i] = malloc(sizeof **readers);
-            if (readers[i] == NULL) {
-                fprintf(stderr, PROGRAM ": out of memory\n");
-                return 1;
-            }
-            text_reader_init(readers[i], in, terminator);
-        }
-    }
-
-    if (serial) {
-        for (i = 0; i < operandCount; i++) {
-            TextLine line;
-            size_t position = 0;
-            int first = 1, crlf = 0;
-
-            if (readers[i] != NULL) {
-                while (text_reader_next(readers[i], &line)) {
-                    if (!first) {
-                        const char* text;
-                        size_t length;
-                        next_delimiter(delimiters, &position, &text, &length);
-                        fwrite(text, 1, length, stdout);
-                    }
-                    fwrite(line.content, 1, line.length, stdout);
-                    if (line.ending == 2)
-                        crlf = 1;
-                    first = 0;
-                }
-                if (readers[i]->failed) {
-                    fprintf(stderr, PROGRAM ": %s: read error\n", operands[i]);
-                    status = 1;
-                }
-            }
-            if (crlf && !zero)
-                fputc('\r', stdout);
-            fputc(terminator, stdout);
-            if (haveStdin)
-                fflush(stdout);
-        }
-    } else {
-        // the line is put together first: lines of one shared reader do not stay valid, and
-        // a round in which every file is at its end writes nothing
-        unsigned char* assembled = NULL;
-        size_t assembledLength, assembledCapacity = 0;
-
-        for (;;) {
-            size_t position = 0;
-            int any = 0, crlf = 0;
-
-            assembledLength = 0;
-            for (i = 0; i < operandCount; i++) {
-                TextLine line;
-                int got = readers[i] != NULL && text_reader_next(readers[i], &line);
-                const char* text = NULL;
-                size_t length = 0, need;
-
-                if (i > 0)
-                    next_delimiter(delimiters, &position, &text, &length);
-                need = assembledLength + length + (got ? line.length : 0) + 2;
-                if (VEC_RESERVE(assembled, assembledCapacity, need) != 0) {
-                    fprintf(stderr, PROGRAM ": out of memory\n");
-                    return 1;
-                }
-                if (length > 0) {
-                    memcpy(assembled + assembledLength, text, length);
-                    assembledLength += length;
-                }
-                if (got) {
-                    any = 1;
-                    memcpy(assembled + assembledLength, line.content, line.length);
-                    assembledLength += line.length;
-                    if (line.ending == 2)
-                        crlf = 1;
-                }
-            }
-            if (!any)
-                break;
-            if (crlf && !zero)
-                assembled[assembledLength++] = '\r';
-            assembled[assembledLength++] = (unsigned char)terminator;
-            fwrite(assembled, 1, assembledLength, stdout);
-            if (haveStdin)
-                fflush(stdout);
-        }
-        free(assembled);
-        for (i = 0; i < operandCount; i++)
-            if (readers[i] != NULL && readers[i]->failed) {
-                fprintf(stderr, PROGRAM ": %s: read error\n", operands[i]);
-                status = 1;
-            }
-    }
+    status = read_errors(&inputs);
 
     if (fflush(stdout) != 0) {
         fprintf(stderr, PROGRAM ": write error\n");

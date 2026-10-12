@@ -543,114 +543,95 @@ static int on_option(int id, const char* value, void* context) {
     return 0;
 }
 
-int main(int argc, char* argv[]) {
-    Options o;
-    const char** operands;
-    Key global;
-    const char* outputFile;
-    int check, checkQuiet, operandCount, status = 0, i, result;
-    unsigned char** texts = NULL;
-    size_t* lengths = NULL;
-    Entry* entries = NULL;
-    size_t entryCount = 0, entryCapacity = 0, k;
-    FILE* out = stdout;
+/**
+ * Keys without options of their own use the global ones; with no key the whole line is one.
+ */
+static void complete_keys(const Key* global) {
+    size_t k;
 
-    memset(&o, 0, sizeof o);
-    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
-    if (result != ARGS_OK)
-        return ARGS_STATUS(spec, result);
-    global = o.global;
-    outputFile = o.outputFile;
-    check = o.check;
-    checkQuiet = o.checkQuiet;
-
-    // keys without options of their own use the global ones; with no key the whole line is one
     if (keyCount == 0) {
-        Key whole = global;
+        Key whole = *global;
         whole.startField = whole.startChar = 0;
         whole.hasEnd = 0;
         add_key(&whole);
-    } else {
-        for (k = 0; k < keyCount; k++) {
-            if (!keys[k].hasOptions) {
-                Key own = keys[k];
-                own.blankStart = own.blankEnd = global.blankStart;
-                own.dict = global.dict;
-                own.fold = global.fold;
-                own.general = global.general;
-                own.ignore = global.ignore;
-                own.numeric = global.numeric;
-                own.reverse = global.reverse;
-                keys[k] = own;
-            }
+        return;
+    }
+
+    for (k = 0; k < keyCount; k++) {
+        if (!keys[k].hasOptions) {
+            Key own = keys[k];
+            own.blankStart = own.blankEnd = global->blankStart;
+            own.dict = global->dict;
+            own.fold = global->fold;
+            own.general = global->general;
+            own.ignore = global->ignore;
+            own.numeric = global->numeric;
+            own.reverse = global->reverse;
+            keys[k] = own;
         }
     }
-    global_reverse = global.reverse;
+}
 
-    text_binary_streams();
-    if (operandCount == 0)
-        operands[operandCount++] = "-";
+/**
+ * Reads every input and lists its lines in *entries (the texts stay allocated: the lines point into them).
+ * Returns 0, 2 when an input could not be opened (the others are read), or -1 when out of memory.
+ */
+static int load_lines(const char** operands, int operandCount, Entry** entries, size_t* entryCount) {
+    size_t entryCapacity = 0;
+    int status = 0, i;
 
-    texts = calloc((size_t)operandCount, sizeof *texts);
-    lengths = calloc((size_t)operandCount, sizeof *lengths);
-    if (texts == NULL || lengths == NULL)
-        return 2;
+    *entries = NULL;
+    *entryCount = 0;
 
     for (i = 0; i < operandCount; i++) {
         FILE* in;
-        size_t offset = 0;
+        unsigned char* text;
+        size_t length, offset = 0;
         TextLine line;
 
         if (text_open(PROGRAM, operands[i], 1, &in) != 0) {
             status = 2;
             continue;
         }
-        texts[i] = text_slurp(in, &lengths[i]);
+        text = text_slurp(in, &length);
         if (in != stdin)
             fclose(in);
-        if (texts[i] == NULL) {
-            fprintf(stderr, PROGRAM ": memory exhausted\n");
-            return 2;
-        }
+        if (text == NULL)
+            return -1;
 
-        while (text_next_line(texts[i], lengths[i], &offset, &line)) {
-            if (VEC_RESERVE(entries, entryCapacity, entryCount + 1) != 0) {
-                fprintf(stderr, PROGRAM ": memory exhausted\n");
-                return 2;
+        while (text_next_line(text, length, &offset, &line)) {
+            if (VEC_RESERVE(*entries, entryCapacity, *entryCount + 1) != 0)
+                return -1;
+            (*entries)[*entryCount].line = line;
+            (*entries)[*entryCount].index = *entryCount;
+            (*entryCount)++;
+        }
+    }
+    return status;
+}
+
+/** sort -c: 0 when the lines are in order, otherwise 1 (and the first line out of order is named). */
+static int check_order(const Entry* entries, size_t count, const char* name, int quiet) {
+    size_t k;
+
+    for (k = 1; k < count; k++) {
+        int order = compare_entries(&entries[k - 1], &entries[k]);
+        if (order > 0 || (unique && order == 0)) {
+            if (!quiet) {
+                fprintf(stderr, PROGRAM ": %s:%lu: disorder: ", name, (unsigned long)(k + 1));
+                fwrite(entries[k].line.content, 1, entries[k].line.length, stderr);
+                fputc('\n', stderr);
             }
-            entries[entryCount].line = line;
-            entries[entryCount].index = entryCount;
-            entryCount++;
+            return 1;
         }
     }
+    return 0;
+}
 
-    if (status != 0 && check)
-        return 2;
-
-    if (check) {
-        for (k = 1; k < entryCount; k++) {
-            int result = compare_entries(&entries[k - 1], &entries[k]);
-            if (result > 0 || (unique && result == 0)) {
-                if (!checkQuiet) {
-                    fprintf(stderr, PROGRAM ": %s:%lu: disorder: ", operands[0], (unsigned long)(k + 1));
-                    fwrite(entries[k].line.content, 1, entries[k].line.length, stderr);
-                    fputc('\n', stderr);
-                }
-                return 1;
-            }
-        }
-        return 0;
-    }
-
-    if (entryCount > 1) {
-        Entry* scratch = malloc(entryCount * sizeof *scratch);
-        if (scratch == NULL) {
-            fprintf(stderr, PROGRAM ": memory exhausted\n");
-            return 2;
-        }
-        merge_sort(entries, scratch, entryCount);
-        free(scratch);
-    }
+/** Writes the sorted lines to the output file, or to standard output; -u leaves out repeated ones. */
+static int write_lines(const Entry* entries, size_t count, const char* outputFile) {
+    FILE* out = stdout;
+    size_t k;
 
     if (outputFile != NULL) {
         char native[VPATH_MAX];
@@ -660,7 +641,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    for (k = 0; k < entryCount; k++) {
+    for (k = 0; k < count; k++) {
         if (unique && k > 0 && compare_by_keys(&entries[k - 1].line, &entries[k].line) == 0)
             continue;
         if (text_write_line(&entries[k].line, out) != 0) {
@@ -673,6 +654,47 @@ int main(int argc, char* argv[]) {
         fclose(out);
     else
         fflush(stdout);
-    free(operands);
-    return status;
+    return 0;
+}
+
+int main(int argc, char* argv[]) {
+    Options o;
+    const char** operands;
+    Entry* entries;
+    size_t entryCount;
+    int operandCount, status, result;
+
+    memset(&o, 0, sizeof o);
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+
+    complete_keys(&o.global);
+    global_reverse = o.global.reverse;
+
+    text_binary_streams();
+    if (operandCount == 0)
+        operands[operandCount++] = "-";
+
+    status = load_lines(operands, operandCount, &entries, &entryCount);
+    if (status < 0) {
+        fprintf(stderr, PROGRAM ": memory exhausted\n");
+        return 2;
+    }
+
+    if (o.check)
+        return status != 0 ? 2 : check_order(entries, entryCount, operands[0], o.checkQuiet);
+
+    if (entryCount > 1) {
+        Entry* scratch = malloc(entryCount * sizeof *scratch);
+        if (scratch == NULL) {
+            fprintf(stderr, PROGRAM ": memory exhausted\n");
+            return 2;
+        }
+        merge_sort(entries, scratch, entryCount);
+        free(scratch);
+    }
+
+    result = write_lines(entries, entryCount, o.outputFile);
+    return result != 0 ? result : status;
 }

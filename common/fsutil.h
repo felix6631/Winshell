@@ -50,6 +50,27 @@ void fs_basename(const char* path, char* out, size_t size);
 /** "directory" + "/" + "name", with no doubled separator. */
 void fs_join(const char* directory, const char* name, char* out, size_t size);
 
+/**
+ * The operands of cp and mv: "SOURCE... TARGET", or only sources with -t DIRECTORY (targetDirectory).
+ * Sets *target and *sourceCount. Returns 0, or -1 after a message (missing operand).
+ */
+int fs_split_operands(const char* program, const char** operands, int count, const char* targetDirectory,
+                      const char** target, int* sourceCount);
+
+/**
+ * Whether the target is a directory (1 or 0). With mustBeDirectory a target that is not one is
+ * reported ("target 'x' is not a directory") and -1 is returned.
+ */
+int fs_target_is_directory(const char* program, const char* target, const char* targetNative, int mustBeDirectory);
+
+/**
+ * Where a source goes: into the target directory under its own name, or onto the target itself.
+ * With dotIsTarget a source named "." stands for the target directory (cp -r dir/. target).
+ * Returns 0, or -1 for a source with no usable name ("", ".." and, without dotIsTarget, ".").
+ */
+int fs_destination(const char* source, const char* target, const char* targetNative, int targetIsDirectory,
+                   int dotIsTarget, char* display, size_t displaySize, char* native, size_t nativeSize);
+
 /** Non-zero when standard input is a console, so a person answers the questions. */
 int fs_stdin_is_console(void);
 

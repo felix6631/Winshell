@@ -43,6 +43,76 @@ static int list_add(CommandList* list, const char* start, size_t length, int op)
     return 0;
 }
 
+/**
+ * Passes what no operator can be in: a quote mark, a run of backslashes (an odd number in front of a
+ * double quote escapes it), and any character inside quotes. Returns how many characters were
+ * passed, or 0 when line[i] is outside of quotes (it may be an operator) or the end of the line.
+ */
+static size_t pass_quoted(const CHAR* line, size_t i, CHAR* quote) {
+    CHAR c = line[i];
+    size_t backslashes = 0;
+
+    if (c == '\0')
+        return 0;
+
+    if (*quote == '\'') {
+        if (c == '\'')
+            *quote = '\0';
+        return 1;
+    }
+
+    if (c == '\\') {
+        while (line[i + backslashes] == '\\')
+            backslashes++;
+        if (line[i + backslashes] == '"' && backslashes % 2 == 1)
+            return backslashes + 1;     // the quote is escaped: pass it as well
+        return backslashes;             // an even number: the quote that follows toggles
+    }
+
+    if (c == '"') {
+        *quote = *quote == '"' ? '\0' : '"';
+        return 1;
+    }
+    if (c == '\'' && *quote == '\0') {
+        *quote = '\'';
+        return 1;
+    }
+    return *quote != '\0' ? 1 : 0;      // inside double quotes nothing is an operator
+}
+
+/**
+ * The list operator at line[i]: LIST_SEQ, LIST_AND or LIST_OR with its *length, or 0 for a
+ * character that belongs to the pipeline (*skip says how many more characters do, as for the
+ * second one of "&>"). -1 for a '&' that starts no operator of this shell (no background jobs).
+ */
+static int operator_at(const CHAR* line, size_t i, size_t* length, size_t* skip) {
+    CHAR c = line[i];
+
+    *length = *skip = 0;
+    if (c == ';') {
+        *length = 1;
+        return LIST_SEQ;
+    }
+    if (c == '&' && line[i + 1] == '&') {
+        *length = 2;
+        return LIST_AND;
+    }
+    if (c == '|' && line[i + 1] == '|') {
+        *length = 2;
+        return LIST_OR;
+    }
+    if (c == '&') {
+        if (i > 0 && line[i - 1] == '>')
+            return 0;                   // 2>&1 and the like
+        if (line[i + 1] == '>') {
+            *skip = 1;                  // &> and &>>
+            return 0;
+        }
+        return -1;
+    }
+    return 0;                           // a pipe belongs to the segment, as do the ordinary characters
+}
+
 int winshell_parse_list(const CHAR* line, CommandList* list) {
     size_t i = 0, segmentStart = 0;
     CHAR quote = '\0';
@@ -51,71 +121,16 @@ int winshell_parse_list(const CHAR* line, CommandList* list) {
     memset(list, 0, sizeof *list);
 
     for (;; i++) {
-        CHAR c = line[i];
-        int op = 0;
-        size_t operatorLength = 0;
+        size_t passed = pass_quoted(line, i, &quote);
+        size_t operatorLength, skip;
+        int op;
 
-        if (c != '\0' && quote == '\'') {
-            if (c == '\'')
-                quote = '\0';
+        if (passed > 0) {
+            i += passed - 1;
             continue;
         }
 
-        if (c == '\\') {
-            // backslashes in front of a double quote: an odd number escapes it
-            size_t backslashes = 0;
-            while (line[i + backslashes] == '\\')
-                backslashes++;
-            if (line[i + backslashes] == '"') {
-                if (backslashes % 2 == 1)
-                    i += backslashes;           // the quote is escaped: skip it as well
-                else
-                    i += backslashes - 1;       // the quote that follows toggles
-            } else {
-                i += backslashes - 1;
-            }
-            continue;
-        }
-
-        if (c == '"') {
-            quote = quote == '"' ? '\0' : '"';
-            continue;
-        }
-        if (c == '\'' && quote == '\0') {
-            quote = '\'';
-            continue;
-        }
-
-        // inside double quotes nothing is an operator
-        if (c != '\0' && quote != '\0')
-            continue;
-
-        if (c != '\0' && quote == '\0') {
-            if (c == ';') {
-                op = LIST_SEQ;
-                operatorLength = 1;
-            } else if (c == '&' && line[i + 1] == '&') {
-                op = LIST_AND;
-                operatorLength = 2;
-            } else if (c == '|' && line[i + 1] == '|') {
-                op = LIST_OR;
-                operatorLength = 2;
-            } else if (c == '&' && (i > 0 && line[i - 1] == '>')) {
-                continue;       // 2>&1 and the like belong to the segment
-            } else if (c == '&' && line[i + 1] == '>') {
-                i++;            // &> and &>>
-                continue;
-            } else if (c == '&') {
-                fprintf(stderr, "Error: Syntax error: '&' is not supported (no background commands)\n");
-                goto err;
-            } else if (c == '|') {
-                continue;       // a pipe belongs to the segment
-            } else {
-                continue;
-            }
-        }
-
-        if (c == '\0') {
+        if (line[i] == '\0') {
             // the end: the last segment, which may be empty after a ';' or in an empty line
             if (is_blank_text(line + segmentStart, i - segmentStart)) {
                 if (pending == LIST_AND || pending == LIST_OR) {
@@ -127,6 +142,16 @@ int winshell_parse_list(const CHAR* line, CommandList* list) {
             if (list_add(list, line + segmentStart, i - segmentStart, pending) != 0)
                 goto err_memory;
             break;
+        }
+
+        op = operator_at(line, i, &operatorLength, &skip);
+        if (op < 0) {
+            fprintf(stderr, "Error: Syntax error: '&' is not supported (no background commands)\n");
+            goto err;
+        }
+        if (op == 0) {
+            i += skip;
+            continue;
         }
 
         // an operator ends a segment, which has to have a command in it

@@ -149,11 +149,65 @@ static int on_option(int id, const char* value, void* context) {
     return 0;
 }
 
+/**
+ * How wide the numbers are: as many digits as the sizes of the files add up to, or 7 when
+ * input of unknown size (standard input that is a pipe or a console, a directory) is involved.
+ * Standard input that is a file has a size too. One number of one file is not padded (0).
+ */
+static int number_width(const char** operands, int operandCount, int columns) {
+    unsigned long long totalSize = 0;
+    int unknown = 0, i;
+
+    if (operandCount == 0 || has_stdin_operand(operands, operandCount)) {
+        HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+        LARGE_INTEGER size;
+        if (in != INVALID_HANDLE_VALUE && GetFileType(in) == FILE_TYPE_DISK && GetFileSizeEx(in, &size))
+            totalSize += (unsigned long long)size.QuadPart;
+        else
+            unknown = 1;
+    }
+
+    for (i = 0; i < operandCount; i++) {
+        char native[VPATH_MAX];
+        WIN32_FILE_ATTRIBUTE_DATA data;
+
+        if (strcmp(operands[i], "-") == 0)
+            continue;       // counted above
+        if (vpath_to_native(operands[i], native, sizeof native) != 0 ||
+            !GetFileAttributesExA(native, GetFileExInfoStandard, &data))
+            continue;
+        if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            unknown = 1;    // not a regular file: its size says nothing, as for a pipe
+        else
+            totalSize += ((unsigned long long)data.nFileSizeHigh << 32) | data.nFileSizeLow;
+    }
+
+    if (columns == 1 && operandCount <= 1)
+        return 0;
+    return unknown ? 7 : digits_of(totalSize);
+}
+
+/** Whether the operand names a directory (which wc reports and counts as nothing). */
+static int is_directory_operand(const char* operand) {
+    char native[VPATH_MAX];
+    DWORD attributes;
+
+    return strcmp(operand, "-") != 0 && vpath_to_native(operand, native, sizeof native) == 0 &&
+           fs_attributes(native, &attributes) == 0 && (attributes & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+static void add_counts(Counts* total, const Counts* counts) {
+    total->lines += counts->lines;
+    total->words += counts->words;
+    total->chars += counts->chars;
+    total->bytes += counts->bytes;
+    if (counts->maxWidth > total->maxWidth)
+        total->maxWidth = counts->maxWidth;
+}
+
 int main(int argc, char* argv[]) {
     const char** operands;
-    int operandCount, status = 0, i, columns, width, result;
-    unsigned long long totalSize = 0;
-    int stdinInvolved = 0;
+    int operandCount, status = 0, i, width, result;
     Counts total;
 
     memset(&total, 0, sizeof total);
@@ -164,38 +218,10 @@ int main(int argc, char* argv[]) {
 
     if (!show_lines && !show_words && !show_chars && !show_bytes && !show_width)
         show_lines = show_words = show_bytes = 1;
-    columns = show_lines + show_words + show_chars + show_bytes + show_width;
 
     text_binary_streams();
-
-    // How wide the numbers are: as many digits as the sizes of the files add up to, or 7 when
-    // input of unknown size (standard input) is involved. One number of one file is not padded.
-    // standard input that is a file has a size too; a pipe or a console has none
-    if (operandCount == 0 || has_stdin_operand(operands, operandCount)) {
-        HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
-        LARGE_INTEGER size;
-        if (in != INVALID_HANDLE_VALUE && GetFileType(in) == FILE_TYPE_DISK && GetFileSizeEx(in, &size))
-            totalSize += (unsigned long long)size.QuadPart;
-        else
-            stdinInvolved = 1;
-    }
-    for (i = 0; i < operandCount; i++) {
-        char native[VPATH_MAX];
-        WIN32_FILE_ATTRIBUTE_DATA data;
-
-        if (strcmp(operands[i], "-") == 0) {
-            continue;       // counted above
-        } else if (vpath_to_native(operands[i], native, sizeof native) == 0 &&
-                   GetFileAttributesExA(native, GetFileExInfoStandard, &data)) {
-            if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-                stdinInvolved = 1;      // not a regular file: its size says nothing, as for a pipe
-            else
-                totalSize += ((unsigned long long)data.nFileSizeHigh << 32) | data.nFileSizeLow;
-        }
-    }
-    width = stdinInvolved ? 7 : digits_of(totalSize);
-    if (columns == 1 && operandCount <= 1)
-        width = 0;
+    width = number_width(operands, operandCount,
+                         show_lines + show_words + show_chars + show_bytes + show_width);
 
     if (operandCount == 0) {
         Counts counts;
@@ -204,19 +230,14 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         print_counts(&counts, width, NULL);
-        free(operands);
         return 0;
     }
 
     for (i = 0; i < operandCount; i++) {
         Counts counts;
         FILE* in;
-        char native[VPATH_MAX];
-        DWORD attributes;
 
-        // a directory: reported, and counted as nothing, as GNU wc does
-        if (strcmp(operands[i], "-") != 0 && vpath_to_native(operands[i], native, sizeof native) == 0 &&
-            fs_attributes(native, &attributes) == 0 && (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+        if (is_directory_operand(operands[i])) {
             fprintf(stderr, PROGRAM ": %s: Is a directory\n", operands[i]);
             memset(&counts, 0, sizeof counts);
             print_counts(&counts, width, operands[i]);
@@ -239,18 +260,10 @@ int main(int argc, char* argv[]) {
             clearerr(stdin);
 
         print_counts(&counts, width, operands[i]);
-
-        total.lines += counts.lines;
-        total.words += counts.words;
-        total.chars += counts.chars;
-        total.bytes += counts.bytes;
-        if (counts.maxWidth > total.maxWidth)
-            total.maxWidth = counts.maxWidth;
+        add_counts(&total, &counts);
     }
 
     if (operandCount > 1)
         print_counts(&total, width, "total");
-
-    free(operands);
     return status;
 }

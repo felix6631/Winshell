@@ -269,116 +269,110 @@ static int on_option(int id, const char* value, void* context) {
     return 0;
 }
 
-int main(int argc, char* argv[]) {
-    Options o = { 0, 0, 0, 0 };
-    const char** operands;
-    int operandCount, complement, deleteMode, squeeze, truncate_, result;
-    Set set1, set2;
-    unsigned char map[256];
-    unsigned char inDelete[256], inSqueeze[256];
-    int c, last = -1;
-    unsigned char buffer[65536];
-    unsigned char out[65536];
-    size_t got, used = 0, j;
-
-    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
-    if (result != ARGS_OK)
-        return ARGS_STATUS(spec, result);
-    complement = o.complement;
-    deleteMode = o.deleteMode;
-    squeeze = o.squeeze;
-    truncate_ = o.truncate;
-
+/** The number of strings that tr was given has to fit what it is asked to do. Returns 0, or 1 after a message. */
+static int check_operands(const char** operands, int operandCount, int deleteMode, int squeeze) {
     if (operandCount > 2) {
         fprintf(stderr, PROGRAM ": extra operand '%s'\n", operands[2]);
-        try_help();
-        return 1;
-    }
-
-    if (operandCount == 0) {
+    } else if (operandCount == 0) {
         fprintf(stderr, PROGRAM ": missing operand\n");
-        try_help();
-        return 1;
-    }
-    if (operandCount == 1 && !deleteMode && !squeeze) {
+    } else if (operandCount == 1 && !deleteMode && !squeeze) {
         fprintf(stderr, PROGRAM ": missing operand after '%s'\nTwo strings must be given when translating.\n",
                 operands[0]);
-        try_help();
-        return 1;
-    }
-    if (operandCount == 2 && deleteMode && !squeeze) {
+    } else if (operandCount == 2 && deleteMode && !squeeze) {
         fprintf(stderr, PROGRAM ": extra operand '%s'\nOnly one string may be given when deleting without "
                         "squeezing repeats.\n", operands[1]);
-        try_help();
-        return 1;
-    }
-    if (operandCount == 1 && deleteMode && squeeze) {
+    } else if (operandCount == 1 && deleteMode && squeeze) {
         fprintf(stderr, PROGRAM ": missing operand after '%s'\nTwo strings must be given when both deleting "
                         "and squeezing repeats.\n", operands[0]);
-        try_help();
-        return 1;
+    } else {
+        return 0;
     }
+    try_help();
+    return 1;
+}
 
-    if (expand_set(operands[0], 0, &set1) != 0)
-        return 1;
-    memset(&set2, 0, sizeof set2);
-    if (operandCount == 2 && expand_set(operands[1], 1, &set2) != 0)
-        return 1;
+/** Replaces the set by the bytes it does not hold, in ascending order. Returns 0, or -1 when out of memory. */
+static int complement_set(Set* set) {
+    unsigned char member[256];
+    unsigned char* bytes = malloc(256);
+    size_t n = 0, j;
+    int c;
 
-    // the first set as the list of bytes it stands for; the complement is in ascending order
-    if (complement) {
-        unsigned char member[256];
-        size_t n = 0;
-        memset(member, 0, sizeof member);
-        for (j = 0; j < set1.length; j++)
-            member[set1.bytes[j]] = 1;
-        free(set1.bytes);
-        set1.bytes = malloc(256);
-        for (c = 0; c < 256; c++)
-            if (!member[c])
-                set1.bytes[n++] = (unsigned char)c;
-        set1.length = n;
-    }
+    if (bytes == NULL)
+        return -1;
+    memset(member, 0, sizeof member);
+    for (j = 0; j < set->length; j++)
+        member[set->bytes[j]] = 1;
+    for (c = 0; c < 256; c++)
+        if (!member[c])
+            bytes[n++] = (unsigned char)c;
+    free(set->bytes);
+    set->bytes = bytes;
+    set->length = n;
+    return 0;
+}
+
+/** What tr does with each byte: the translation, the bytes it deletes and the bytes it squeezes. */
+typedef struct {
+    unsigned char map[256];
+    unsigned char inDelete[256], inSqueeze[256];
+    int           deleteMode, squeeze;
+} Plan;
+
+/** Makes the plan from the sets. Returns 0, or 1 after a message. */
+static int make_plan(Plan* plan, Set* set1, Set* set2, int operandCount, int truncate_) {
+    size_t j;
+    int c;
 
     for (c = 0; c < 256; c++)
-        map[c] = (unsigned char)c;
-    memset(inDelete, 0, sizeof inDelete);
-    memset(inSqueeze, 0, sizeof inSqueeze);
+        plan->map[c] = (unsigned char)c;
+    memset(plan->inDelete, 0, sizeof plan->inDelete);
+    memset(plan->inSqueeze, 0, sizeof plan->inSqueeze);
 
-    if (deleteMode) {
-        for (j = 0; j < set1.length; j++)
-            inDelete[set1.bytes[j]] = 1;
-        if (squeeze)
-            for (j = 0; j < set2.length; j++)
-                inSqueeze[set2.bytes[j]] = 1;
+    if (plan->deleteMode) {
+        for (j = 0; j < set1->length; j++)
+            plan->inDelete[set1->bytes[j]] = 1;
+        if (plan->squeeze)
+            for (j = 0; j < set2->length; j++)
+                plan->inSqueeze[set2->bytes[j]] = 1;
     } else if (operandCount == 2) {
         // translating
-        fill_set(&set2, set1.length);
-        if (truncate_ && set1.length > set2.length)
-            set1.length = set2.length;
-        if (set2.length == 0 && set1.length > 0) {
+        fill_set(set2, set1->length);
+        if (truncate_ && set1->length > set2->length)
+            set1->length = set2->length;
+        if (set2->length == 0 && set1->length > 0) {
             fprintf(stderr, PROGRAM ": when not truncating set1, string2 must be non-empty\n");
             return 1;
         }
-        for (j = 0; j < set1.length; j++) {
-            unsigned char to = j < set2.length ? set2.bytes[j] : set2.bytes[set2.length - 1];
-            map[set1.bytes[j]] = to;
+        for (j = 0; j < set1->length; j++) {
+            unsigned char to = j < set2->length ? set2->bytes[j] : set2->bytes[set2->length - 1];
+            plan->map[set1->bytes[j]] = to;
         }
-        if (squeeze)
-            for (j = 0; j < set2.length; j++)
-                inSqueeze[set2.bytes[j]] = 1;
+        if (plan->squeeze)
+            for (j = 0; j < set2->length; j++)
+                plan->inSqueeze[set2->bytes[j]] = 1;
     } else {
         // squeezing only
-        for (j = 0; j < set1.length; j++)
-            inSqueeze[set1.bytes[j]] = 1;
+        for (j = 0; j < set1->length; j++)
+            plan->inSqueeze[set1->bytes[j]] = 1;
     }
+    return 0;
+}
 
-    text_binary_streams();
+/**
+ * Applies the plan to standard input. What is there is translated and written at once, so that it
+ * works in the middle of a pipeline of programs that produce their output slowly.
+ */
+static int run_plan(const Plan* plan) {
+    unsigned char buffer[65536];
+    unsigned char out[65536];
+    size_t used = 0;
+    int last = -1;
 
-    // what is there is translated and written at once, so that it works in the middle of a pipeline
-    // of programs that produce their output slowly
     for (;;) {
         long read = text_read_some(stdin, buffer, sizeof buffer);
+        size_t got, j;
+
         if (read <= 0)
             break;
         got = (size_t)read;
@@ -386,10 +380,10 @@ int main(int argc, char* argv[]) {
         for (j = 0; j < got; j++) {
             unsigned char b = buffer[j];
 
-            if (deleteMode && inDelete[b])
+            if (plan->deleteMode && plan->inDelete[b])
                 continue;
-            b = map[b];
-            if (squeeze && inSqueeze[b] && last == b)
+            b = plan->map[b];
+            if (plan->squeeze && plan->inSqueeze[b] && last == b)
                 continue;
             last = b;
 
@@ -411,4 +405,35 @@ int main(int argc, char* argv[]) {
         return 1;
     fflush(stdout);
     return 0;
+}
+
+int main(int argc, char* argv[]) {
+    Options o = { 0, 0, 0, 0 };
+    const char** operands;
+    int operandCount, result;
+    Set set1, set2;
+    Plan plan;
+
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+
+    if (check_operands(operands, operandCount, o.deleteMode, o.squeeze) != 0)
+        return 1;
+
+    if (expand_set(operands[0], 0, &set1) != 0)
+        return 1;
+    memset(&set2, 0, sizeof set2);
+    if (operandCount == 2 && expand_set(operands[1], 1, &set2) != 0)
+        return 1;
+    if (o.complement && complement_set(&set1) != 0)
+        return 1;
+
+    plan.deleteMode = o.deleteMode;
+    plan.squeeze = o.squeeze;
+    if (make_plan(&plan, &set1, &set2, operandCount, o.truncate) != 0)
+        return 1;
+
+    text_binary_streams();
+    return run_plan(&plan);
 }
