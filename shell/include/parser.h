@@ -25,11 +25,7 @@ typedef struct {
     LPSTR* argv;        // NULL-terminated; argv[0] is the program name; NULL for NAME=value alone
     LPSTR* patterns;    // same length as argv: the glob pattern of a word, or NULL
     LPSTR  input;       // "< file"   or NULL
-    LPSTR  output;      // the file of the last "> file" / ">> file"   or NULL
-    int    append;      // non-zero for ">>"
-    LPSTR  errput;      // the file of the last "2> file" / "2>> file"   or NULL
-    int    errAppend;   // non-zero for "2>>"
-    Redirect* redirects;    // every redirection of standard output and error, in the order written
+    Redirect* redirects;    // every > >> 2> 2>> 2>&1 ... of the command, in the order written
     size_t    redirectCount;
     LPSTR* assignments; // the "NAME=value" words in front of the command
     size_t assignmentCount;

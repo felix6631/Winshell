@@ -1,5 +1,6 @@
 #include "executer.h"
 #include "vpath.h"
+#include "program.h"
 #include "cmdline.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,30 +8,6 @@
 #include <windows.h>
 
 #define MAX_COMMAND_LINE 32767
-
-/** Builds "<directory of shell.exe>\<program>.exe" into path. */
-static int resolve_program(const char* program, char* path, size_t size) {
-    char directory[MAX_PATH];
-    DWORD length = GetModuleFileNameA(NULL, directory, MAX_PATH);
-    char* separator;
-    size_t program_length = strlen(program);
-    int written;
-
-    if (length == 0 || length >= MAX_PATH)
-        return -1;
-
-    separator = strrchr(directory, '\\');
-    if (separator == NULL)
-        return -1;
-    *separator = '\0';
-
-    if (program_length >= 4 && _stricmp(program + program_length - 4, ".exe") == 0)
-        written = snprintf(path, size, "%s\\%s", directory, program);
-    else
-        written = snprintf(path, size, "%s\\%s.exe", directory, program);
-
-    return (written < 0 || (size_t)written >= size) ? -1 : 0;
-}
 
 /*
  * About handles: a child inherits every inheritable handle of the shell, not
@@ -168,7 +145,7 @@ static HANDLE start_program(char* const argv[], HANDLE in, HANDLE out, HANDLE er
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
 
-    if (resolve_program(argv[0], path, sizeof path) != 0)
+    if (program_find(argv[0], path, sizeof path) != 0)
         goto err_start;
 
     command = cmdline_build(argv);
@@ -214,6 +191,88 @@ err_start:
     return NULL;
 }
 
+#define COMMAND_READY 1     /* the files are open, the environment is built */
+#define COMMAND_FAILED 0    /* a message was printed; the neighbours see an empty input or a closed output */
+#define COMMAND_NOMEM (-1)
+
+/**
+ * Starts one command of a pipeline. pipeRead is the end of the pipe coming from the
+ * previous command and pipeWrite the one going to the next, or NULL; the shell keeps
+ * both (the caller closes them), and gives the program duplicates of them.
+ * *process gets the program, or NULL when none was started (a failure, or NAME=value alone).
+ */
+static int start_command(const Command* command, HANDLE pipeRead, HANDLE pipeWrite,
+                         HANDLE shellIn, HANDLE shellOut, HANDLE shellErr, HANDLE* process) {
+    HANDLE in = shellIn, out = shellOut, err = shellErr;
+    // the copies and files opened for this command, to close afterwards; descriptors that
+    // were made copies of another one (2>&1) refer to the same handle, which is closed once
+    HANDLE* owned = malloc((2 + command->redirectCount) * sizeof *owned);
+    size_t ownedCount = 0, r;
+    char* environment;
+    int ready = 1, failed = 0;
+
+    *process = NULL;
+    if (owned == NULL) {
+        fprintf(stderr, "Error: Out of memory\n");
+        return COMMAND_NOMEM;
+    }
+
+    if (command->input != NULL) {
+        in = open_input_file(command->input);
+        if (in == INVALID_HANDLE_VALUE) {
+            fprintf(stderr, "Error: Cannot open '%s' for reading\n", command->input);
+            in = NULL;
+            ready = 0;
+        } else {
+            owned[ownedCount++] = in;
+        }
+    } else if (pipeRead != NULL) {
+        in = duplicate_inheritable(pipeRead);
+        owned[ownedCount++] = in;
+    }
+
+    if (pipeWrite != NULL) {
+        out = duplicate_inheritable(pipeWrite);
+        owned[ownedCount++] = out;
+    }
+
+    // standard output and error, as written: a later redirection does not change a copy made before it
+    for (r = 0; r < command->redirectCount; r++) {
+        const Redirect* redirect = &command->redirects[r];
+        HANDLE* slot = redirect->fd == 2 ? &err : &out;
+
+        if (redirect->file == NULL) {
+            *slot = redirect->dupOf == 2 ? err : out;
+        } else {
+            HANDLE file = open_output_file(redirect->file, redirect->append);
+            if (file == INVALID_HANDLE_VALUE) {
+                fprintf(stderr, "Error: Cannot open '%s' for writing\n", redirect->file);
+                ready = 0;
+            } else {
+                owned[ownedCount++] = file;
+                *slot = file;
+            }
+        }
+    }
+
+    environment = build_environment(command, &failed);
+    if (failed) {
+        fprintf(stderr, "Error: Out of memory\n");
+        ready = 0;
+    }
+
+    // NAME=value alone starts nothing; its redirections were still made (and truncate their files)
+    if (ready && command->argv != NULL)
+        *process = start_program(command->argv, in, out, err, environment);
+    free(environment);
+
+    // The shell must not keep any pipe end of its own, or EOF never arrives.
+    for (r = 0; r < ownedCount; r++)
+        CloseHandle(owned[r]);
+    free(owned);
+    return ready ? COMMAND_READY : COMMAND_FAILED;
+}
+
 int execute_pipeline(const Pipeline* pipeline) {
     HANDLE shellIn  = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE shellOut = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -240,85 +299,24 @@ int execute_pipeline(const Pipeline* pipeline) {
         const Command* command = &pipeline->commands[i];
         int isLast = (i + 1 == pipeline->count);
         HANDLE nextRead = NULL, pipeWrite = NULL;
-        HANDLE in = shellIn, out = shellOut, err = shellErr;
-        // the copies and files opened for this command, to close afterwards; descriptors that
-        // were made copies of another one (2>&1) refer to the same handle, which is closed once
-        HANDLE* owned = malloc((2 + command->redirectCount) * sizeof *owned);
-        size_t ownedCount = 0, r;
-        char* environment = NULL;
-        int ready = 1, failed = 0;
-
-        if (owned == NULL) {
-            fprintf(stderr, "Error: Out of memory\n");
-            close_handle(&pipeRead);
-            break;
-        }
+        int result;
 
         if (!isLast && !CreatePipe(&nextRead, &pipeWrite, NULL, 0)) {
             fprintf(stderr, "Error: Failed to create a pipe\n");
-            close_handle(&pipeRead);
-            free(owned);
             break;
         }
 
-        if (command->input != NULL) {
-            in = open_input_file(command->input);
-            if (in == INVALID_HANDLE_VALUE) {
-                fprintf(stderr, "Error: Cannot open '%s' for reading\n", command->input);
-                in = NULL;
-                ready = 0;
-            } else {
-                owned[ownedCount++] = in;
-            }
-        } else if (pipeRead != NULL) {
-            in = duplicate_inheritable(pipeRead);
-            owned[ownedCount++] = in;
-        }
-
-        if (pipeWrite != NULL) {
-            out = duplicate_inheritable(pipeWrite);
-            owned[ownedCount++] = out;
-        }
-
-        // standard output and error, as written: a later redirection does not change a copy made before it
-        for (r = 0; r < command->redirectCount; r++) {
-            const Redirect* redirect = &command->redirects[r];
-            HANDLE* slot = redirect->fd == 2 ? &err : &out;
-
-            if (redirect->file == NULL) {
-                *slot = redirect->dupOf == 2 ? err : out;
-            } else {
-                HANDLE file = open_output_file(redirect->file, redirect->append);
-                if (file == INVALID_HANDLE_VALUE) {
-                    fprintf(stderr, "Error: Cannot open '%s' for writing\n", redirect->file);
-                    ready = 0;
-                } else {
-                    owned[ownedCount++] = file;
-                    *slot = file;
-                }
-            }
-        }
-
-        environment = build_environment(command, &failed);
-        if (failed) {
-            fprintf(stderr, "Error: Out of memory\n");
-            ready = 0;
-        }
-
-        // NAME=value alone starts nothing; its redirections were still made (and truncate their files)
-        if (ready && command->argv != NULL)
-            processes[i] = start_program(command->argv, in, out, err, environment);
-        else if (ready && isLast)
+        result = start_command(command, pipeRead, pipeWrite, shellIn, shellOut, shellErr, &processes[i]);
+        if (result == COMMAND_READY && command->argv == NULL && isLast)
             noopSucceeded = 1;
-        free(environment);
 
-        // The shell must not keep any pipe end of its own, or EOF never arrives.
-        for (r = 0; r < ownedCount; r++)
-            CloseHandle(owned[r]);
-        free(owned);
         close_handle(&pipeRead);
         close_handle(&pipeWrite);
         pipeRead = nextRead;
+        if (result == COMMAND_NOMEM) {
+            close_handle(&pipeRead);
+            break;
+        }
     }
     close_handle(&pipeRead);
 

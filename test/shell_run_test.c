@@ -21,6 +21,24 @@ static void test_running(void) {
 
     SCRIPT_OUT("echo before\nquit\necho after\n", "before\n");
 
+    // a program may also be named by a path, virtual or Windows, with or without ".exe"
+    {
+        char native[MAX_PATH * 2], virtualPath[MAX_PATH * 2];
+        bin_path("echo", native, sizeof native);
+        expected_virtual(native, virtualPath, sizeof virtualPath);
+        {
+            char script_text[MAX_PATH * 6];
+            snprintf(script_text, sizeof script_text, "%s by path\n", virtualPath);
+            SCRIPT_OUT(script_text, "by path\n");
+        }
+        {
+            char script_text[MAX_PATH * 6];
+            size_t length = strlen(virtualPath);
+            snprintf(script_text, sizeof script_text, "%.*s by path\n", (int)(length - 4), virtualPath);
+            SCRIPT_OUT(script_text, "by path\n");
+        }
+    }
+
     // blank lines do nothing
     SCRIPT_OUT("\n   \n\t\necho x\n", "x\n");
 

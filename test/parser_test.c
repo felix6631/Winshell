@@ -18,6 +18,26 @@ static int argument_count(const Command* command) {
     return count;
 }
 
+/** The file the last redirection of descriptor fd (1 or 2) of the command writes to, or NULL. */
+static const char* file_of(const Command* command, int fd) {
+    const char* file = NULL;
+    size_t i;
+    for (i = 0; i < command->redirectCount; i++)
+        if (command->redirects[i].fd == fd && command->redirects[i].file != NULL)
+            file = command->redirects[i].file;
+    return file;
+}
+
+/** Whether that redirection appends. */
+static int append_of(const Command* command, int fd) {
+    int append = 0;
+    size_t i;
+    for (i = 0; i < command->redirectCount; i++)
+        if (command->redirects[i].fd == fd && command->redirects[i].file != NULL)
+            append = command->redirects[i].append;
+    return append;
+}
+
 /** Silences the messages the parser prints for bad input. */
 static FILE* mute_stderr(void) {
     fflush(stderr);
@@ -35,7 +55,7 @@ static void test_words(void) {
     CHECK_STR(p.commands[0].argv[1], "hello");
     CHECK_STR(p.commands[0].argv[2], "world");
     CHECK(p.commands[0].argv[3] == NULL);
-    CHECK(p.commands[0].input == NULL && p.commands[0].output == NULL && p.commands[0].errput == NULL);
+    CHECK(p.commands[0].input == NULL && file_of(&p.commands[0], 1) == NULL && file_of(&p.commands[0], 2) == NULL);
     winshell_freePipeline(&p);
 
     // blanks of any kind separate words; leading and trailing ones are ignored
@@ -138,7 +158,7 @@ static void test_quotes(void) {
     CHECK_STR(p.commands[0].argv[1], "a>b");
     CHECK_STR(p.commands[0].argv[2], "c|d");
     CHECK_STR(p.commands[0].argv[3], "<");
-    CHECK(p.commands[0].output == NULL);
+    CHECK(file_of(&p.commands[0], 1) == NULL);
     winshell_freePipeline(&p);
 
     // unclosed quotes are errors
@@ -181,69 +201,69 @@ static void test_redirections(void) {
     CHECK_INT(p.count, 1);
     CHECK_INT(argument_count(&p.commands[0]), 1);
     CHECK_STR(p.commands[0].input, "in.txt");
-    CHECK_STR(p.commands[0].output, "out.txt");
-    CHECK_INT(p.commands[0].append, 0);
+    CHECK_STR(file_of(&p.commands[0], 1), "out.txt");
+    CHECK_INT(append_of(&p.commands[0], 1), 0);
     winshell_freePipeline(&p);
 
     CHECK_INT(parse("echo hi >> log.txt", &p), 0);
-    CHECK_STR(p.commands[0].output, "log.txt");
-    CHECK_INT(p.commands[0].append, 1);
+    CHECK_STR(file_of(&p.commands[0], 1), "log.txt");
+    CHECK_INT(append_of(&p.commands[0], 1), 1);
     CHECK_INT(argument_count(&p.commands[0]), 2);
     winshell_freePipeline(&p);
 
     CHECK_INT(parse("cat nosuch 2> err.txt", &p), 0);
-    CHECK_STR(p.commands[0].errput, "err.txt");
-    CHECK_INT(p.commands[0].errAppend, 0);
+    CHECK_STR(file_of(&p.commands[0], 2), "err.txt");
+    CHECK_INT(append_of(&p.commands[0], 2), 0);
     CHECK_INT(argument_count(&p.commands[0]), 2);
     winshell_freePipeline(&p);
 
     CHECK_INT(parse("cat nosuch 2>> err.txt", &p), 0);
-    CHECK_STR(p.commands[0].errput, "err.txt");
-    CHECK_INT(p.commands[0].errAppend, 1);
+    CHECK_STR(file_of(&p.commands[0], 2), "err.txt");
+    CHECK_INT(append_of(&p.commands[0], 2), 1);
     winshell_freePipeline(&p);
 
     // no spaces needed, and the redirection may come first
     CHECK_INT(parse("echo hi>out.txt", &p), 0);
     CHECK_INT(argument_count(&p.commands[0]), 2);
     CHECK_STR(p.commands[0].argv[1], "hi");
-    CHECK_STR(p.commands[0].output, "out.txt");
+    CHECK_STR(file_of(&p.commands[0], 1), "out.txt");
     winshell_freePipeline(&p);
 
     CHECK_INT(parse("> out.txt echo hi", &p), 0);
     CHECK_STR(p.commands[0].argv[0], "echo");
-    CHECK_STR(p.commands[0].output, "out.txt");
+    CHECK_STR(file_of(&p.commands[0], 1), "out.txt");
     winshell_freePipeline(&p);
 
     // a 2 is a file descriptor only when it sticks to the operator
     CHECK_INT(parse("echo 2 > out.txt", &p), 0);
     CHECK_INT(argument_count(&p.commands[0]), 2);
     CHECK_STR(p.commands[0].argv[1], "2");
-    CHECK_STR(p.commands[0].output, "out.txt");
-    CHECK(p.commands[0].errput == NULL);
+    CHECK_STR(file_of(&p.commands[0], 1), "out.txt");
+    CHECK(file_of(&p.commands[0], 2) == NULL);
     winshell_freePipeline(&p);
 
     CHECK_INT(parse("echo a2>out.txt", &p), 0);
     CHECK_STR(p.commands[0].argv[1], "a2");
-    CHECK_STR(p.commands[0].output, "out.txt");
+    CHECK_STR(file_of(&p.commands[0], 1), "out.txt");
     winshell_freePipeline(&p);
 
     // the last of two redirections of the same kind wins
     CHECK_INT(parse("echo hi > a.txt > b.txt", &p), 0);
-    CHECK_STR(p.commands[0].output, "b.txt");
+    CHECK_STR(file_of(&p.commands[0], 1), "b.txt");
     winshell_freePipeline(&p);
 
     // a pipeline with redirections on its ends
     CHECK_INT(parse("cat < in.txt | cat -n > out.txt", &p), 0);
     CHECK_INT(p.count, 2);
     CHECK_STR(p.commands[0].input, "in.txt");
-    CHECK(p.commands[0].output == NULL);
+    CHECK(file_of(&p.commands[0], 1) == NULL);
     CHECK(p.commands[1].input == NULL);
-    CHECK_STR(p.commands[1].output, "out.txt");
+    CHECK_STR(file_of(&p.commands[1], 1), "out.txt");
     winshell_freePipeline(&p);
 
     // quoted file names
     CHECK_INT(parse("echo hi > \"my file.txt\"", &p), 0);
-    CHECK_STR(p.commands[0].output, "my file.txt");
+    CHECK_STR(file_of(&p.commands[0], 1), "my file.txt");
     winshell_freePipeline(&p);
 
     mute_stderr();
@@ -303,7 +323,7 @@ static void test_patterns(void) {
 
     // file names of redirections are never patterns
     CHECK_INT(parse("echo hi > *.out", &p), 0);
-    CHECK_STR(p.commands[0].output, "*.out");
+    CHECK_STR(file_of(&p.commands[0], 1), "*.out");
     winshell_freePipeline(&p);
 
     // many words with patterns
@@ -395,7 +415,7 @@ static void test_variables(void) {
     CHECK_INT(p.count, 1);
     CHECK_INT(argument_count(&p.commands[0]), 2);
     CHECK_STR(p.commands[0].argv[1], "a|b>c");
-    CHECK(p.commands[0].output == NULL);
+    CHECK(file_of(&p.commands[0], 1) == NULL);
     winshell_freePipeline(&p);
 
     // wildcards in a value act, unless it is quoted
@@ -420,7 +440,7 @@ static void test_variables(void) {
 
     // in a redirection
     CHECK_INT(parse("echo hi > $PT_NAME.txt", &p), 0);
-    CHECK_STR(p.commands[0].output, "name.txt");
+    CHECK_STR(file_of(&p.commands[0], 1), "name.txt");
     winshell_freePipeline(&p);
 
     // in a quoted word with a quote in front of it
@@ -570,11 +590,11 @@ static void test_assignments(void) {
 
     // a redirection before the assignment, and its file name
     CHECK_INT(parse("> out.txt A=1 echo", &p), 0);
-    CHECK_STR(p.commands[0].output, "out.txt");
+    CHECK_STR(file_of(&p.commands[0], 1), "out.txt");
     CHECK_INT(p.commands[0].assignmentCount, 1);
     winshell_freePipeline(&p);
     CHECK_INT(parse("echo > A=1", &p), 0);
-    CHECK_STR(p.commands[0].output, "A=1");
+    CHECK_STR(file_of(&p.commands[0], 1), "A=1");
     CHECK_INT(p.commands[0].assignmentCount, 0);
     winshell_freePipeline(&p);
 
@@ -598,7 +618,7 @@ static void test_duplication(void) {
     CHECK_INT(c->redirects[0].fd, 2);
     CHECK(c->redirects[0].file == NULL);
     CHECK_INT(c->redirects[0].dupOf, 1);
-    CHECK(c->errput == NULL && c->output == NULL);
+    CHECK(file_of(c, 2) == NULL && file_of(c, 1) == NULL);
     winshell_freePipeline(&p);
 
     CHECK_INT(parse("echo hi 1>&2", &p), 0);
@@ -625,15 +645,15 @@ static void test_duplication(void) {
     CHECK_INT(c->redirects[2].fd, 2);
     CHECK_STR(c->redirects[2].file, "b.txt");
     CHECK_INT(c->redirects[2].append, 1);
-    CHECK_STR(c->output, "a.txt");
-    CHECK_STR(c->errput, "b.txt");
+    CHECK_STR(file_of(c, 1), "a.txt");
+    CHECK_STR(file_of(c, 2), "b.txt");
     winshell_freePipeline(&p);
 
     // more than a few redirections, and the end of a word right after
     CHECK_INT(parse("cat >a >b >c >d >e 2>&1|cat", &p), 0);
     CHECK_INT(p.count, 2);
     CHECK_INT(p.commands[0].redirectCount, 6);
-    CHECK_STR(p.commands[0].output, "e");
+    CHECK_STR(file_of(&p.commands[0], 1), "e");
     winshell_freePipeline(&p);
 
     // &> and &>>
@@ -662,7 +682,7 @@ static void test_duplication(void) {
 
     // a quoted &1 is a file name
     CHECK_INT(parse("echo hi > '&1'", &p), 0);
-    CHECK_STR(p.commands[0].output, "&1");
+    CHECK_STR(file_of(&p.commands[0], 1), "&1");
     CHECK_INT(p.commands[0].redirectCount, 1);
     CHECK(p.commands[0].redirects[0].file != NULL);
     winshell_freePipeline(&p);

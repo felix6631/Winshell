@@ -6,6 +6,7 @@
 #include <windows.h>
 #include "cmdline.h"
 #include "vpath.h"
+#include "program.h"
 #include "args.h"
 
 #define VERSION "0.1"
@@ -81,39 +82,6 @@ static int is_assignment(const char* word) {
     return equals != NULL && equals != word;
 }
 
-/** The program to start: a path of the virtual file system, or a name in the directory of env.exe. */
-static int resolve_program(const char* program, char* path, size_t size) {
-    size_t length = strlen(program);
-    int written;
-
-    if (strchr(program, '/') != NULL || strchr(program, '\\') != NULL) {
-        char native[VPATH_MAX];
-        if (vpath_to_native(program, native, sizeof native) != 0)
-            return -1;
-        written = snprintf(path, size, "%s", native);
-        if (written >= 0 && (size_t)written < size && GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES &&
-            !(length >= 4 && _stricmp(program + length - 4, ".exe") == 0))
-            written = snprintf(path, size, "%s.exe", native);
-    } else {
-        char directory[MAX_PATH];
-        DWORD n = GetModuleFileNameA(NULL, directory, MAX_PATH);
-        char* separator;
-        if (n == 0 || n >= MAX_PATH)
-            return -1;
-        separator = strrchr(directory, '\\');
-        if (separator == NULL)
-            return -1;
-        *separator = '\0';
-        if (length >= 4 && _stricmp(program + length - 4, ".exe") == 0)
-            written = snprintf(path, size, "%s\\%s", directory, program);
-        else
-            written = snprintf(path, size, "%s\\%s.exe", directory, program);
-    }
-    if (written < 0 || (size_t)written >= size)
-        return -1;
-    return GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES ? -1 : 0;
-}
-
 static int run(char* const argv[], const Environment* e) {
     char path[MAX_PATH * 2];
     char* command;
@@ -123,7 +91,7 @@ static int run(char* const argv[], const Environment* e) {
     PROCESS_INFORMATION pi;
     DWORD code;
 
-    if (resolve_program(argv[0], path, sizeof path) != 0) {
+    if (program_find(argv[0], path, sizeof path) != 0) {
         fprintf(stderr, "env: '%s': No such file or directory\n", argv[0]);
         return 127;
     }
