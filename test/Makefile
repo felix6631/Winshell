@@ -65,9 +65,9 @@ $(OUT)\vpath_test.exe: vpath_test.c testlib.h ..\common\vpath.c ..\common\vpath.
 	@if not exist $(OUT) mkdir $(OUT)
 	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ vpath_test.c ..\common\vpath.c
 
-$(OUT)\parser_test.exe: parser_test.c testlib.h ..\shell\src\parser.c ..\shell\include\parser.h ..\common\vpath.c
+$(OUT)\parser_test.exe: parser_test.c testlib.h ..\shell\src\parser.c ..\shell\src\variables.c ..\shell\include\parser.h ..\shell\include\variables.h ..\common\vpath.c
 	@if not exist $(OUT) mkdir $(OUT)
-	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ parser_test.c ..\shell\src\parser.c ..\common\vpath.c
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ parser_test.c ..\shell\src\parser.c ..\shell\src\variables.c ..\common\vpath.c
 
 clean:
 	@if exist out rmdir /s /q out

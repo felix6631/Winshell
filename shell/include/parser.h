@@ -15,13 +15,24 @@
  * redirections written next to it.
  */
 typedef struct {
-    LPSTR* argv;        // NULL-terminated; argv[0] is the program name
+    int    fd;          // 1 (standard output) or 2 (standard error)
+    LPSTR  file;        // the file it goes to, or NULL for a copy of another descriptor
+    int    append;      // non-zero for ">>"
+    int    dupOf;       // when file is NULL: 1 or 2, the descriptor this one becomes a copy of
+} Redirect;
+
+typedef struct {
+    LPSTR* argv;        // NULL-terminated; argv[0] is the program name; NULL for NAME=value alone
     LPSTR* patterns;    // same length as argv: the glob pattern of a word, or NULL
     LPSTR  input;       // "< file"   or NULL
-    LPSTR  output;      // "> file" / ">> file"   or NULL
+    LPSTR  output;      // the file of the last "> file" / ">> file"   or NULL
     int    append;      // non-zero for ">>"
-    LPSTR  errput;      // "2> file" / "2>> file"   or NULL
+    LPSTR  errput;      // the file of the last "2> file" / "2>> file"   or NULL
     int    errAppend;   // non-zero for "2>>"
+    Redirect* redirects;    // every redirection of standard output and error, in the order written
+    size_t    redirectCount;
+    LPSTR* assignments; // the "NAME=value" words in front of the command
+    size_t assignmentCount;
 } Command;
 
 /** Commands connected with '|'. A blank line gives a pipeline of zero commands. */
@@ -80,7 +91,17 @@ void winshell_freeList(CommandList* list);
  *   >> file   append standard output to file
  *   2> file   write standard error to file, replacing it
  *   2>> file  append standard error to file
- * Operators need no surrounding spaces: "a>b|c" works.
+ *   2>&1      standard error goes where standard output goes
+ *   1>&2, >&2 standard output goes where standard error goes
+ *   &> file   standard output and error to file (&>> appends)
+ * Operators need no surrounding spaces: "a>b|c" works. Redirections of
+ * standard output and error are applied in the order they are written, so
+ * "a >f 2>&1" sends both to f, and "a 2>&1 >f" sends only the output to f.
+ *
+ * Assignments: words of the form NAME=value in front of the command name.
+ * Alone they set variables of the shell (see variables.h); in front of a
+ * command they are in the environment of that command only. The value is
+ * not split into words and has no wildcards; ~ at its start is $HOME.
  *
  * Quoting (operators and wildcards lose their meaning inside quotes):
  *   'text'   everything inside is taken literally

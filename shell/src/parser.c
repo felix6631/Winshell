@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include "parser.h"
 #include "vpath.h"
+#include "variables.h"
 
 #define DELIMITERS " \t\r\n"
 
@@ -20,7 +21,11 @@ typedef enum {
     LEX_OUTPUT,       // >
     LEX_APPEND,       // >>
     LEX_ERROR,        // 2>
-    LEX_ERROR_APPEND  // 2>>
+    LEX_ERROR_APPEND, // 2>>
+    LEX_ASSIGN,       // NAME=value in front of the command
+    LEX_DUP,          // 2>&1, 1>&2: fd becomes a copy of target
+    LEX_BOTH,         // &>
+    LEX_BOTH_APPEND   // &>>
 } LexemeType;
 
 typedef struct {
@@ -28,7 +33,8 @@ typedef struct {
     size_t     textOffset;      // into the text buffer, only for LEX_WORD
     size_t     patternOffset;   // into the pattern buffer
     int        hasPattern;      // the word has wildcards
-    LPSTR      text;            // set when the buffers are final
+    int        fd, target;      // only for LEX_DUP
+    LPSTR      text;           // set when the buffers are final
     LPSTR      pattern;
 } Lexeme;
 
@@ -112,7 +118,7 @@ static const char* variable_value(const char* name, char* scratch, size_t size) 
         return scratch;
     }
 
-    value = getenv(name);
+    value = var_get(name);
     if (value != NULL)
         return value;
 
@@ -133,6 +139,11 @@ typedef struct {
     Lexeme*   lexemes;
     size_t    count, capacity;
     int       failed;
+    int       isAssign;         // the word being read is NAME=value
+    size_t    assignValue;      // where its value starts in text
+    int       dirty;            // the word has a variable or ~ in it: no NAME= can follow
+    int       commandWords;     // words of the command so far, not counting assignments and file names
+    int       expectFile;       // the last lexeme was a redirection that takes a file name
 } Lexer;
 
 static void lexer_push(Lexer* L, LexemeType type, size_t textOffset, size_t patternOffset, int hasPattern) {
@@ -152,6 +163,8 @@ static void lexer_push(Lexer* L, LexemeType type, size_t textOffset, size_t patt
     L->lexemes[L->count].hasPattern = hasPattern;
     L->lexemes[L->count].text = NULL;
     L->lexemes[L->count].pattern = NULL;
+    L->lexemes[L->count].fd = 0;
+    L->lexemes[L->count].target = 0;
     L->count++;
 }
 
@@ -172,12 +185,48 @@ static void lexer_word(Lexer* L, size_t* wordStart, size_t* patStart, int* quote
         text_put(&L->pat, '\0');
         {
             const CHAR* pattern = L->pat.data + *patStart;
-            lexer_push(L, LEX_WORD, *wordStart, *patStart, pattern_is_active(pattern));
+            if (L->isAssign) {
+                lexer_push(L, LEX_ASSIGN, *wordStart, *patStart, 0);
+            } else {
+                lexer_push(L, LEX_WORD, *wordStart, *patStart, pattern_is_active(pattern));
+                if (L->expectFile)
+                    L->expectFile = 0;
+                else
+                    L->commandWords++;
+            }
         }
         *wordStart = L->text.length;
         *patStart = L->pat.length;
     }
     *quoted = 0;
+}
+
+/** At an '&' after '>': 1 or 2 for "&1" or "&2" that ends a word, 0 for anything else. */
+static int dup_target(const CHAR* p) {
+    CHAR after;
+    if (p[0] != '&' || (p[1] != '1' && p[1] != '2'))
+        return 0;
+    after = p[2];
+    if (after != '\0' && !is_delimiter(after) && after != '|' && after != '<' && after != '>')
+        return 0;
+    return p[1] - '0';
+}
+
+/** Whether text[0..length) is a variable name, which an assignment starts with. */
+static int is_assignment_name(const CHAR* text, size_t length) {
+    size_t i;
+    if (length == 0 || !is_name_start(text[0]))
+        return 0;
+    for (i = 1; i < length; i++)
+        if (!is_name_char(text[i]))
+            return 0;
+    return 1;
+}
+
+static void lexer_free(Lexer* L) {
+    free(L->lexemes);
+    free(L->text.data);
+    free(L->pat.data);
 }
 
 /**
@@ -208,24 +257,55 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, CHAR** patternsOut, Lexe
             continue;
         }
 
+        L.isAssign = 0;
+        L.dirty = 0;
+
         if (*read == '|') {
             lexer_push(&L, LEX_PIPE, 0, 0, 0);
+            L.commandWords = 0;
+            L.expectFile = 0;
             read++;
             continue;
         }
         if (*read == '<') {
             lexer_push(&L, LEX_INPUT, 0, 0, 0);
+            L.expectFile = 1;
             read++;
+            continue;
+        }
+        if (*read == '&' && read[1] == '>') {
+            // &> and &>>: output and error to the same file
+            LexemeType type = LEX_BOTH;
+            read += 2;
+            if (*read == '>') {
+                type = LEX_BOTH_APPEND;
+                read++;
+            }
+            lexer_push(&L, type, 0, 0, 0);
+            L.expectFile = 1;
             continue;
         }
         if (*read == '>') {
             LexemeType type = LEX_OUTPUT;
-            if (read[1] == '>') {
+            read++;
+            if (*read == '>') {
                 type = LEX_APPEND;
                 read++;
             }
+            if (*read == '&') {
+                if (type == LEX_OUTPUT && dup_target(read) != 0) {
+                    lexer_push(&L, LEX_DUP, 0, 0, 0);
+                    L.lexemes[L.count - 1].fd = 1;
+                    L.lexemes[L.count - 1].target = dup_target(read);
+                    read += 2;
+                    continue;
+                }
+                fprintf(stderr, "Error: Syntax error: '&' after '>' must be followed by 1 or 2\n");
+                lexer_free(&L);
+                return -1;
+            }
             lexer_push(&L, type, 0, 0, 0);
-            read++;
+            L.expectFile = 1;
             continue;
         }
 
@@ -306,9 +386,10 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, CHAR** patternsOut, Lexe
                     name[length] = '\0';
                     value = variable_value(name, scratch, sizeof scratch);
                     read = after;
+                    L.dirty = 1;
                     if (value != NULL) {
                         for (; *value != '\0'; value++) {
-                            if (quote == '"') {
+                            if (quote == '"' || L.isAssign) {
                                 lexer_char(&L, *value, 1);          // one piece, and no wildcards
                             } else if (*value == ' ' || *value == '\t' || *value == '\n' || *value == '\r') {
                                 lexer_word(&L, &wordStart, &patStart, &quoted);     // split at blanks
@@ -318,7 +399,8 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, CHAR** patternsOut, Lexe
                         }
                     }
                 }
-            } else if (c == '~' && quote == '\0' && !quoted && L.text.length == wordStart &&
+            } else if (c == '~' && quote == '\0' && !quoted &&
+                       (L.text.length == wordStart || (L.isAssign && L.text.length == L.assignValue)) &&
                        (read[1] == '\0' || read[1] == '/' || read[1] == '\\' || is_delimiter(read[1]) ||
                         read[1] == '|' || read[1] == '<' || read[1] == '>')) {
                 // a lone ~ at the start of a word is the home directory
@@ -328,6 +410,7 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, CHAR** patternsOut, Lexe
                     for (; *home != '\0'; home++)
                         lexer_char(&L, *home, 1);
                     quoted = 1;             // an empty value would still be a word
+                    L.dirty = 1;
                 } else {
                     lexer_char(&L, '~', 0);
                 }
@@ -335,18 +418,44 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, CHAR** patternsOut, Lexe
             } else if (quote != '\0') {
                 lexer_char(&L, c, 1);
                 read++;
-            } else if (c == '>' && !quoted && L.text.length - wordStart == 1 && L.text.data[wordStart] == '2') {
-                // "2>" and "2>>": the 2 is a file descriptor, not an argument
-                LexemeType type = LEX_ERROR;
-                if (read[1] == '>') {
-                    type = LEX_ERROR_APPEND;
+            } else if (c == '>' && !quoted && !L.dirty && L.text.length - wordStart == 1 &&
+                       (L.text.data[wordStart] == '2' || L.text.data[wordStart] == '1')) {
+                // "2>", "2>>", "1>", "1>>": the digit is a file descriptor, not an argument
+                int fd = L.text.data[wordStart] - '0';
+                int append = 0;
+                read++;
+                if (*read == '>') {
+                    append = 1;
                     read++;
                 }
-                read++;
                 L.text.length = wordStart;
                 L.pat.length = patStart;
-                lexer_push(&L, type, 0, 0, 0);
+                if (*read == '&') {
+                    if (!append && dup_target(read) != 0) {
+                        lexer_push(&L, LEX_DUP, 0, 0, 0);
+                        L.lexemes[L.count - 1].fd = fd;
+                        L.lexemes[L.count - 1].target = dup_target(read);
+                        read += 2;
+                        operatorDone = 1;
+                        continue;
+                    }
+                    fprintf(stderr, "Error: Syntax error: '&' after '>' must be followed by 1 or 2\n");
+                    lexer_free(&L);
+                    return -1;
+                }
+                if (fd == 2)
+                    lexer_push(&L, append ? LEX_ERROR_APPEND : LEX_ERROR, 0, 0, 0);
+                else
+                    lexer_push(&L, append ? LEX_APPEND : LEX_OUTPUT, 0, 0, 0);
+                L.expectFile = 1;
                 operatorDone = 1;
+            } else if (c == '=' && !L.isAssign && !quoted && !L.dirty && L.commandWords == 0 && !L.expectFile &&
+                       is_assignment_name(L.text.data + wordStart, L.text.length - wordStart)) {
+                // NAME=value in front of the command: the value is one word and has no wildcards
+                L.isAssign = 1;
+                lexer_char(&L, '=', 0);
+                L.assignValue = L.text.length;
+                read++;
             } else if (is_delimiter(c) || c == '|' || c == '<' || c == '>') {
                 break;
             } else {
@@ -378,7 +487,7 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, CHAR** patternsOut, Lexe
 
     // the buffers do not move any more: the offsets become pointers
     for (i = 0; i < L.count; i++) {
-        if (L.lexemes[i].type == LEX_WORD) {
+        if (L.lexemes[i].type == LEX_WORD || L.lexemes[i].type == LEX_ASSIGN) {
             L.lexemes[i].text = L.text.data + L.lexemes[i].textOffset;
             L.lexemes[i].pattern = L.lexemes[i].hasPattern ? L.pat.data + L.lexemes[i].patternOffset : NULL;
         }
@@ -399,6 +508,8 @@ static const char* operator_name(LexemeType type) {
         case LEX_APPEND:       return ">>";
         case LEX_ERROR:        return "2>";
         case LEX_ERROR_APPEND: return "2>>";
+        case LEX_BOTH:         return "&>";
+        case LEX_BOTH_APPEND:  return "&>>";
         default:                 return "";
     }
 }
@@ -443,6 +554,46 @@ static int add_argument(Command* command, size_t* argc, size_t* capacity, LPSTR 
     return 0;
 }
 
+/** Whether an array that holds count items has to grow for one more (it doubles from 4). */
+static int needs_room(size_t count) {
+    return count == 0 || (count >= 4 && (count & (count - 1)) == 0);
+}
+
+static int add_redirect(Command* command, int fd, LPSTR file, int append, int dupOf) {
+    Redirect* redirect;
+
+    if (needs_room(command->redirectCount)) {
+        size_t capacity = command->redirectCount == 0 ? 4 : command->redirectCount * 2;
+        Redirect* grown = realloc(command->redirects, capacity * sizeof *grown);
+        if (grown == NULL)
+            return -1;
+        command->redirects = grown;
+    }
+    redirect = &command->redirects[command->redirectCount++];
+    redirect->fd = fd;
+    redirect->file = file;
+    redirect->append = append;
+    redirect->dupOf = dupOf;
+    return 0;
+}
+
+static int add_assignment(Command* command, LPSTR assignment) {
+    if (needs_room(command->assignmentCount)) {
+        size_t capacity = command->assignmentCount == 0 ? 4 : command->assignmentCount * 2;
+        LPSTR* grown = realloc(command->assignments, capacity * sizeof *grown);
+        if (grown == NULL)
+            return -1;
+        command->assignments = grown;
+    }
+    command->assignments[command->assignmentCount++] = assignment;
+    return 0;
+}
+
+/** A command that has neither a program nor an assignment is not a command. */
+static int has_nothing_to_run(const Command* command) {
+    return command->argv == NULL && command->assignmentCount == 0;
+}
+
 int winshell_parse(const CHAR* line, Pipeline* pipeline) {
     Lexeme* lexemes;
     size_t lexemeCount, i;
@@ -466,15 +617,29 @@ int winshell_parse(const CHAR* line, Pipeline* pipeline) {
             if (add_argument(current, &argc, &argvCapacity, lexeme->text, lexeme->pattern) != 0)
                 goto err_memory;
         } else if (lexeme->type == LEX_PIPE) {
-            if (current == NULL || current->argv == NULL) {
+            if (current == NULL || has_nothing_to_run(current)) {
                 fprintf(stderr, "Error: Syntax error: missing command before '|'\n");
                 goto err_syntax;
             }
             current = NULL;
+        } else if (lexeme->type == LEX_ASSIGN || lexeme->type == LEX_DUP) {
+            if (current == NULL) {
+                current = add_command(pipeline, &commandCapacity);
+                if (current == NULL)
+                    goto err_memory;
+                argc = argvCapacity = 0;
+            }
+            if (lexeme->type == LEX_ASSIGN) {
+                if (add_assignment(current, lexeme->text) != 0)
+                    goto err_memory;
+            } else if (add_redirect(current, lexeme->fd, NULL, 0, lexeme->target) != 0) {
+                goto err_memory;
+            }
         } else {
             // a redirection: the next lexeme has to be the file name
             LPSTR* target;
             int* append = NULL;
+            int both = lexeme->type == LEX_BOTH || lexeme->type == LEX_BOTH_APPEND;
 
             if (i + 1 >= lexemeCount || lexemes[i + 1].type != LEX_WORD) {
                 fprintf(stderr, "Error: Syntax error: file name expected after '%s'\n", operator_name(lexeme->type));
@@ -493,9 +658,19 @@ int winshell_parse(const CHAR* line, Pipeline* pipeline) {
                 case LEX_OUTPUT:       target = &current->output;  append = &current->append;    *append = 0; break;
                 case LEX_APPEND:       target = &current->output;  append = &current->append;    *append = 1; break;
                 case LEX_ERROR:        target = &current->errput;  append = &current->errAppend; *append = 0; break;
-                default:                 target = &current->errput;  append = &current->errAppend; *append = 1; break;
+                case LEX_ERROR_APPEND: target = &current->errput;  append = &current->errAppend; *append = 1; break;
+                case LEX_BOTH:         target = &current->output;  append = &current->append;    *append = 0; break;
+                default:                 target = &current->output;  append = &current->append;    *append = 1; break;
             }
             *target = lexemes[++i].text;
+
+            // standard output and error go through the list in the order they were written
+            if (lexeme->type == LEX_INPUT)
+                continue;
+            if (add_redirect(current, (target == &current->errput) ? 2 : 1, *target, *append, 0) != 0)
+                goto err_memory;
+            if (both && add_redirect(current, 2, NULL, 0, 1) != 0)
+                goto err_memory;
         }
     }
 
@@ -505,7 +680,7 @@ int winshell_parse(const CHAR* line, Pipeline* pipeline) {
         goto err_syntax;
     }
     for (i = 0; i < pipeline->count; i++) {
-        if (pipeline->commands[i].argv == NULL) {
+        if (has_nothing_to_run(&pipeline->commands[i])) {
             fprintf(stderr, "Error: Syntax error: missing command\n");
             goto err_syntax;
         }
@@ -527,6 +702,8 @@ void winshell_freePipeline(Pipeline* pipeline) {
     for (i = 0; i < pipeline->count; i++) {
         free(pipeline->commands[i].argv);
         free(pipeline->commands[i].patterns);
+        free(pipeline->commands[i].redirects);
+        free(pipeline->commands[i].assignments);
     }
     for (i = 0; i < pipeline->ownedCount; i++)
         free(pipeline->owned[i]);
@@ -626,8 +803,13 @@ int winshell_parse_list(const CHAR* line, CommandList* list) {
             } else if (c == '|' && line[i + 1] == '|') {
                 op = LIST_OR;
                 operatorLength = 2;
+            } else if (c == '&' && (i > 0 && line[i - 1] == '>')) {
+                continue;       // 2>&1 and the like belong to the segment
+            } else if (c == '&' && line[i + 1] == '>') {
+                i++;            // &> and &>>
+                continue;
             } else if (c == '&') {
-                fprintf(stderr, "Error: Syntax error: '&' is not supported (no background commands, no 2>&1)\n");
+                fprintf(stderr, "Error: Syntax error: '&' is not supported (no background commands)\n");
                 goto err;
             } else if (c == '|') {
                 continue;       // a pipe belongs to the segment

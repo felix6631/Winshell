@@ -6,7 +6,7 @@ Winshell is a project and toolchain for using a Linux-style shell and coreutils 
 It is written in plain C on top of the Win32 API, and aims to run as far back as Windows XP.
 
 > **Status: early development.** The shell reads a line and runs `bin\<command>.exe`;
-> `2>&1`, background jobs (`&`), control structures and shell functions are not implemented yet.
+> background jobs (`&`), control structures and shell functions are not implemented yet.
 
 ## Implemented
 
@@ -40,7 +40,7 @@ See [Planned](#planned) for what is still to come.
 - The goal is to do the same job as the Linux commands; only what does not work as is on Windows is adapted to Windows.
   (For example, `cat` does not translate bytes and treats a CR LF pair as one line ending.)
 - Exit with `exit [N]` or `quit`; without N the status of the last command is used. End of input (Ctrl+Z, Enter) also exits.
-- **Builtins:** `cd [DIR]`, `export NAME=VALUE...` (alone it lists the variables), `unset NAME...`, `exit [N]`, `quit`.
+- **Builtins:** `cd [DIR]`, `export NAME[=VALUE]...` (alone it lists the variables), `unset NAME...`, `exit [N]`, `quit`.
 - **Lists of commands**
   - `a ; b`: run b after a, always.
   - `a && b`: run b only when a succeeded (status 0).
@@ -48,8 +48,13 @@ See [Planned](#planned) for what is still to come.
   - They are evaluated from left to right (`a && b || c` is `(a && b) || c`), and a command that is skipped does not change the status.
   - Each command is parsed when its turn has come, so `cd dir && ls *` sees the directory and the variables the previous command left.
   - The status of a pipeline is that of its last command. A program that is not found gives 127, a syntax error 2, a program stopped with Ctrl+C 130.
+- **Assignment**
+  - `NAME=value` alone sets a variable of the shell. Only the shell knows it and the programs do not get it; `export NAME` puts it in the environment, and the programs started afterwards have it. Assigning to a variable that is already exported keeps it exported.
+  - `NAME=value command` sets the variable in the environment of that command only; the variables of the shell do not change. Only the command position makes an assignment (the `A=1` of `echo A=1` is an argument), and a quote in the name or around the `=` makes it a plain word.
+  - The value stays one word and has no wildcards. A `~` at its start is `$HOME`. The blanks of a `$B` in `A=$B` do not split it.
+  - Expansion happens before the assignment, so `A=1 echo $A` sees the previous `$A`. `A=1 | cat` in a pipeline does not change the variables of the shell.
 - **Variables**
-  - `$NAME` and `${NAME}` are replaced by the value of the environment variable, `$?` by the status of the last command. Names are not case sensitive, like Windows names.
+  - `$NAME` and `${NAME}` are replaced by the value of the shell variable or of the environment variable, `$?` by the status of the last command. Names are not case sensitive, like Windows names.
   - In double quotes the value stays one word; outside of quotes it is cut at blanks into words, and wildcards in it act. Inside single quotes nothing is expanded. A variable that is not set makes no word when it stands alone outside of quotes.
   - A `$` that starts no name is just a `$`. Write a literal `$NAME` in single quotes (`\` is the path separator and is no escape).
   - `|`, `>`, `;` and the like in a value are not operators.
@@ -74,8 +79,11 @@ See [Planned](#planned) for what is still to come.
   - `> file`, `>> file`: write standard output to a file (replacing it), or append to it.
   - `2> file`, `2>> file`: write standard error to a file, or append to it.
   - Spaces around operators are optional (`echo hi>out.txt`). Operators have no meaning inside quotes.
+  - `2>&1`: send standard error where standard output goes. `1>&2` (`>&2`) is the other way round.
+  - `&> file`, `&>> file`: write standard output and standard error to the same file.
+  - Redirections of standard output and error are applied in the order written: `a > f 2>&1` sends both to f, `a 2>&1 > f` sends the error to the old output and only the output to f.
   - A redirection takes precedence over a pipe. The exit code of the last command is the result.
-  - `2>&1` and `&` (background jobs) are not supported yet; a lone `&` is a syntax error.
+  - `&` (background jobs) is not supported yet; a lone `&` is a syntax error.
 - **Ctrl+C / Ctrl+Break**
   - While a program is running, only that program is interrupted and the shell keeps running.
   - At the prompt the shell does not exit; it discards the line being typed.
@@ -191,7 +199,7 @@ A sub-project's `Makefile` must provide `all` and `clean` rules and accept the o
 
 ## Planned
 
-**Shell features**: `2>&1`, background jobs (`&`), variable assignment (`NAME=value`), brace expansion, command substitution (`$(...)`), `if`/`for`/`while`
+**Shell features**: background jobs (`&`), brace expansion, command substitution (`$(...)`), `if`/`for`/`while`
 
 **coreutils**
 

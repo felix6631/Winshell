@@ -156,10 +156,93 @@ static void test_variables(void) {
     }
 }
 
+/** NAME=value alone, in front of a command, and what export makes of them. */
+static void test_assignments(void) {
+    RunResult r;
+    char expected[MAX_PATH * 3], home[MAX_PATH];
+    const char* userProfile;
+
+    printf("assignments\n");
+
+    // a shell started by the script shows which variables a program gets
+    write_text(workDir, "probe_a.txt", "echo \"[$WS_A]\"\n");
+    write_text(workDir, "probe_b.txt", "echo \"[$WS_B]\"\n");
+
+    SCRIPT_OUT("WS_V=1; echo $WS_V\n", "1\n");
+    SCRIPT_OUT("WS_V=1 WS_W=2; echo $WS_V $WS_W\n", "1 2\n");
+    SCRIPT_OUT("WS_V=one; WS_V=two; echo $WS_V\n", "two\n");
+    SCRIPT_OUT("WS_V=a=b; echo $WS_V\n", "a=b\n");
+    SCRIPT_OUT("WS_V=; echo [$WS_V]\n", "[]\n");
+    SCRIPT_OUT("WS_V=1; echo $?\n", "0\n");
+    SCRIPT_OUT("WS_V=1 && echo ok\n", "ok\n");
+    SCRIPT_OUT("WS_V=1; WS_U=$WS_V$WS_V; echo $WS_U\n", "11\n");
+
+    // quotes are removed and keep the value in one piece
+    SCRIPT_OUT("WS_V=\"x   y\"; echo \"$WS_V\"\n", "x   y\n");
+    SCRIPT_OUT("WS_V='$a b'; echo \"$WS_V\"\n", "$a b\n");
+    SCRIPT_OUT("WS_V=a\"b c\"d; echo \"$WS_V\"\n", "ab cd\n");
+
+    // no word splitting and no wildcards in the value, also when it comes from a variable
+    _putenv_s("WS_SP", "a   b");
+    SCRIPT_OUT("WS_V=$WS_SP; echo \"$WS_V\"\n", "a   b\n");
+    SCRIPT_OUT("WS_V=*.txt; echo \"$WS_V\"\n", "*.txt\n");
+
+    // ~ at the start of the value is the home directory
+    if (getenv("HOME") != NULL) {
+        snprintf(home, sizeof home, "%s", getenv("HOME"));
+    } else {
+        userProfile = getenv("USERPROFILE");
+        expected_virtual(userProfile != NULL ? userProfile : "", home, sizeof home);
+    }
+    snprintf(expected, sizeof expected, "%s/x\n", home);
+    SCRIPT_OUT("WS_V=~/x; echo \"$WS_V\"\n", expected);
+
+    // it is the command position that makes an assignment: anywhere else it is an argument
+    SCRIPT_OUT("echo WS_V=1\n", "WS_V=1\n");
+    SCRIPT_OUT("echo a WS_V=1 b\n", "a WS_V=1 b\n");
+    SCRIPT_OUT("echo \"WS_V\"=1\n", "WS_V=1\n");
+    script("\"WS_V\"=1\n", &r);
+    CHECK(strstr(r.err, "Failed to execute command") != NULL);
+    run_result_free(&r);
+    script("$WS_NOT_SET=1\n", &r);
+    CHECK(strstr(r.err, "Failed to execute command") != NULL);
+    run_result_free(&r);
+
+    // the variable is the shell's only: the programs do not get it, until it is exported
+    SCRIPT_OUT("WS_A=1; shell < probe_a.txt\n", "[]\n");
+    SCRIPT_OUT("WS_A=1; export WS_A; shell < probe_a.txt\n", "[1]\n");
+    SCRIPT_OUT("export WS_A; WS_A=2; shell < probe_a.txt\n", "[2]\n");
+    SCRIPT_OUT("WS_A=3; export WS_A=4; shell < probe_a.txt\n", "[4]\n");
+    SCRIPT_OUT("export WS_A=5; WS_A=6; shell < probe_a.txt\n", "[6]\n");     // stays exported
+    SCRIPT_OUT("export WS_A=5; unset WS_A; shell < probe_a.txt\n", "[]\n");
+    SCRIPT_OUT("WS_A=1; unset WS_A; echo [$WS_A]\n", "[]\n");
+
+    // in front of a command: the environment of that command only
+    SCRIPT_OUT("WS_B=hi shell < probe_b.txt\n", "[hi]\n");
+    SCRIPT_OUT("WS_B=hi shell < probe_b.txt; echo [$WS_B]\n", "[hi]\n[]\n");
+    SCRIPT_OUT("WS_B=set; WS_B=other shell < probe_b.txt; echo $WS_B\n", "[other]\nset\n");
+    SCRIPT_OUT("export WS_B=kept; WS_B=temp shell < probe_b.txt; shell < probe_b.txt\n", "[temp]\n[kept]\n");
+    SCRIPT_OUT("WS_B=1 WS_B=2 shell < probe_b.txt\n", "[2]\n");
+    SCRIPT_OUT("WS_B=hi echo [$WS_B]\n", "[]\n");                // expanded before it is set
+    SCRIPT_OUT("WS_B=hi echo done\n", "done\n");
+    // a command of a pipeline gets its own
+    SCRIPT_OUT("WS_B=left shell < probe_b.txt | cat\n", "[left]\n");
+
+    // its status and its redirections
+    SCRIPT_OUT("WS_B=1 cat nosuch.txt 2> assign_err.txt; echo $?\n", "1\n");
+    script("WS_V=1 > assign_made.txt\n", &r);
+    CHECK_STR(r.out, "");
+    run_result_free(&r);
+    CHECK(path_exists_in(workDir, "assign_made.txt"));
+    SCRIPT_OUT("WS_V=kept; WS_V=gone | cat; echo $WS_V\n", "kept\n");         // in a pipeline: not the shell's
+    SCRIPT_OUT("WS_V=1 > /c/nodrive_here/x.txt; echo $?\n", "1\n");
+}
+
 int main(void) {
     tools_init("shell_lists_test");
 
     test_lists();
     test_variables();
+    test_assignments();
     return test_summary("shell_lists_test");
 }

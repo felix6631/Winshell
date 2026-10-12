@@ -499,10 +499,190 @@ static void test_lists(void) {
     CHECK_INT(winshell_parse_list("a ||", &list), -1);
     CHECK_INT(winshell_parse_list("a && && b", &list), -1);
     CHECK_INT(winshell_parse_list("a & b", &list), -1);
-    CHECK_INT(winshell_parse_list("a 2>&1", &list), -1);
+    CHECK_INT(winshell_parse_list("a &", &list), -1);
+    CHECK_INT(winshell_parse_list("a & > f", &list), -1);
+}
+
+static void test_assignments(void) {
+    Pipeline p;
+    CommandList list;
+
+    printf("assignments\n");
+
+    // alone: no program, only the assignments
+    CHECK_INT(parse("A=1 B=two", &p), 0);
+    CHECK_INT(p.count, 1);
+    CHECK(p.commands[0].argv == NULL);
+    CHECK_INT(p.commands[0].assignmentCount, 2);
+    CHECK_STR(p.commands[0].assignments[0], "A=1");
+    CHECK_STR(p.commands[0].assignments[1], "B=two");
+    winshell_freePipeline(&p);
+
+    // in front of a command
+    CHECK_INT(parse("A=1 echo hi", &p), 0);
+    CHECK_INT(p.commands[0].assignmentCount, 1);
+    CHECK_STR(p.commands[0].assignments[0], "A=1");
+    CHECK_INT(argument_count(&p.commands[0]), 2);
+    CHECK_STR(p.commands[0].argv[0], "echo");
+    winshell_freePipeline(&p);
+
+    // not in front: an ordinary word
+    CHECK_INT(parse("echo A=1", &p), 0);
+    CHECK_INT(p.commands[0].assignmentCount, 0);
+    CHECK_STR(p.commands[0].argv[1], "A=1");
+    winshell_freePipeline(&p);
+
+    // a quoted name, a name made by a variable, a name that is not one
+    CHECK_INT(parse("\"A\"=1", &p), 0);
+    CHECK_INT(p.commands[0].assignmentCount, 0);
+    CHECK_STR(p.commands[0].argv[0], "A=1");
+    winshell_freePipeline(&p);
+    CHECK_INT(parse("1A=1 echo", &p), 0);
+    CHECK_INT(p.commands[0].assignmentCount, 0);
+    CHECK_STR(p.commands[0].argv[0], "1A=1");
+    winshell_freePipeline(&p);
+    CHECK_INT(parse("=1", &p), 0);
+    CHECK_INT(p.commands[0].assignmentCount, 0);
+    winshell_freePipeline(&p);
+
+    // the value: quotes removed, one piece, no wildcards
+    CHECK_INT(parse("A=\"x y\" B='*' C=a\\b D=", &p), 0);
+    CHECK_INT(p.commands[0].assignmentCount, 4);
+    CHECK_STR(p.commands[0].assignments[0], "A=x y");
+    CHECK_STR(p.commands[0].assignments[1], "B=*");
+    CHECK_STR(p.commands[0].assignments[2], "C=a\\b");
+    CHECK_STR(p.commands[0].assignments[3], "D=");
+    winshell_freePipeline(&p);
+    CHECK_INT(parse("A=*.c", &p), 0);
+    CHECK_STR(p.commands[0].assignments[0], "A=*.c");
+    CHECK(p.commands[0].argv == NULL);
+    winshell_freePipeline(&p);
+
+    // the next command of a pipeline has its own; assignments can be a command of the pipeline
+    CHECK_INT(parse("A=1 cat | B=2 sort", &p), 0);
+    CHECK_INT(p.count, 2);
+    CHECK_STR(p.commands[0].assignments[0], "A=1");
+    CHECK_STR(p.commands[1].assignments[0], "B=2");
+    winshell_freePipeline(&p);
+    CHECK_INT(parse("A=1 | cat", &p), 0);
+    CHECK(p.commands[0].argv == NULL);
+    winshell_freePipeline(&p);
+
+    // a redirection before the assignment, and its file name
+    CHECK_INT(parse("> out.txt A=1 echo", &p), 0);
+    CHECK_STR(p.commands[0].output, "out.txt");
+    CHECK_INT(p.commands[0].assignmentCount, 1);
+    winshell_freePipeline(&p);
+    CHECK_INT(parse("echo > A=1", &p), 0);
+    CHECK_STR(p.commands[0].output, "A=1");
+    CHECK_INT(p.commands[0].assignmentCount, 0);
+    winshell_freePipeline(&p);
+
+    // a list: each item has its own
+    CHECK_INT(winshell_parse_list("A=1; echo $A && B=2", &list), 0);
+    CHECK_INT(list.count, 3);
+    winshell_freeList(&list);
+}
+
+static void test_duplication(void) {
+    Pipeline p;
+    CommandList list;
+    Command* c;
+
+    printf("descriptor duplication\n");
+
+    CHECK_INT(parse("cat nosuch 2>&1", &p), 0);
+    c = &p.commands[0];
+    CHECK_INT(argument_count(c), 2);
+    CHECK_INT(c->redirectCount, 1);
+    CHECK_INT(c->redirects[0].fd, 2);
+    CHECK(c->redirects[0].file == NULL);
+    CHECK_INT(c->redirects[0].dupOf, 1);
+    CHECK(c->errput == NULL && c->output == NULL);
+    winshell_freePipeline(&p);
+
+    CHECK_INT(parse("echo hi 1>&2", &p), 0);
+    c = &p.commands[0];
+    CHECK_INT(argument_count(c), 2);
+    CHECK_INT(c->redirectCount, 1);
+    CHECK_INT(c->redirects[0].fd, 1);
+    CHECK_INT(c->redirects[0].dupOf, 2);
+    winshell_freePipeline(&p);
+
+    CHECK_INT(parse("echo hi >&2", &p), 0);
+    CHECK_INT(p.commands[0].redirects[0].fd, 1);
+    CHECK_INT(p.commands[0].redirects[0].dupOf, 2);
+    winshell_freePipeline(&p);
+
+    // written order is kept
+    CHECK_INT(parse("cat >a.txt 2>&1 2>>b.txt", &p), 0);
+    c = &p.commands[0];
+    CHECK_INT(c->redirectCount, 3);
+    CHECK_INT(c->redirects[0].fd, 1);
+    CHECK_STR(c->redirects[0].file, "a.txt");
+    CHECK_INT(c->redirects[1].fd, 2);
+    CHECK_INT(c->redirects[1].dupOf, 1);
+    CHECK_INT(c->redirects[2].fd, 2);
+    CHECK_STR(c->redirects[2].file, "b.txt");
+    CHECK_INT(c->redirects[2].append, 1);
+    CHECK_STR(c->output, "a.txt");
+    CHECK_STR(c->errput, "b.txt");
+    winshell_freePipeline(&p);
+
+    // more than a few redirections, and the end of a word right after
+    CHECK_INT(parse("cat >a >b >c >d >e 2>&1|cat", &p), 0);
+    CHECK_INT(p.count, 2);
+    CHECK_INT(p.commands[0].redirectCount, 6);
+    CHECK_STR(p.commands[0].output, "e");
+    winshell_freePipeline(&p);
+
+    // &> and &>>
+    CHECK_INT(parse("cat &> all.txt", &p), 0);
+    c = &p.commands[0];
+    CHECK_INT(argument_count(c), 1);
+    CHECK_INT(c->redirectCount, 2);
+    CHECK_INT(c->redirects[0].fd, 1);
+    CHECK_STR(c->redirects[0].file, "all.txt");
+    CHECK_INT(c->redirects[0].append, 0);
+    CHECK_INT(c->redirects[1].fd, 2);
+    CHECK_INT(c->redirects[1].dupOf, 1);
+    winshell_freePipeline(&p);
+    CHECK_INT(parse("cat &>> all.txt", &p), 0);
+    CHECK_INT(p.commands[0].redirects[0].append, 1);
+    winshell_freePipeline(&p);
+
+    // 1 and 2 are descriptors only when they stick to the operator
+    CHECK_INT(parse("echo 1 2 >out", &p), 0);
+    CHECK_INT(argument_count(&p.commands[0]), 3);
+    CHECK_INT(p.commands[0].redirectCount, 1);
+    winshell_freePipeline(&p);
+    CHECK_INT(parse("echo 12>out", &p), 0);
+    CHECK_STR(p.commands[0].argv[1], "12");
+    winshell_freePipeline(&p);
+
+    // a quoted &1 is a file name
+    CHECK_INT(parse("echo hi > '&1'", &p), 0);
+    CHECK_STR(p.commands[0].output, "&1");
+    CHECK_INT(p.commands[0].redirectCount, 1);
+    CHECK(p.commands[0].redirects[0].file != NULL);
+    winshell_freePipeline(&p);
+
+    // the list parser lets these & pass, and still refuses a lone one
+    CHECK_INT(winshell_parse_list("cat 2>&1; cat &>f && echo", &list), 0);
+    CHECK_INT(list.count, 3);
+    winshell_freeList(&list);
+
+    mute_stderr();
+    CHECK_INT(winshell_parse_list("echo hi &", &list), -1);
+    CHECK_INT(parse("echo hi 2>&", &p), -1);
+    CHECK_INT(parse("echo hi 2>&3", &p), -1);
+    CHECK_INT(parse("echo hi >&1x", &p), -1);
+    CHECK_INT(parse("echo hi 2>>&1", &p), -1);
 }
 
 int main(void) {
+    test_assignments();
+    test_duplication();
     test_variables();
     test_lists();
     test_patterns();

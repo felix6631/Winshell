@@ -10,8 +10,12 @@
  * Programs are looked up in the directory of the shell (the project's bin
  * directory); ".exe" is appended when missing. All commands run at the same
  * time, the standard output of each being connected to the standard input of
- * the next one. Redirections of a command take precedence over the pipe.
+ * the next one. Redirections of a command take precedence over the pipe, and
+ * those of standard output and error are applied in the order written, so
+ * a copy (2>&1) is of what the descriptor was at that point.
  * Without any, standard input, output and error are those of the shell.
+ * The NAME=value words of a command are added to its environment only.
+ * A command that is only NAME=value starts no program; its redirections are made.
  *
  * A command that cannot be started, or a redirection whose file cannot be
  * opened, is reported on standard error. The rest of the pipeline still runs;

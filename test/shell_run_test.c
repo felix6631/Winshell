@@ -209,6 +209,103 @@ static void test_redirection(void) {
     }
 }
 
+/** 2>&1, 1>&2, >&2 and &>: descriptors that become copies of each other, in the order written. */
+static void test_duplication(void) {
+    RunResult r;
+    char* text;
+
+    printf("descriptor duplication\n");
+
+    write_text(workDir, "dup_in.txt", "one\ntwo\n");
+
+    // the error goes where the output goes: here the same stream, so nothing is left on stderr
+    script("cat nosuch.txt 2>&1\n", &r);
+    CHECK(strstr(r.out, "cat: nosuch.txt: No such file or directory") != NULL);
+    CHECK_STR(r.err, "");
+    run_result_free(&r);
+
+    // ... and through a pipe
+    script("cat nosuch.txt 2>&1 | cat -n\n", &r);
+    CHECK(strstr(r.out, "     1\tcat: nosuch.txt: No such file or directory") != NULL);
+    CHECK_STR(r.err, "");
+    run_result_free(&r);
+
+    // without 2>&1 the error does not enter the pipe
+    script("cat nosuch.txt | cat -n\n", &r);
+    CHECK_STR(r.out, "");
+    CHECK(strstr(r.err, "nosuch.txt") != NULL);
+    run_result_free(&r);
+
+    // >file 2>&1: both in the file
+    script("cat dup_in.txt nosuch.txt > both.txt 2>&1\ncat both.txt\n", &r);
+    CHECK(strstr(r.out, "one\ntwo\n") != NULL && strstr(r.out, "nosuch.txt") != NULL);
+    CHECK_STR(r.err, "");
+    run_result_free(&r);
+
+    // 2>&1 >file: the error went to the old output, only the output is in the file
+    script("cat dup_in.txt nosuch.txt 2>&1 > only.txt\ncat only.txt\n", &r);
+    CHECK(strstr(r.out, "cat: nosuch.txt") == r.out);
+    CHECK(strstr(r.out, "\none\ntwo\n") != NULL);
+    CHECK_STR(r.err, "");
+    text = read_file(workDir, "only.txt", NULL);
+    CHECK(text != NULL);
+    if (text != NULL) {
+        CHECK_STR(lf_only(text), "one\ntwo\n");
+        free(text);
+    }
+    run_result_free(&r);
+
+    // 2>file 2>&1: the order does not matter for a copy of the same file
+    script("cat nosuch.txt 2> errfile.txt 2>&1\ncat errfile.txt\n", &r);
+    CHECK(strstr(r.out, "nosuch.txt") != NULL);
+    run_result_free(&r);
+
+    // 1>&2 and >&2: the output goes to the error
+    script("echo to-error 1>&2\n", &r);
+    CHECK_STR(r.out, "");
+    CHECK_STR(r.err, "to-error\n");
+    run_result_free(&r);
+    script("echo also >&2\n", &r);
+    CHECK_STR(r.out, "");
+    CHECK_STR(r.err, "also\n");
+    run_result_free(&r);
+
+    // ... so a pipe after it gets nothing
+    script("echo hi 1>&2 | cat -n\n", &r);
+    CHECK_STR(r.out, "");
+    CHECK_STR(r.err, "hi\n");
+    run_result_free(&r);
+
+    // 1> is a plain redirection
+    SCRIPT_OUT("echo viaone 1> one.txt\ncat one.txt\n", "viaone\n");
+
+    // &> and &>>: output and error to one file
+    script("cat dup_in.txt nosuch.txt &> all.txt\ncat all.txt\n", &r);
+    CHECK(strstr(r.out, "one\ntwo\n") != NULL && strstr(r.out, "nosuch.txt") != NULL);
+    CHECK_STR(r.err, "");
+    run_result_free(&r);
+    script("echo first &> app_all.txt\ncat nosuch.txt &>> app_all.txt\ncat app_all.txt\n", &r);
+    CHECK(strstr(r.out, "first\n") == r.out && strstr(r.out, "nosuch.txt") != NULL);
+    run_result_free(&r);
+
+    // a & that is not part of an operator is still not supported
+    script("echo a &\n", &r);
+    CHECK(strstr(r.err, "'&' is not supported") != NULL);
+    run_result_free(&r);
+
+    // the status is that of the command; the copies do not change it
+    SCRIPT_OUT("cat nosuch.txt 2>&1 | cat > sink.txt; echo $?\n", "0\n");
+    SCRIPT_OUT("cat nosuch.txt > sink.txt 2>&1; echo $?\n", "1\n");
+
+    // only &1 and &2 are descriptors; anything else after '>&' is refused, a quoted name is a file
+    script("echo hi 2>&1x\n", &r);
+    CHECK(strstr(r.err, "'&' after '>' must be followed by 1 or 2") != NULL);
+    CHECK_STR(r.out, "");
+    run_result_free(&r);
+    SCRIPT_OUT("echo quoted > '&1'\ncat '&1'\n", "quoted\n");
+    SCRIPT_OUT("echo 2>&1 a\n", "a\n");
+}
+
 int main(void) {
     tools_init("shell_run_test");
 
@@ -216,5 +313,6 @@ int main(void) {
     test_quoting();
     test_pipes();
     test_redirection();
+    test_duplication();
     return test_summary("shell_run_test");
 }

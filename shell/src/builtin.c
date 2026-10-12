@@ -1,5 +1,6 @@
 #include "builtin.h"
 #include "vpath.h"
+#include "variables.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,7 +122,7 @@ static int builtin_export(char* const argv[]) {
             status = 1;
             continue;
         }
-        if (equals != NULL) {
+        {
             char name[256];
             if (length >= sizeof name) {
                 fprintf(stderr, "export: '%s': name too long\n", argv[i]);
@@ -130,12 +131,10 @@ static int builtin_export(char* const argv[]) {
             }
             memcpy(name, argv[i], length);
             name[length] = '\0';
-            if (equals[1] == '\0') {
-                // _putenv_s with "" removes the variable; Windows can hold it empty
-                _putenv_s(name, "");
-                SetEnvironmentVariableA(name, "");
-            } else {
-                _putenv_s(name, equals + 1);
+            // "export NAME" exports the variable the shell has; "export NAME=value" sets it as well
+            if (var_export(name, equals != NULL ? equals + 1 : NULL) != 0) {
+                fprintf(stderr, "export: out of memory\n");
+                status = 1;
             }
         }
     }
@@ -151,7 +150,7 @@ static int builtin_unset(char* const argv[]) {
             status = 1;
             continue;
         }
-        _putenv_s(argv[i], "");      // an empty value removes the variable
+        var_unset(argv[i]);
     }
     return status;
 }

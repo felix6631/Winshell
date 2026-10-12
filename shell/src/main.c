@@ -6,6 +6,7 @@
 #include "parser.h"
 #include "executer.h"
 #include "builtin.h"
+#include "variables.h"
 
 /** Set when Ctrl+C or Ctrl+Break reached the shell. */
 static volatile LONG interrupted = 0;
@@ -88,8 +89,29 @@ static int run_item(const char* text, int* exitShell, int status) {
     if (pipeline.count > 0 && winshell_glob(&pipeline) == 0) {
         int builtinStatus = status;
 
+        // NAME=value alone sets variables of the shell; only that command does, not one inside a pipeline
+        if (pipeline.count == 1 && pipeline.commands[0].argv == NULL) {
+            const Command* command = &pipeline.commands[0];
+            size_t i;
+
+            for (i = 0; i < command->assignmentCount; i++) {
+                const char* assignment = command->assignments[i];
+                size_t length = strcspn(assignment, "=");
+                char name[256];
+
+                if (length < sizeof name) {
+                    memcpy(name, assignment, length);
+                    name[length] = '\0';
+                    if (var_set(name, assignment + length + 1) != 0)
+                        fprintf(stderr, "Error: Out of memory\n");
+                } else {
+                    fprintf(stderr, "Error: Variable name too long\n");
+                }
+            }
+            // redirections still take effect (> file empties it)
+            status = execute_pipeline(&pipeline) == 0 ? 0 : 1;
         // a builtin only makes sense as a command of its own, not inside a pipeline
-        if (pipeline.count == 1 && builtin_run(&pipeline.commands[0], &builtinStatus, exitShell)) {
+        } else if (pipeline.count == 1 && builtin_run(&pipeline.commands[0], &builtinStatus, exitShell)) {
             status = builtinStatus;
         } else {
             int result = execute_pipeline(&pipeline);
