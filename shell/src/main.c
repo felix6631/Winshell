@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
-#include "constants.h"
 #include "parser.h"
 #include "executer.h"
 #include "builtin.h"
@@ -31,7 +30,7 @@ static BOOL WINAPI winshell_ctrlHandler(DWORD type) {
     }
 }
 
-void winshell_terminalInit() {
+static void winshell_terminalInit(void) {
     SetConsoleCtrlHandler(winshell_ctrlHandler, TRUE);
     builtin_init();
 }
@@ -42,7 +41,7 @@ void winshell_terminalInit() {
  * The result has to be freed.
  */
 static char* read_line(void) {
-    size_t length = 0, capacity = BUFFERSIZE;
+    size_t length = 0, capacity = BUFSIZ;
     char* line = malloc(capacity);
     if (line == NULL)
         return NULL;
@@ -56,7 +55,12 @@ static char* read_line(void) {
             break;
         }
 
-        length += strlen(line + length);
+        {
+            size_t got = strlen(line + length);
+            if (got == 0)
+                continue;       // a NUL byte: nothing to keep, and there is no last character to look at
+            length += got;
+        }
         if (line[length - 1] == '\n')
             break;
 
@@ -126,7 +130,7 @@ static int run_item(const char* text, int* exitShell, int status) {
     return status;
 }
 
-int main() {
+int main(void) {
     int status = 0, exitShell = 0;
 
     winshell_terminalInit();

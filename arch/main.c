@@ -4,7 +4,7 @@
 /**
  * All of recognizable architecture are defined on "winnt.h", line 5660
  */
-int main() {
+int main(void) {
     SYSTEM_INFO sysInfo;
     GetNativeSystemInfo(&sysInfo);
 

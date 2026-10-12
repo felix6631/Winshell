@@ -84,13 +84,14 @@ int main(int argc, char* argv[]) {
         for (i = 0; i < fileCount; i++) {
             char native[VPATH_MAX];
             FILE* file = NULL;
+            int converted = vpath_to_native(names[i], native, sizeof native) == 0;
 
-            if (vpath_to_native(names[i], native, sizeof native) == 0)
+            if (converted)
                 file = fopen(native, append ? "ab" : "wb");
             if (file == NULL) {
+                DWORD attributes = converted ? GetFileAttributesA(native) : INVALID_FILE_ATTRIBUTES;
                 const char* reason = errno == ENOENT ? "No such file or directory" : fs_strerror(GetLastError());
-                if (errno == EISDIR || (GetFileAttributesA(native) != INVALID_FILE_ATTRIBUTES &&
-                                        (GetFileAttributesA(native) & FILE_ATTRIBUTE_DIRECTORY)))
+                if (errno == EISDIR || (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY)))
                     reason = "Is a directory";
                 fprintf(stderr, PROGRAM ": %s: %s\n", names[i], reason);
                 status = 1;
