@@ -165,6 +165,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 ```
 Winshell/
 ├─ Makefile        최상위 빌드 규칙
+├─ common.mk       모든 도구가 포함하는 빌드 규칙
 ├─ shell/          쉘 본체 (include/, src/)
 ├─ arch/           arch 명령
 ├─ cat/            cat 명령
@@ -199,10 +200,11 @@ Winshell/
 
 1. 최상위에 명령 이름의 디렉터리를 만들고 `main.c` 를 작성합니다. 옵션은 `common/args.h` 의 `args_parse` 로 처리합니다
    (`tee/main.c` 가 가장 작은 예입니다: 옵션 표, 처리 함수, `args_parse` 호출).
-2. `tee/Makefile` 을 복사하여 `NAME` 과 `SRCS`/`HDRS` 를 수정합니다.
-3. 최상위 `Makefile` 의 `all`, `clean` 목록에 `build-<이름>`, `clean-<이름>` 을 추가합니다.
+2. `tee/Makefile` 을 복사하여 `NAME`, `SRCS`, `HDRS` 를 수정합니다. 도구의 `Makefile` 은 이 셋(필요하면 `INCLUDES`, `LIBS`)만 정하고
+   규칙은 `common.mk` 를 포함해서 얻습니다.
+3. 최상위 `Makefile` 의 `BUILD` 목록에 `build-<이름>` 을 추가합니다(`clean-<이름>` 은 자동으로 따라옵니다).
 
-각 서브 프로젝트의 `Makefile` 은 `all`, `clean` 규칙을 제공하고 `BINDIR` 매크로로 출력 위치를 받아야 합니다.
+`common.mk` 는 `all`, `clean` 규칙을 제공하고 `BINDIR` 매크로로 출력 위치를, `EXTRA_CFLAGS` 로 추가 컴파일 옵션을 받습니다.
 
 ## 설계 방향
 

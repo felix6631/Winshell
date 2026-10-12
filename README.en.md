@@ -165,6 +165,7 @@ The test programs are divided by feature (`test\`).
 ```
 Winshell/
 ├─ Makefile        top-level build rules
+├─ common.mk       build rules that every tool includes
 ├─ shell/          the shell itself (include/, src/)
 ├─ arch/           arch command
 ├─ cat/            cat command
@@ -199,10 +200,10 @@ Winshell/
 
 1. Create a directory named after the command at the top level and write `main.c` in it. Handle the options with
    `args_parse` of `common/args.h` (`tee/main.c` is the smallest example: a table of options, a handler, one call).
-2. Copy `tee/Makefile` and change `NAME`, `SRCS` and `HDRS`.
-3. Add `build-<name>` and `clean-<name>` to the `all` and `clean` lists in the top-level `Makefile`.
+2. Copy `tee/Makefile` and change `NAME`, `SRCS` and `HDRS` (and `INCLUDES`, `LIBS` if needed); the rules come from `common.mk`.
+3. Add `build-<name>` to the `BUILD` list in the top-level `Makefile` (`clean-<name>` follows by itself).
 
-A sub-project's `Makefile` must provide `all` and `clean` rules and accept the output location through the `BINDIR` macro.
+`common.mk` provides the `all` and `clean` rules, and takes the output location through the `BINDIR` macro and extra compiler options through `EXTRA_CFLAGS`.
 
 ## Design goals
 

@@ -1,20 +1,8 @@
 ## shell 빌드 규칙 (NMAKE / MSVC). 보통은 최상위 Makefile을 통해 호출됩니다.
 
-NAME   = shell
-BINDIR = ..\bin
-OBJDIR = obj
-TARGET = $(BINDIR)\$(NAME).exe
-CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /Iinclude /I..\common $(EXTRA_CFLAGS)
-SRCS   = src\main.c src\parser.c src\list.c src\executer.c src\builtin.c src\glob.c src\variables.c ..\common\cmdline.c ..\common\program.c ..\common\vpath.c
-HDRS   = ..\common\cmdline.h ..\common\program.h include\builtin.h include\executer.h include\parser.h include\variables.h ..\common\vpath.h
+NAME     = shell
+SRCS     = src\main.c src\parser.c src\list.c src\executer.c src\builtin.c src\glob.c src\variables.c ..\common\cmdline.c ..\common\program.c ..\common\vpath.c
+HDRS     = ..\common\cmdline.h ..\common\program.h include\builtin.h include\executer.h include\parser.h include\variables.h ..\common\vpath.h
+INCLUDES = /Iinclude
 
-all: $(TARGET)
-
-$(TARGET): $(SRCS) $(HDRS)
-	@if not exist "$(BINDIR)" mkdir "$(BINDIR)"
-	@if not exist $(OBJDIR) mkdir $(OBJDIR)
-	cl $(CFLAGS) /Fo$(OBJDIR)\ /Fe"$(TARGET)" $(SRCS)
-
-clean:
-	@if exist "$(TARGET)" del "$(TARGET)"
-	@if exist $(OBJDIR) rmdir /s /q $(OBJDIR)
+!INCLUDE ..\common.mk
