@@ -28,7 +28,11 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `rm` | 완료 (`-f -i -r -R -d -v`, `/`, 드라이브, 공유의 루트는 `--no-preserve-root` 로도 삭제 불가) |
 | `rmdir` | 완료 (`-p -v --ignore-fail-on-non-empty`) |
 | `sort` | 완료 (`-b -d -f -g -i -n -r -s -u -c -C -k -t -o`, 바이트 순서(C 로캘), `-h -M -V -z` 는 미지원) |
+| `tac` | 완료 (`-b -s`, CRLF 유지; `-r` 은 미지원) |
 | `tail` | 완료 (`-n -c -f -s -q -v -NUM`, `-n +K`) |
+| `tee` | 완료 (`-a`, 파일마다 오류를 보고하고 계속, 입력이 오는 대로 전달) |
+| `nl` | 완료 (`-b -h -f`의 `a t n`, `-n -w -s -v -i -l -p -d`; `p` 정규식 스타일은 미지원) |
+| `paste` | 완료 (`-d -s -z`, `- -` 로 표준 입력을 번갈아 읽음) |
 | `touch` | 완료 (`-a -c -d -m -r -t`) |
 | `tr` | 완료 (`-c -C -d -s -t`, `[:alpha:]` 등의 문자 클래스, 범위, 이스케이프) |
 | `uniq` | 완료 (`-c -d -D -u -i -f -s -w`) |
@@ -111,7 +115,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `head`, `ls`, `mkdir`, `mv`, `printenv`, `pwd`, `rm`, `rmdir`, `sort`, `tail`, `touch`, `tr`, `uniq`, `wc`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `rm`, `rmdir`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -136,6 +140,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `dirs_test` | `mkdir`, `rmdir`, `touch` |
 | `text_test` | `head`, `tail`, `wc` |
 | `filter_test` | `sort`, `uniq`, `cut`, `tr` |
+| `lines_test` | `tee`, `tac`, `nl`, `paste`: 줄 끝, 구분자, 섹션, 표준 입력 번갈아 읽기 |
 | `env_test` | `env`, `printenv`: 환경 변경, `-i`/`-u`, 명령 실행과 종료 상태, `-C` |
 | `shell_run_test` | 쉘: 명령 실행, 따옴표, 파이프, 리다이렉션 |
 | `shell_cd_test` | 쉘: `cd`, 가상 파일 시스템, 와일드카드 |
@@ -171,11 +176,15 @@ Winshell/
 ├─ mkdir/          mkdir 명령
 ├─ mv/             mv 명령
 ├─ printenv/       printenv 명령
+├─ nl/             nl 명령
+├─ paste/          paste 명령
 ├─ pwd/            pwd 명령
 ├─ rm/             rm 명령
 ├─ rmdir/          rmdir 명령
 ├─ sort/           sort 명령
+├─ tac/            tac 명령
 ├─ tail/           tail 명령
+├─ tee/            tee 명령
 ├─ touch/          touch 명령
 ├─ tr/             tr 명령
 ├─ uniq/           uniq 명령
@@ -212,10 +221,10 @@ Winshell/
 <summary>목록 펼치기</summary>
 
 `[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, date, dd, df, dir,
-dircolors, dirname, du, env, expand, expr, factor, false, fmt, fold, groups, hostid, hostname, id, install,
-join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nl, nohup, nproc, numfmt, od, paste,
-pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
-sha384sum, sha512sum, shred, shuf, sleep, split, stat, stdbuf, sum, sync, tac, tee, test, true,
+dircolors, dirname, du, expand, expr, factor, false, fmt, fold, groups, hostid, hostname, id, install,
+join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup, nproc, numfmt, od,
+pathchk, pinky, pr, printf, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
+sha384sum, sha512sum, shred, shuf, sleep, split, stat, stdbuf, sum, sync, test, true,
 truncate, tsort, tty, uname, unexpand, unlink, uptime, users, vdir, who, whoami, yes
 
 </details>

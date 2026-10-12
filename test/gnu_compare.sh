@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Compares head, tail, wc, sort, uniq, cut, tr and cat with the GNU tools: the output bytes and the
+# Compares head, tail, wc, sort, uniq, cut, tr, cat, tac, nl, paste and tee with the GNU tools: the output bytes and the
 # exit codes of many combinations of options and inputs have to be the same.
 #
 # The GNU tools are the ones of MSYS2 or Git for Windows (an environment with bash). They are
@@ -12,7 +12,8 @@
 # The exit code is the number of combinations that differ, or 0. What is meant to be different is not
 # in the comparisons: a line ending of CR LF is not part of a line here (so inputs with CR LF are
 # only compared for the tools whose result does not depend on that), sort -z, -h, -M and -V are
-# refused, and a character is a character of UTF-8 (the MSYS locale counts bytes).
+# refused, and a character is a character of UTF-8 (the MSYS locale counts bytes). tac -r and the p
+# style of nl need regular expressions, which are not supported.
 
 GNU_DIR=${GNU_DIR:-/usr/bin}
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -41,6 +42,24 @@ printf 'no newline at all' > nonl.txt
 printf '\n\n\n' > blank.txt
 seq 1 20000 | sed 's/^/line /;s/$/ with some words/' > big.txt
 head -c 70000 /dev/urandom | od -An -c > noise.txt 2>/dev/null || cp big.txt noise.txt
+
+printf 'a
+\:\:\:
+h1
+h2
+\:\:
+b1
+
+
+
+b2
+\:
+f1
+\:\:\:
+h3
+\:\:
+b3
+' > sections.txt
 
 TEXTS="words.txt nums.txt table.txt tabs.txt dup.txt fields.txt lines.txt empty.txt nonl.txt blank.txt big.txt"
 
@@ -178,6 +197,104 @@ for f in $TEXTS; do
 done
 compare cat nosuch.txt lines.txt
 compare cat -n lines.txt words.txt
+
+echo "== tac"
+for f in $TEXTS sections.txt; do
+    for o in "" -b "-s :" "-b -s :" "-s ab" "-bs ab" "-s ''"; do
+        total=$((total + 1))
+        eval "gnu tac $o $f" > exp.out 2> exp.err < /dev/null; erc=$?
+        eval "ours tac $o $f" > got.out 2> got.err < /dev/null; grc=$?
+        if ! cmp -s exp.out got.out || [ $erc != $grc ]; then
+            bad=$((bad + 1))
+            echo "DIFFERS: tac $o $f (status $erc, ours $grc)"
+        fi
+    done
+done
+compare tac lines.txt words.txt
+compare tac nosuch.txt lines.txt
+compare_stdin words.txt tac
+compare_stdin nonl.txt tac -s a
+
+echo "== nl"
+for f in $TEXTS sections.txt; do
+    for o in "" -ba -bn -ba\ -l2 -ba\ -l3 -n\ ln -n\ rz -n\ rn -w3 -w10 -s: -s\ -- "-v 10 -i 5" "-v -3" -i-2 -p "-ha -fa" "-ba -ha -fa" "-ba -p" "-d xy -ba" "-d x" "-nrz -w 3 -v 98 -ba"; do
+        total=$((total + 1))
+        eval "gnu nl $o $f" > exp.out 2> exp.err < /dev/null; erc=$?
+        eval "ours nl $o $f" > got.out 2> got.err < /dev/null; grc=$?
+        if ! cmp -s exp.out got.out || [ $erc != $grc ]; then
+            bad=$((bad + 1))
+            echo "DIFFERS: nl $o $f (status $erc, ours $grc)"
+        fi
+    done
+done
+compare nl words.txt lines.txt
+compare nl -ba nonl.txt words.txt
+compare nl nosuch.txt lines.txt
+compare nl -w0 lines.txt
+compare nl -l0 lines.txt
+compare nl -n xx lines.txt
+compare nl -b x lines.txt
+compare_stdin words.txt nl -ba
+
+echo "== paste"
+for f in $TEXTS; do
+    for o in "" -s "-d :" "-d ,;" "-s -d ,;" "-d '\n'" "-d '\0'" "-d '\t\\'" "-s -d '\0'" -z; do
+        total=$((total + 1))
+        eval "gnu paste $o $f" > exp.out 2> exp.err < /dev/null; erc=$?
+        eval "ours paste $o $f" > got.out 2> got.err < /dev/null; grc=$?
+        if ! cmp -s exp.out got.out || [ $erc != $grc ]; then
+            bad=$((bad + 1))
+            echo "DIFFERS: paste $o $f (status $erc, ours $grc)"
+        fi
+    done
+done
+for o in "" -s "-d ," "-s -d ,:" "-d ''" "-s -d ''" "-d '\'" "-d ab"; do
+    for files in "words.txt lines.txt" "lines.txt words.txt dup.txt" "lines.txt empty.txt words.txt" "empty.txt" "nonl.txt lines.txt" "lines.txt lines.txt" "blank.txt dup.txt"; do
+        total=$((total + 1))
+        eval "gnu paste $o $files" > exp.out 2> exp.err < /dev/null; erc=$?
+        eval "ours paste $o $files" > got.out 2> got.err < /dev/null; grc=$?
+        if ! cmp -s exp.out got.out || [ $erc != $grc ]; then
+            bad=$((bad + 1))
+            echo "DIFFERS: paste $o $files (status $erc, ours $grc)"
+        fi
+    done
+done
+compare paste nosuch.txt lines.txt
+# the same standard input twice takes its lines in turn
+for o in "" "-s" "-d ,"; do
+    for f in lines.txt words.txt nonl.txt; do
+        total=$((total + 1))
+        eval "gnu paste $o - -" < $f > exp.out 2> exp.err; erc=$?
+        eval "ours paste $o - -" < $f > got.out 2> got.err; grc=$?
+        if ! cmp -s exp.out got.out || [ $erc != $grc ]; then
+            bad=$((bad + 1))
+            echo "DIFFERS: paste $o - - < $f (status $erc, ours $grc)"
+        fi
+    done
+done
+compare_stdin lines.txt paste - words.txt -
+
+echo "== tee"
+for f in words.txt nonl.txt empty.txt big.txt; do
+    for o in "" -a; do
+        total=$((total + 1))
+        rm -f exp.f1 exp.f2 got.f1 got.f2
+        printf 'old\n' > exp.f1; cp exp.f1 got.f1
+        gnu tee $o exp.f1 exp.f2 < $f > exp.out 2> exp.err; erc=$?
+        ours tee $o got.f1 got.f2 < $f > got.out 2> got.err; grc=$?
+        if ! cmp -s exp.out got.out || ! cmp -s exp.f1 got.f1 || ! cmp -s exp.f2 got.f2 || [ $erc != $grc ]; then
+            bad=$((bad + 1))
+            echo "DIFFERS: tee $o < $f (status $erc, ours $grc)"
+        fi
+    done
+done
+total=$((total + 1))
+gnu tee < words.txt > exp.out 2> exp.err; erc=$?
+ours tee < words.txt > got.out 2> got.err; grc=$?
+if ! cmp -s exp.out got.out || [ $erc != $grc ]; then
+    bad=$((bad + 1))
+    echo "DIFFERS: tee (no file)"
+fi
 
 echo
 echo "$total combinations compared, $bad differ"

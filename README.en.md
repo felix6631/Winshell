@@ -28,7 +28,11 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `rm` | Done (`-f -i -r -R -d -v`, `/` and the roots of drives and shares are never removed, not even with `--no-preserve-root`) |
 | `rmdir` | Done (`-p -v --ignore-fail-on-non-empty`) |
 | `sort` | Done (`-b -d -f -g -i -n -r -s -u -c -C -k -t -o`; byte order as in the C locale; `-h -M -V -z` are not supported) |
+| `tac` | Done (`-b -s`, CR LF kept; `-r` is not supported) |
 | `tail` | Done (`-n -c -f -s -q -v -NUM`, `-n +K`) |
+| `tee` | Done (`-a`; reports a file that fails and goes on; passes data on as it arrives) |
+| `nl` | Done (`a t n` for `-b -h -f`, `-n -w -s -v -i -l -p -d`; the `p` regular-expression style is not supported) |
+| `paste` | Done (`-d -s -z`; `- -` takes the lines of standard input in turn) |
 | `touch` | Done (`-a -c -d -m -r -t`) |
 | `tr` | Done (`-c -C -d -s -t`, classes `[:alpha:]` etc.) |
 | `uniq` | Done (`-c -d -D -u -i -f -s -w`) |
@@ -111,7 +115,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `head`, `ls`, `mkdir`, `mv`, `printenv`, `pwd`, `rm`, `rmdir`, `sort`, `tail`, `touch`, `tr`, `uniq`, `wc`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `rm`, `rmdir`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -136,6 +140,7 @@ The test programs are divided by feature (`test\`).
 | `dirs_test` | `mkdir`, `rmdir`, `touch` |
 | `text_test` | `head`, `tail`, `wc` |
 | `filter_test` | `sort`, `uniq`, `cut`, `tr` |
+| `lines_test` | `tee`, `tac`, `nl`, `paste`: line endings, separators, sections, standard input taken in turn |
 | `env_test` | `env`, `printenv`: changing the environment, `-i`/`-u`, running a command and its status, `-C` |
 | `shell_run_test` | shell: running commands, quoting, pipes, redirection |
 | `shell_cd_test` | shell: `cd`, the virtual file system, wildcards |
@@ -171,11 +176,15 @@ Winshell/
 ├─ mkdir/          mkdir command
 ├─ mv/             mv command
 ├─ printenv/       printenv command
+├─ nl/             nl command
+├─ paste/          paste command
 ├─ pwd/            pwd command
 ├─ rm/             rm command
 ├─ rmdir/          rmdir command
 ├─ sort/           sort command
+├─ tac/            tac command
 ├─ tail/           tail command
+├─ tee/            tee command
 ├─ touch/          touch command
 ├─ tr/             tr command
 ├─ uniq/           uniq command
@@ -212,10 +221,10 @@ A sub-project's `Makefile` must provide `all` and `clean` rules and accept the o
 <summary>Show list</summary>
 
 `[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, date, dd, df, dir,
-dircolors, dirname, du, env, expand, expr, factor, false, fmt, fold, groups, hostid, hostname, id, install,
-join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nl, nohup, nproc, numfmt, od, paste,
-pathchk, pinky, pr, printenv, printf, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
-sha384sum, sha512sum, shred, shuf, sleep, split, stat, stdbuf, sum, sync, tac, tee, test, true,
+dircolors, dirname, du, expand, expr, factor, false, fmt, fold, groups, hostid, hostname, id, install,
+join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup, nproc, numfmt, od,
+pathchk, pinky, pr, printf, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
+sha384sum, sha512sum, shred, shuf, sleep, split, stat, stdbuf, sum, sync, test, true,
 truncate, tsort, tty, uname, unexpand, unlink, uptime, users, vdir, who, whoami, yes
 
 </details>

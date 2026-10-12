@@ -178,6 +178,9 @@ static const char* cutOptions[] = { "-c1-3", "-c2", "-b1,3", "-f2", "-d: -f1", "
 static const char* headOptions[] = { "-n3", "-n 0", "-n -2", "-n 100", "-n1" };
 static const char* tailOptions[] = { "-n3", "-n +3", "-n 100", "-n 0", "-n1", "-n +1" };
 static const char* wcOptions[] = { "-l", "-w", "-L", "-lwL" };
+static const char* tacOptions[] = { "", "-s :" };
+static const char* nlOptions[] = { "", "-ba", "-ba -l2", "-n rz -w3", "-s: -v5" };
+static const char* pasteOptions[] = { "", "-s", "-d:", "-s -d,;" };
 
 #define SET(tool, array, cr) { tool, array, (int)(sizeof array / sizeof array[0]), cr }
 
@@ -189,6 +192,9 @@ static const ToolSet toolSets[] = {
     SET("head", headOptions, 1),
     SET("tail", tailOptions, 1),
     SET("wc", wcOptions, 0),
+    SET("tac", tacOptions, 1),
+    SET("nl", nlOptions, 1),
+    SET("paste", pasteOptions, 1),
 };
 
 /** Checks the properties of one tool with one set of options for one random text. */
@@ -282,7 +288,7 @@ int main(void) {
     {
         static const char* fixed[] = { "", "\n", "\r\n", "\n\n\n", "\r\n\r\n", "a", "a\r\n", "\r\n\r\na", "a\n\r\nb\r\n" };
         static const char* fixedTools[] = { "cat -b", "cat -s", "sort", "sort -u", "uniq -c", "uniq -d", "head -n 1",
-                                            "tail -n 1", "wc -l", "cut -c1" };
+                                            "tail -n 1", "wc -l", "cut -c1", "tac", "nl -ba", "paste -s" };
         size_t a, b;
         for (a = 0; a < sizeof fixed / sizeof fixed[0]; a++) {
             for (b = 0; b < sizeof fixedTools / sizeof fixedTools[0]; b++) {

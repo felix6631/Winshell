@@ -183,3 +183,78 @@ int text_write_line(const TextLine* line, FILE* out) {
         return fputs("\r\n", out) < 0 ? -1 : 0;
     return fputc('\n', out) == EOF ? -1 : 0;
 }
+
+void text_reader_init(LineReader* reader, FILE* in, int terminator) {
+    memset(reader, 0, sizeof *reader);
+    reader->in = in;
+    reader->terminator = terminator;
+}
+
+void text_reader_free(LineReader* reader) {
+    free(reader->buffer);
+    memset(reader, 0, sizeof *reader);
+}
+
+int text_reader_next(LineReader* reader, TextLine* line) {
+    for (;;) {
+        unsigned char* begin = reader->buffer + reader->start;
+        size_t available = reader->length - reader->start;
+        unsigned char* end = NULL;
+
+        if (reader->scanned < available)
+            end = memchr(begin + reader->scanned, reader->terminator, available - reader->scanned);
+
+        if (end != NULL) {
+            size_t contentLength = (size_t)(end - begin);
+            line->content = begin;
+            line->length = contentLength;
+            line->ending = 1;
+            if (reader->terminator == '\n' && contentLength > 0 && begin[contentLength - 1] == '\r') {
+                line->length--;
+                line->ending = 2;
+            }
+            reader->start += contentLength + 1;
+            reader->scanned = 0;
+            return 1;
+        }
+        reader->scanned = available;
+
+        if (reader->eof || reader->failed) {
+            if (available == 0)
+                return 0;
+            line->content = begin;
+            line->length = available;
+            line->ending = 0;
+            reader->start = reader->length;
+            reader->scanned = 0;
+            return 1;
+        }
+
+        // more input: keep the unfinished line at the front of the buffer
+        if (reader->start > 0) {
+            memmove(reader->buffer, begin, available);
+            reader->length = available;
+            reader->start = 0;
+        }
+        if (reader->capacity - reader->length < 4096) {
+            size_t capacity = reader->capacity == 0 ? 8192 : reader->capacity * 2;
+            unsigned char* grown = realloc(reader->buffer, capacity);
+            if (grown == NULL) {
+                reader->failed = 1;
+                continue;
+            }
+            reader->buffer = grown;
+            reader->capacity = capacity;
+        }
+        {
+            long got = text_read_some(reader->in, reader->buffer + reader->length,
+                                      reader->capacity - reader->length);
+            if (got < 0)
+                reader->failed = 1;
+            else if (got == 0)
+                reader->eof = 1;
+            else
+                reader->length += (size_t)got;
+        }
+    }
+}

@@ -66,4 +66,30 @@ int text_next_line(const unsigned char* text, size_t length, size_t* offset, Tex
 /** Writes the content and then the ending of the line (a missing one is written as LF). */
 int text_write_line(const TextLine* line, FILE* out);
 
+/**
+ * Lines of a stream, one at a time, as they arrive: a line is handed out as soon as its
+ * end has been read, so a filter that uses it passes on a pipe's input without waiting for
+ * the end of it. With a terminator other than '\n' (paste -z) there is no CR LF handling.
+ */
+typedef struct {
+    FILE*          in;
+    unsigned char* buffer;
+    size_t         length, capacity;    // of the buffer and of what is in it
+    size_t         start;               // where the line that comes next starts
+    size_t         scanned;             // from start: bytes known not to hold the terminator
+    int            terminator;
+    int            eof;
+    int            failed;              // out of memory or a read error
+} LineReader;
+
+void text_reader_init(LineReader* reader, FILE* in, int terminator);
+
+/**
+ * The next line, valid until the next call. Returns 1, or 0 at the end (also after an error:
+ * check reader->failed).
+ */
+int text_reader_next(LineReader* reader, TextLine* line);
+
+void text_reader_free(LineReader* reader);
+
 #endif //TEXTUTIL_H
