@@ -3,6 +3,7 @@
 #include <string.h>
 #include "textutil.h"
 #include "args.h"
+#include "vec.h"
 
 #define VERSION "0.1"
 #define PROGRAM "tac"
@@ -56,14 +57,9 @@ static int reverse(const unsigned char* text, size_t length, const char* separat
         {
             size_t boundary = before ? at : at + separatorLength;
             if (boundary > 0 && boundary < length) {
-                if (count == capacity) {
-                    size_t* grown = realloc(boundaries, capacity * 2 * sizeof *grown);
-                    if (grown == NULL) {
-                        free(boundaries);
-                        return -1;
-                    }
-                    boundaries = grown;
-                    capacity *= 2;
+                if (VEC_RESERVE(boundaries, capacity, count + 1) != 0) {
+                    free(boundaries);
+                    return -1;
                 }
                 if (boundary > boundaries[count - 1])
                     boundaries[count++] = boundary;

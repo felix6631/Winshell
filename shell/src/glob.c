@@ -27,6 +27,7 @@
 #include <windows.h>
 #include "parser.h"
 #include "vpath.h"
+#include "vec.h"
 
 typedef struct {
     char** items;
@@ -34,14 +35,8 @@ typedef struct {
 } StringList;
 
 static int list_push(StringList* list, char* owned) {
-    if (list->count >= list->capacity) {
-        size_t capacity = list->capacity == 0 ? 16 : list->capacity * 2;
-        char** grown = realloc(list->items, capacity * sizeof *grown);
-        if (grown == NULL)
-            return -1;
-        list->items = grown;
-        list->capacity = capacity;
-    }
+    if (VEC_RESERVE(list->items, list->capacity, list->count + 1) != 0)
+        return -1;
     list->items[list->count++] = owned;
     return 0;
 }
@@ -402,14 +397,8 @@ static int expand_pattern(const char* pattern, StringList* results) {
 /* ---- the pipeline ---------------------------------------------------------------- */
 
 static int owned_push(Pipeline* pipeline, char* string) {
-    if (pipeline->ownedCount >= pipeline->ownedCapacity) {
-        size_t capacity = pipeline->ownedCapacity == 0 ? 16 : pipeline->ownedCapacity * 2;
-        LPSTR* grown = realloc(pipeline->owned, capacity * sizeof *grown);
-        if (grown == NULL)
-            return -1;
-        pipeline->owned = grown;
-        pipeline->ownedCapacity = capacity;
-    }
+    if (VEC_RESERVE(pipeline->owned, pipeline->ownedCapacity, pipeline->ownedCount + 1) != 0)
+        return -1;
     pipeline->owned[pipeline->ownedCount++] = string;
     return 0;
 }

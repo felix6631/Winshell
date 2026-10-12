@@ -7,6 +7,7 @@
 #include <windows.h>
 #include "vpath.h"
 #include "fsutil.h"
+#include "vec.h"
 
 int text_parse_count(const char* text, TextCount* out) {
     const char* p = text;
@@ -125,20 +126,20 @@ long text_read_some(FILE* in, void* buffer, size_t size) {
 }
 
 unsigned char* text_slurp(FILE* in, size_t* length) {
-    size_t capacity = 65536, used = 0;
-    unsigned char* data = malloc(capacity);
+    size_t capacity = 0, used = 0;
+    unsigned char* data = NULL;
 
-    while (data != NULL) {
+    if (VEC_RESERVE(data, capacity, 65536) != 0) {
+        *length = 0;
+        return NULL;
+    }
+
+    for (;;) {
         size_t got;
-        if (used == capacity) {
-            unsigned char* grown = realloc(data, capacity * 2);
-            if (grown == NULL) {
-                free(data);
-                data = NULL;
-                break;
-            }
-            data = grown;
-            capacity *= 2;
+        if (used == capacity && VEC_RESERVE(data, capacity, capacity + 1) != 0) {
+            free(data);
+            data = NULL;
+            break;
         }
         got = fread(data + used, 1, capacity - used, in);
         if (got == 0)
@@ -236,15 +237,9 @@ int text_reader_next(LineReader* reader, TextLine* line) {
             reader->length = available;
             reader->start = 0;
         }
-        if (reader->capacity - reader->length < 4096) {
-            size_t capacity = reader->capacity == 0 ? 8192 : reader->capacity * 2;
-            unsigned char* grown = realloc(reader->buffer, capacity);
-            if (grown == NULL) {
-                reader->failed = 1;
-                continue;
-            }
-            reader->buffer = grown;
-            reader->capacity = capacity;
+        if (VEC_RESERVE(reader->buffer, reader->capacity, reader->length + 4096) != 0) {
+            reader->failed = 1;
+            continue;
         }
         {
             long got = text_read_some(reader->in, reader->buffer + reader->length,

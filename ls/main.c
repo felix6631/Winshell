@@ -9,6 +9,7 @@
 #include <aclapi.h>
 #include "vpath.h"
 #include "args.h"
+#include "vec.h"
 
 #define VERSION "0.1"
 #define PROGRAM "ls"
@@ -96,15 +97,9 @@ static void list_add(EntryList* list, const char* name, const char* native, DWOR
                      unsigned long long size, FILETIME mtime) {
     Entry* entry;
 
-    if (list->count >= list->capacity) {
-        size_t capacity = list->capacity == 0 ? 64 : list->capacity * 2;
-        Entry* grown = realloc(list->items, capacity * sizeof *grown);
-        if (grown == NULL) {
-            fprintf(stderr, PROGRAM ": out of memory\n");
-            exit(2);
-        }
-        list->items = grown;
-        list->capacity = capacity;
+    if (VEC_RESERVE(list->items, list->capacity, list->count + 1) != 0) {
+        fprintf(stderr, PROGRAM ": out of memory\n");
+        exit(2);
     }
 
     entry = &list->items[list->count++];

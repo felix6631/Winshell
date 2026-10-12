@@ -35,32 +35,6 @@ typedef struct {
     int       fromEnd;      // -n -K / -c -K: everything but the last ones
 } Mode;
 
-/** Reads everything. The result has to be freed. */
-static unsigned char* slurp(FILE* in, size_t* length) {
-    size_t capacity = 65536, used = 0;
-    unsigned char* data = malloc(capacity);
-
-    while (data != NULL) {
-        size_t got;
-        if (used == capacity) {
-            unsigned char* grown = realloc(data, capacity * 2);
-            if (grown == NULL) {
-                free(data);
-                data = NULL;
-                break;
-            }
-            data = grown;
-            capacity *= 2;
-        }
-        got = fread(data + used, 1, capacity - used, in);
-        if (got == 0)
-            break;
-        used += got;
-    }
-    *length = used;
-    return data;
-}
-
 /** Writes the first n lines (or bytes) of the stream. Returns 0, or -1 on a write error. */
 static int head_first(FILE* in, const Mode* mode) {
     unsigned char buffer[65536];
@@ -101,7 +75,7 @@ static int head_first(FILE* in, const Mode* mode) {
 /** Writes all but the last n lines (or bytes). The input is read completely first. */
 static int head_all_but_last(FILE* in, const Mode* mode) {
     size_t length = 0, keep, i;
-    unsigned char* data = slurp(in, &length);
+    unsigned char* data = text_slurp(in, &length);
 
     if (data == NULL) {
         fprintf(stderr, PROGRAM ": memory exhausted\n");

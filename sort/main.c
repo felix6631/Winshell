@@ -5,6 +5,7 @@
 #include "textutil.h"
 #include "vpath.h"
 #include "args.h"
+#include "vec.h"
 
 #define VERSION "0.1"
 #define PROGRAM "sort"
@@ -450,12 +451,10 @@ static int parse_key(const char* text, Key* key) {
 }
 
 static void add_key(const Key* key) {
-    Key* grown = realloc(keys, (keyCount + 1) * sizeof *keys);
-    if (grown == NULL) {
+    if (VEC_GROW_BY_COUNT(keys, keyCount) != 0) {
         fprintf(stderr, PROGRAM ": memory exhausted\n");
         exit(2);
     }
-    keys = grown;
     keys[keyCount++] = *key;
 }
 
@@ -615,15 +614,9 @@ int main(int argc, char* argv[]) {
         }
 
         while (text_next_line(texts[i], lengths[i], &offset, &line)) {
-            if (entryCount >= entryCapacity) {
-                size_t capacity = entryCapacity == 0 ? 1024 : entryCapacity * 2;
-                Entry* grown = realloc(entries, capacity * sizeof *entries);
-                if (grown == NULL) {
-                    fprintf(stderr, PROGRAM ": memory exhausted\n");
-                    return 2;
-                }
-                entries = grown;
-                entryCapacity = capacity;
+            if (VEC_RESERVE(entries, entryCapacity, entryCount + 1) != 0) {
+                fprintf(stderr, PROGRAM ": memory exhausted\n");
+                return 2;
             }
             entries[entryCount].line = line;
             entries[entryCount].index = entryCount;

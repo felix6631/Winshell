@@ -4,6 +4,7 @@
 #include <string.h>
 #include "textutil.h"
 #include "args.h"
+#include "vec.h"
 
 #define VERSION "0.1"
 #define PROGRAM "tr"
@@ -55,14 +56,8 @@ typedef struct {
 } Set;
 
 static int add_byte(Set* set, size_t* capacity, unsigned char c) {
-    if (set->length >= *capacity) {
-        size_t bigger = *capacity == 0 ? 64 : *capacity * 2;
-        unsigned char* grown = realloc(set->bytes, bigger);
-        if (grown == NULL)
-            return -1;
-        set->bytes = grown;
-        *capacity = bigger;
-    }
+    if (VEC_RESERVE(set->bytes, *capacity, set->length + 1) != 0)
+        return -1;
     set->bytes[set->length++] = c;
     return 0;
 }
@@ -173,12 +168,9 @@ static int expand_set(const char* text, int isSecond, Set* set) {
                         }
                         if (close == count) {
                             // [c*]: as many as the first set needs
-                            size_t* grown = realloc(set->fillAt, (set->fills + 1) * sizeof *grown);
-                            unsigned char* grownChar = realloc(set->fillChar, set->fills + 1);
-                            if (grown == NULL || grownChar == NULL)
+                            if (VEC_GROW_BY_COUNT(set->fillAt, set->fills) != 0 ||
+                                VEC_GROW_BY_COUNT(set->fillChar, set->fills) != 0)
                                 return -1;
-                            set->fillAt = grown;
-                            set->fillChar = grownChar;
                             set->fillAt[set->fills] = set->length;
                             set->fillChar[set->fills] = (unsigned char)c;
                             set->fills++;

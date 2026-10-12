@@ -3,6 +3,7 @@
 #include <string.h>
 #include "textutil.h"
 #include "args.h"
+#include "vec.h"
 
 #define VERSION "0.1"
 #define PROGRAM "cut"
@@ -94,13 +95,9 @@ static int parse_list(const char* list) {
             return -1;
         }
 
-        {
-            Range* grown = realloc(ranges, (rangeCount + 1) * sizeof *ranges);
-            if (grown == NULL)
-                return -1;
-            ranges = grown;
-            ranges[rangeCount++] = range;
-        }
+        if (VEC_GROW_BY_COUNT(ranges, rangeCount) != 0)
+            return -1;
+        ranges[rangeCount++] = range;
 
         if (*p == ',') {
             p++;

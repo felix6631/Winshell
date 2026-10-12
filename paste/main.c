@@ -3,6 +3,7 @@
 #include <string.h>
 #include "textutil.h"
 #include "args.h"
+#include "vec.h"
 
 #define VERSION "0.1"
 #define PROGRAM "paste"
@@ -203,18 +204,9 @@ int main(int argc, char* argv[]) {
                 if (i > 0)
                     next_delimiter(delimiters, &position, &text, &length);
                 need = assembledLength + length + (got ? line.length : 0) + 2;
-                if (need > assembledCapacity) {
-                    size_t capacity = assembledCapacity == 0 ? 4096 : assembledCapacity;
-                    unsigned char* grown;
-                    while (capacity < need)
-                        capacity *= 2;
-                    grown = realloc(assembled, capacity);
-                    if (grown == NULL) {
-                        fprintf(stderr, PROGRAM ": out of memory\n");
-                        return 1;
-                    }
-                    assembled = grown;
-                    assembledCapacity = capacity;
+                if (VEC_RESERVE(assembled, assembledCapacity, need) != 0) {
+                    fprintf(stderr, PROGRAM ": out of memory\n");
+                    return 1;
                 }
                 if (length > 0) {
                     memcpy(assembled + assembledLength, text, length);

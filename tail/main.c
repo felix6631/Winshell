@@ -58,32 +58,6 @@ static size_t last_lines_start(const unsigned char* data, size_t length, long lo
     return 0;
 }
 
-/** Reads everything. The result has to be freed. */
-static unsigned char* slurp(FILE* in, size_t* length) {
-    size_t capacity = 65536, used = 0;
-    unsigned char* data = malloc(capacity);
-
-    while (data != NULL) {
-        size_t got;
-        if (used == capacity) {
-            unsigned char* grown = realloc(data, capacity * 2);
-            if (grown == NULL) {
-                free(data);
-                data = NULL;
-                break;
-            }
-            data = grown;
-            capacity *= 2;
-        }
-        got = fread(data + used, 1, capacity - used, in);
-        if (got == 0)
-            break;
-        used += got;
-    }
-    *length = used;
-    return data;
-}
-
 /** Streams from the start, dropping the first (count - 1) lines or bytes: tail -n +K, tail -c +K. */
 static int tail_from(FILE* in, const Mode* mode) {
     unsigned char buffer[65536];
@@ -179,7 +153,7 @@ static int tail_last(FILE* in, int seekable, const Mode* mode) {
             }
         }
     } else {
-        data = slurp(in, &length);
+        data = text_slurp(in, &length);
         if (data == NULL) {
             fprintf(stderr, PROGRAM ": memory exhausted\n");
             return -1;

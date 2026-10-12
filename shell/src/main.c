@@ -6,6 +6,7 @@
 #include "executer.h"
 #include "builtin.h"
 #include "variables.h"
+#include "vec.h"
 
 /** Set when Ctrl+C or Ctrl+Break reached the shell. */
 static volatile LONG interrupted = 0;
@@ -65,14 +66,9 @@ static char* read_line(void) {
             break;
 
         // buffer is full without a line feed; make room for the rest
-        if (length + 1 >= capacity) {
-            char* grown = realloc(line, capacity * 2);
-            if (grown == NULL) {
-                free(line);
-                return NULL;
-            }
-            line = grown;
-            capacity *= 2;
+        if (length + 1 >= capacity && VEC_RESERVE(line, capacity, capacity + 1) != 0) {
+            free(line);
+            return NULL;
         }
     }
     return line;

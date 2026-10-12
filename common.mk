@@ -16,7 +16,7 @@ CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common $(INCLUDES
 
 all: $(TARGET)
 
-$(TARGET): $(SRCS) $(HDRS)
+$(TARGET): $(SRCS) $(HDRS) ..\common\vec.h
 	@if not exist "$(BINDIR)" mkdir "$(BINDIR)"
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
 	cl $(CFLAGS) /Fo$(OBJDIR)\ /Fe"$(TARGET)" $(SRCS) $(LIBS)

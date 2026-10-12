@@ -1,4 +1,5 @@
 #include "variables.h"
+#include "vec.h"
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
@@ -42,12 +43,10 @@ static void env_put(const char* name, const char* value) {
 }
 
 static Entry* new_entry(const char* name) {
-    Entry* grown = realloc(entries, (entryCount + 1) * sizeof *grown);
     char* copy;
 
-    if (grown == NULL)
+    if (VEC_GROW_BY_COUNT(entries, entryCount) != 0)
         return NULL;
-    entries = grown;
     copy = _strdup(name);
     if (copy == NULL)
         return NULL;

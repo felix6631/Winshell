@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "parser.h"
+#include "vec.h"
 
 static int is_blank(CHAR c) {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n';
@@ -27,12 +28,10 @@ static int is_blank_text(const char* start, size_t length) {
 }
 
 static int list_add(CommandList* list, const char* start, size_t length, int op) {
-    ListItem* grown = realloc(list->items, (list->count + 1) * sizeof *grown);
     char* copy;
 
-    if (grown == NULL)
+    if (VEC_GROW_BY_COUNT(list->items, list->count) != 0)
         return -1;
-    list->items = grown;
     copy = malloc(length + 1);
     if (copy == NULL)
         return -1;

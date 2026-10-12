@@ -5,6 +5,7 @@
 #include "parser.h"
 #include "vpath.h"
 #include "variables.h"
+#include "vec.h"
 
 #define DELIMITERS " \t\r\n"
 
@@ -45,14 +46,8 @@ typedef struct {
 } Text;
 
 static int text_put(Text* t, CHAR c) {
-    if (t->length + 2 > t->capacity) {
-        size_t capacity = t->capacity == 0 ? 256 : t->capacity * 2;
-        CHAR* grown = realloc(t->data, capacity);
-        if (grown == NULL)
-            return -1;
-        t->data = grown;
-        t->capacity = capacity;
-    }
+    if (VEC_RESERVE(t->data, t->capacity, t->length + 2) != 0)
+        return -1;
     t->data[t->length++] = c;
     t->data[t->length] = '\0';
     return 0;
@@ -168,15 +163,9 @@ typedef struct {
 static void lexer_push(Lexer* L, LexemeType type, size_t textOffset, size_t patternOffset, int hasPattern) {
     Lexeme* lexeme;
 
-    if (L->count >= L->capacity) {
-        size_t capacity = L->capacity == 0 ? 16 : L->capacity * 2;
-        Lexeme* grown = realloc(L->lexemes, capacity * sizeof *grown);
-        if (grown == NULL) {
-            L->error = LEX_NOMEM;
-            return;
-        }
-        L->lexemes = grown;
-        L->capacity = capacity;
+    if (VEC_RESERVE(L->lexemes, L->capacity, L->count + 1) != 0) {
+        L->error = LEX_NOMEM;
+        return;
     }
     lexeme = &L->lexemes[L->count++];
     memset(lexeme, 0, sizeof *lexeme);
@@ -632,14 +621,8 @@ static Command* builder_command(Builder* b) {
     if (b->current != NULL)
         return b->current;
 
-    if (pipeline->count >= b->commandCapacity) {
-        size_t capacity = b->commandCapacity == 0 ? 4 : b->commandCapacity * 2;
-        Command* grown = realloc(pipeline->commands, capacity * sizeof *grown);
-        if (grown == NULL)
-            return NULL;
-        pipeline->commands = grown;
-        b->commandCapacity = capacity;
-    }
+    if (VEC_RESERVE(pipeline->commands, b->commandCapacity, pipeline->count + 1) != 0)
+        return NULL;
 
     command = &pipeline->commands[pipeline->count++];
     memset(command, 0, sizeof *command);
@@ -652,17 +635,12 @@ static Command* builder_command(Builder* b) {
 static int builder_argument(Builder* b, LPSTR word, LPSTR pattern) {
     Command* command = b->current;
 
+    // argv and patterns grow together: the capacity is that of both
     if (b->argc + 2 > b->argvCapacity) {
-        size_t capacity = b->argvCapacity == 0 ? 8 : b->argvCapacity * 2;
-        LPSTR* grown = realloc(command->argv, capacity * sizeof *grown);
-        if (grown == NULL)
+        size_t patternsCapacity = b->argvCapacity;
+        if (VEC_RESERVE(command->argv, b->argvCapacity, b->argc + 2) != 0 ||
+            VEC_RESERVE(command->patterns, patternsCapacity, b->argc + 2) != 0)
             return -1;
-        command->argv = grown;
-        grown = realloc(command->patterns, capacity * sizeof *grown);
-        if (grown == NULL)
-            return -1;
-        command->patterns = grown;
-        b->argvCapacity = capacity;
     }
     command->argv[b->argc] = word;
     command->patterns[b->argc] = pattern;
@@ -672,21 +650,11 @@ static int builder_argument(Builder* b, LPSTR word, LPSTR pattern) {
     return 0;
 }
 
-/** Whether an array that holds count items has to grow for one more (it doubles from 4). */
-static int needs_room(size_t count) {
-    return count == 0 || (count >= 4 && (count & (count - 1)) == 0);
-}
-
 static int add_redirect(Command* command, int fd, LPSTR file, int append, int dupOf) {
     Redirect* redirect;
 
-    if (needs_room(command->redirectCount)) {
-        size_t capacity = command->redirectCount == 0 ? 4 : command->redirectCount * 2;
-        Redirect* grown = realloc(command->redirects, capacity * sizeof *grown);
-        if (grown == NULL)
-            return -1;
-        command->redirects = grown;
-    }
+    if (VEC_GROW_BY_COUNT(command->redirects, command->redirectCount) != 0)
+        return -1;
     redirect = &command->redirects[command->redirectCount++];
     redirect->fd = fd;
     redirect->file = file;
@@ -696,13 +664,8 @@ static int add_redirect(Command* command, int fd, LPSTR file, int append, int du
 }
 
 static int add_assignment(Command* command, LPSTR assignment) {
-    if (needs_room(command->assignmentCount)) {
-        size_t capacity = command->assignmentCount == 0 ? 4 : command->assignmentCount * 2;
-        LPSTR* grown = realloc(command->assignments, capacity * sizeof *grown);
-        if (grown == NULL)
-            return -1;
-        command->assignments = grown;
-    }
+    if (VEC_GROW_BY_COUNT(command->assignments, command->assignmentCount) != 0)
+        return -1;
     command->assignments[command->assignmentCount++] = assignment;
     return 0;
 }

@@ -8,6 +8,7 @@
 #include "vpath.h"
 #include "program.h"
 #include "args.h"
+#include "vec.h"
 
 #define VERSION "0.1"
 
@@ -35,14 +36,8 @@ typedef struct {
 } Environment;
 
 static int env_push(Environment* e, char* entry) {
-    if (e->count == e->capacity) {
-        size_t capacity = e->capacity == 0 ? 64 : e->capacity * 2;
-        char** grown = realloc(e->items, capacity * sizeof *grown);
-        if (grown == NULL)
-            return -1;
-        e->items = grown;
-        e->capacity = capacity;
-    }
+    if (VEC_RESERVE(e->items, e->capacity, e->count + 1) != 0)
+        return -1;
     e->items[e->count++] = entry;
     return 0;
 }
@@ -86,7 +81,7 @@ static int run(char* const argv[], const Environment* e) {
     char path[MAX_PATH * 2];
     char* command;
     char* block;
-    size_t size = 1, used = 0, i;
+    size_t size = 2, used = 0, i;       // an empty environment is two NULs
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
     DWORD code;
@@ -112,11 +107,7 @@ static int run(char* const argv[], const Environment* e) {
         used += length;
     }
     block[used] = '\0';
-    if (e->count == 0) {
-        // an empty block is two NULs
-        block = realloc(block, 2);
-        block[0] = block[1] = '\0';
-    }
+    block[used + 1] = '\0';
 
     ZeroMemory(&si, sizeof si);
     si.cb = sizeof si;
