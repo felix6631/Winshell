@@ -22,6 +22,8 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `ls` | Done (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` lists the drives) |
 | `mkdir` | Done (`-p -v -m`; `-m` is accepted and ignored) |
 | `mv` | Done (`-f -i -n -t -v`, to another drive it copies and then removes) |
+| `env` | Done (`-i`, `-u`, `-0`, `-C`, `NAME=VALUE`, running a command; found in the directory of `env.exe` or by a virtual path) |
+| `printenv` | Done (`-0`, names, status 1 for a missing one) |
 | `pwd` | Done (`-L`, `-P`, prints the virtual path) |
 | `rm` | Done (`-f -i -r -R -d -v`, `/` and the roots of drives and shares are never removed, not even with `--no-preserve-root`) |
 | `rmdir` | Done (`-p -v --ignore-fail-on-non-empty`) |
@@ -109,7 +111,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `head`, `ls`, `mkdir`, `mv`, `pwd`, `rm`, `rmdir`, `sort`, `tail`, `touch`, `tr`, `uniq`, `wc`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `head`, `ls`, `mkdir`, `mv`, `printenv`, `pwd`, `rm`, `rmdir`, `sort`, `tail`, `touch`, `tr`, `uniq`, `wc`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -134,6 +136,7 @@ The test programs are divided by feature (`test\`).
 | `dirs_test` | `mkdir`, `rmdir`, `touch` |
 | `text_test` | `head`, `tail`, `wc` |
 | `filter_test` | `sort`, `uniq`, `cut`, `tr` |
+| `env_test` | `env`, `printenv`: changing the environment, `-i`/`-u`, running a command and its status, `-C` |
 | `shell_run_test` | shell: running commands, quoting, pipes, redirection |
 | `shell_cd_test` | shell: `cd`, the virtual file system, wildcards |
 | `shell_lists_test` | shell: `; && \|\|`, exit status, variables, `exit` |
@@ -162,10 +165,12 @@ Winshell/
 ├─ cp/             cp command
 ├─ cut/            cut command
 ├─ echo/           echo command
+├─ env/            env command
 ├─ head/           head command
 ├─ ls/             ls command
 ├─ mkdir/          mkdir command
 ├─ mv/             mv command
+├─ printenv/       printenv command
 ├─ pwd/            pwd command
 ├─ rm/             rm command
 ├─ rmdir/          rmdir command

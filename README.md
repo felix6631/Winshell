@@ -22,6 +22,8 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `ls` | 완료 (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` 는 드라이브 목록) |
 | `mkdir` | 완료 (`-p -v -m`; `-m` 은 받기만 함) |
 | `mv` | 완료 (`-f -i -n -t -v`, 다른 드라이브로는 복사 후 삭제) |
+| `env` | 완료 (`-i`, `-u`, `-0`, `-C`, `NAME=VALUE`, 명령 실행; 명령은 `env.exe` 의 디렉터리나 가상 경로에서 찾음) |
+| `printenv` | 완료 (`-0`, 이름 지정, 종료 상태 1) |
 | `pwd` | 완료 (`-L`, `-P`, 가상 경로로 출력) |
 | `rm` | 완료 (`-f -i -r -R -d -v`, `/`, 드라이브, 공유의 루트는 `--no-preserve-root` 로도 삭제 불가) |
 | `rmdir` | 완료 (`-p -v --ignore-fail-on-non-empty`) |
@@ -109,7 +111,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `head`, `ls`, `mkdir`, `mv`, `pwd`, `rm`, `rmdir`, `sort`, `tail`, `touch`, `tr`, `uniq`, `wc`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `head`, `ls`, `mkdir`, `mv`, `printenv`, `pwd`, `rm`, `rmdir`, `sort`, `tail`, `touch`, `tr`, `uniq`, `wc`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -134,6 +136,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `dirs_test` | `mkdir`, `rmdir`, `touch` |
 | `text_test` | `head`, `tail`, `wc` |
 | `filter_test` | `sort`, `uniq`, `cut`, `tr` |
+| `env_test` | `env`, `printenv`: 환경 변경, `-i`/`-u`, 명령 실행과 종료 상태, `-C` |
 | `shell_run_test` | 쉘: 명령 실행, 따옴표, 파이프, 리다이렉션 |
 | `shell_cd_test` | 쉘: `cd`, 가상 파일 시스템, 와일드카드 |
 | `shell_lists_test` | 쉘: `; && \|\|`, 종료 상태, 변수, `exit` |
@@ -162,10 +165,12 @@ Winshell/
 ├─ cp/             cp 명령
 ├─ cut/            cut 명령
 ├─ echo/           echo 명령
+├─ env/            env 명령
 ├─ head/           head 명령
 ├─ ls/             ls 명령
 ├─ mkdir/          mkdir 명령
 ├─ mv/             mv 명령
+├─ printenv/       printenv 명령
 ├─ pwd/            pwd 명령
 ├─ rm/             rm 명령
 ├─ rmdir/          rmdir 명령

@@ -17,7 +17,7 @@
 
 BINDIR = $(MAKEDIR)\bin
 
-all: bindir build-shell build-arch build-cat build-cp build-cut build-echo build-head build-ls build-mkdir build-mv build-pwd build-rm build-rmdir build-sort build-tail build-touch build-tr build-uniq build-wc
+all: bindir build-shell build-arch build-cat build-cp build-cut build-echo build-env build-head build-ls build-mkdir build-mv build-printenv build-pwd build-rm build-rmdir build-sort build-tail build-touch build-tr build-uniq build-wc
 
 bindir:
 	@if not exist "$(BINDIR)" mkdir "$(BINDIR)"
@@ -32,6 +32,10 @@ build-cp:
 	@cd cp && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-echo:
 	@cd echo && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-env:
+	@cd env && $(MAKE) /nologo BINDIR="$(BINDIR)" all
+build-printenv:
+	@cd printenv && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-head:
 	@cd head && $(MAKE) /nologo BINDIR="$(BINDIR)" all
 build-ls:
@@ -75,7 +79,7 @@ asan:
 gnu: all
 	@bash test/gnu_compare.sh
 
-clean: clean-shell clean-arch clean-cat clean-cp clean-echo clean-head clean-ls clean-mkdir clean-mv clean-pwd clean-rm clean-rmdir clean-tail clean-touch clean-wc clean-test clean-cut clean-sort clean-tr clean-uniq
+clean: clean-shell clean-arch clean-cat clean-cp clean-echo clean-env clean-head clean-ls clean-mkdir clean-mv clean-printenv clean-pwd clean-rm clean-rmdir clean-tail clean-touch clean-wc clean-test clean-cut clean-sort clean-tr clean-uniq
 
 clean-shell:
 	@cd shell && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
@@ -87,6 +91,10 @@ clean-cp:
 	@cd cp && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-echo:
 	@cd echo && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-env:
+	@cd env && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
+clean-printenv:
+	@cd printenv && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-head:
 	@cd head && $(MAKE) /nologo BINDIR="$(BINDIR)" clean
 clean-ls:

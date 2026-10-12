@@ -1,75 +1,12 @@
 #include "executer.h"
 #include "vpath.h"
+#include "cmdline.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
 
 #define MAX_COMMAND_LINE 32767
-
-/**
- * Writes arg into out, quoted following the rules of CommandLineToArgvW so
- * the child gets the very same argument back. Returns the end of the output.
- */
-static char* quote_arg(char* out, const char* arg) {
-    size_t backslashes, i;
-
-    if (*arg != '\0' && strpbrk(arg, " \t\"") == NULL) {
-        size_t length = strlen(arg);
-        memcpy(out, arg, length);
-        return out + length;
-    }
-
-    *out++ = '"';
-    for (;;) {
-        backslashes = 0;
-        while (*arg == '\\') {
-            arg++;
-            backslashes++;
-        }
-
-        if (*arg == '\0') {
-            // backslashes in front of the closing quote must be doubled
-            for (i = 0; i < backslashes * 2; i++)
-                *out++ = '\\';
-            break;
-        }
-
-        if (*arg == '"') {
-            // backslashes in front of a quote must be doubled, and the quote escaped
-            for (i = 0; i < backslashes * 2 + 1; i++)
-                *out++ = '\\';
-        } else {
-            for (i = 0; i < backslashes; i++)
-                *out++ = '\\';
-        }
-        *out++ = *arg++;
-    }
-    *out++ = '"';
-    return out;
-}
-
-/** Joins argv into one command line. The result has to be freed. */
-static char* build_command_line(char* const argv[]) {
-    size_t size = 1, i;
-    char *command, *end;
-
-    for (i = 0; argv[i] != NULL; i++)
-        size += strlen(argv[i]) * 2 + 3;
-
-    command = malloc(size);
-    if (command == NULL)
-        return NULL;
-
-    end = command;
-    for (i = 0; argv[i] != NULL; i++) {
-        if (i > 0)
-            *end++ = ' ';
-        end = quote_arg(end, argv[i]);
-    }
-    *end = '\0';
-    return command;
-}
 
 /** Builds "<directory of shell.exe>\<program>.exe" into path. */
 static int resolve_program(const char* program, char* path, size_t size) {
@@ -234,7 +171,7 @@ static HANDLE start_program(char* const argv[], HANDLE in, HANDLE out, HANDLE er
     if (resolve_program(argv[0], path, sizeof path) != 0)
         goto err_start;
 
-    command = build_command_line(argv);
+    command = cmdline_build(argv);
     if (command == NULL)
         goto err_start;
 
