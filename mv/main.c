@@ -4,6 +4,7 @@
 #include <windows.h>
 #include "vpath.h"
 #include "fsutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "mv"
@@ -137,83 +138,57 @@ static int move_one(const FsOptions* o, const char* srcDisplay, const char* srcN
     return 1;
 }
 
+enum { OPT_FORCE = 1, OPT_INTERACTIVE, OPT_NO_CLOBBER, OPT_VERBOSE, OPT_TARGET };
+
+static const ArgsOption optionList[] = {
+    { OPT_FORCE,       'f', "force",            ARGS_NONE },
+    { OPT_INTERACTIVE, 'i', "interactive",      ARGS_NONE },
+    { OPT_NO_CLOBBER,  'n', "no-clobber",       ARGS_NONE },
+    { OPT_VERBOSE,     'v', "verbose",          ARGS_NONE },
+    { OPT_TARGET,      't', "target-directory", ARGS_REQUIRED },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, optionList, 1, 0, 0 };
+
+typedef struct {
+    FsOptions*  fs;
+    const char* targetDirectory;
+} Options;
+
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+
+    switch (id) {
+        case OPT_FORCE:       o->fs->force = 1; o->fs->interactive = o->fs->noClobber = 0; break;
+        case OPT_INTERACTIVE: o->fs->interactive = 1; o->fs->force = o->fs->noClobber = 0; break;
+        case OPT_NO_CLOBBER:  o->fs->noClobber = 1; o->fs->force = o->fs->interactive = 0; break;
+        case OPT_VERBOSE:     o->fs->verbose = 1; break;
+        case OPT_TARGET:      o->targetDirectory = value; break;
+    }
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     FsOptions options;
-    const char** operands = malloc((size_t)(argc + 1) * sizeof *operands);
-    const char* targetDirectory = NULL;
-    int count = 0, optionsEnded = 0, status = 0, i, sourceCount;
+    Options parsed;
+    const char** operands;
+    const char* targetDirectory;
+    int count, status = 0, i, sourceCount, result;
     const char* target;
     char targetNative[VPATH_MAX];
     DWORD targetAttributes = 0;
     int targetIsDirectory;
 
-    if (operands == NULL)
-        return 1;
     memset(&options, 0, sizeof options);
     options.program = PROGRAM;
+    parsed.fs = &options;
+    parsed.targetDirectory = NULL;
 
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
-
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            operands[count++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--force") == 0) {
-                options.force = 1;
-                options.interactive = options.noClobber = 0;
-            } else if (strcmp(arg, "--interactive") == 0) {
-                options.interactive = 1;
-                options.force = options.noClobber = 0;
-            } else if (strcmp(arg, "--no-clobber") == 0) {
-                options.noClobber = 1;
-                options.force = options.interactive = 0;
-            } else if (strcmp(arg, "--verbose") == 0) {
-                options.verbose = 1;
-            } else if (strncmp(arg, "--target-directory=", 19) == 0) {
-                targetDirectory = arg + 19;
-            } else if (strcmp(arg, "--target-directory") == 0 && i + 1 < argc) {
-                targetDirectory = argv[++i];
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'f': options.force = 1; options.interactive = options.noClobber = 0; break;
-                    case 'i': options.interactive = 1; options.force = options.noClobber = 0; break;
-                    case 'n': options.noClobber = 1; options.force = options.interactive = 0; break;
-                    case 'v': options.verbose = 1; break;
-                    case 't':
-                        if (p[1] != '\0') {
-                            targetDirectory = p + 1;
-                            p += strlen(p) - 1;
-                        } else if (i + 1 < argc) {
-                            targetDirectory = argv[++i];
-                        } else {
-                            fprintf(stderr, PROGRAM ": option requires an argument -- 't'\n");
-                            try_help();
-                            return 1;
-                        }
-                        break;
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                }
-            }
-        }
-    }
+    result = args_parse(&spec, argc, argv, on_option, &parsed, &operands, &count);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    targetDirectory = parsed.targetDirectory;
 
     if (targetDirectory != NULL) {
         target = targetDirectory;

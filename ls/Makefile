@@ -5,8 +5,8 @@ BINDIR = ..\bin
 OBJDIR = obj
 TARGET = $(BINDIR)\$(NAME).exe
 CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common $(EXTRA_CFLAGS)
-SRCS   = main.c ..\common\vpath.c
-HDRS   = ..\common\vpath.h
+SRCS   = main.c ..\common\args.c ..\common\vpath.c
+HDRS   = ..\common\args.h ..\common\vpath.h
 LIBS   = advapi32.lib
 
 all: $(TARGET)

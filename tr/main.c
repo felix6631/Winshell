@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "textutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "tr"
@@ -247,9 +248,39 @@ static void fill_set(Set* set, size_t needed) {
     set->length = length;
 }
 
+enum { OPT_COMPLEMENT = 1, OPT_C_UPPER, OPT_DELETE, OPT_SQUEEZE, OPT_TRUNCATE };
+
+static const ArgsOption options[] = {
+    { OPT_COMPLEMENT, 'c', "complement",        ARGS_NONE },
+    { OPT_COMPLEMENT, 'C', NULL,                ARGS_NONE },
+    { OPT_DELETE,     'd', "delete",            ARGS_NONE },
+    { OPT_SQUEEZE,    's', "squeeze-repeats",   ARGS_NONE },
+    { OPT_TRUNCATE,   't', "truncate-set1",     ARGS_NONE },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 0 };
+
+typedef struct {
+    int complement, deleteMode, squeeze, truncate;
+} Options;
+
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+    (void)value;
+    switch (id) {
+        case OPT_COMPLEMENT: o->complement = 1; break;
+        case OPT_DELETE:     o->deleteMode = 1; break;
+        case OPT_SQUEEZE:    o->squeeze = 1; break;
+        case OPT_TRUNCATE:   o->truncate = 1; break;
+    }
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
-    const char* operands[2];
-    int operandCount = 0, optionsEnded = 0, complement = 0, deleteMode = 0, squeeze = 0, truncate_ = 0, i;
+    Options o = { 0, 0, 0, 0 };
+    const char** operands;
+    int operandCount, complement, deleteMode, squeeze, truncate_, result;
     Set set1, set2;
     unsigned char map[256];
     unsigned char inDelete[256], inSqueeze[256];
@@ -258,54 +289,18 @@ int main(int argc, char* argv[]) {
     unsigned char out[65536];
     size_t got, used = 0, j;
 
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    complement = o.complement;
+    deleteMode = o.deleteMode;
+    squeeze = o.squeeze;
+    truncate_ = o.truncate;
 
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            if (operandCount == 2) {
-                fprintf(stderr, PROGRAM ": extra operand '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-            operands[operandCount++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--complement") == 0) {
-                complement = 1;
-            } else if (strcmp(arg, "--delete") == 0) {
-                deleteMode = 1;
-            } else if (strcmp(arg, "--squeeze-repeats") == 0) {
-                squeeze = 1;
-            } else if (strcmp(arg, "--truncate-set1") == 0) {
-                truncate_ = 1;
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'c':
-                    case 'C': complement = 1; break;
-                    case 'd': deleteMode = 1; break;
-                    case 's': squeeze = 1; break;
-                    case 't': truncate_ = 1; break;
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                }
-            }
-        }
+    if (operandCount > 2) {
+        fprintf(stderr, PROGRAM ": extra operand '%s'\n", operands[2]);
+        try_help();
+        return 1;
     }
 
     if (operandCount == 0) {

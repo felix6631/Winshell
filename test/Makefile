@@ -3,6 +3,7 @@
 ## 단위 테스트
 ##   vpath_test          common\vpath.c 의 단위 테스트 (가상 경로 변환)
 ##   parser_test         쉘 파서의 단위 테스트 (따옴표, 변수, 목록, 파이프, 리다이렉션)
+##   args_test           common\args.c 의 단위 테스트 (도구의 옵션 파서)
 ## 명령을 프로그램으로 실행해서 확인하는 테스트 (bin\ 의 프로그램이 필요)
 ##   basic_test          echo, arch, pwd
 ##   cat_test            cat
@@ -35,7 +36,7 @@ OUT    = out
 EXTRA  =
 CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common /I..\shell\include $(EXTRA)
 
-TESTS = $(OUT)\vpath_test.exe $(OUT)\parser_test.exe \
+TESTS = $(OUT)\vpath_test.exe $(OUT)\parser_test.exe $(OUT)\args_test.exe \
         $(OUT)\basic_test.exe $(OUT)\cat_test.exe $(OUT)\ls_test.exe $(OUT)\fileops_test.exe \
         $(OUT)\dirs_test.exe $(OUT)\text_test.exe $(OUT)\filter_test.exe \
         $(OUT)\shell_run_test.exe $(OUT)\shell_cd_test.exe $(OUT)\shell_lists_test.exe \
@@ -66,6 +67,10 @@ $(OUT)\sharing_test.exe $(OUT)\async_test.exe $(OUT)\env_test.exe $(OUT)\lines_t
 $(OUT)\vpath_test.exe: vpath_test.c testlib.h ..\common\vpath.c ..\common\vpath.h
 	@if not exist $(OUT) mkdir $(OUT)
 	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ vpath_test.c ..\common\vpath.c
+
+$(OUT)\args_test.exe: args_test.c testlib.h ..\common\args.c ..\common\args.h
+	@if not exist $(OUT) mkdir $(OUT)
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ args_test.c ..\common\args.c
 
 $(OUT)\parser_test.exe: parser_test.c testlib.h ..\shell\src\parser.c ..\shell\src\variables.c ..\shell\include\parser.h ..\shell\include\variables.h ..\common\vpath.c
 	@if not exist $(OUT) mkdir $(OUT)

@@ -102,7 +102,7 @@ static void test_pwd(void) {
 
     run_command("pwd", "--bogus", NULL, &r);
     CHECK_INT(r.exitCode, 1);
-    CHECK(strstr(r.err, "invalid option") != NULL);
+    CHECK(strstr(r.err, "unrecognized option '--bogus'") != NULL);
     run_result_free(&r);
 
     run_command("pwd", "--help", NULL, &r);

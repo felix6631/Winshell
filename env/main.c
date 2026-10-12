@@ -6,6 +6,7 @@
 #include <windows.h>
 #include "cmdline.h"
 #include "vpath.h"
+#include "args.h"
 
 #define VERSION "0.1"
 
@@ -176,11 +177,55 @@ static int run(char* const argv[], const Environment* e) {
     return (int)code;
 }
 
+enum { OPT_IGNORE = 1, OPT_UNSET, OPT_NULL, OPT_CHDIR };
+
+static const ArgsOption options[] = {
+    { OPT_IGNORE, 'i', "ignore-environment", ARGS_NONE },
+    { OPT_UNSET,  'u', "unset",              ARGS_REQUIRED },
+    { OPT_NULL,   '0', "null",               ARGS_NONE },
+    { OPT_CHDIR,  'C', "chdir",              ARGS_REQUIRED },
+    { 0 }
+};
+
+// 125 is the status of env itself failing; the first operand ends the options
+static const ArgsSpec spec = { "env", VERSION, print_usage, options, 125, 1, 0 };
+
+typedef struct {
+    Environment* environment;
+    const char*  chdirTo;
+    int          nullEnd;
+} Options;
+
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+
+    switch (id) {
+        case OPT_IGNORE:
+            o->environment->count = 0;
+            return 0;
+        case OPT_NULL:
+            o->nullEnd = 1;
+            return 0;
+        case OPT_CHDIR:
+            o->chdirTo = value;
+            return 0;
+        default:
+            if (value[0] == '\0' || strchr(value, '=') != NULL) {
+                fprintf(stderr, "env: cannot unset '%s': Invalid argument\n", value);
+                return -1;
+            }
+            env_remove(o->environment, value, strlen(value));
+            return 0;
+    }
+}
+
 int main(int argc, char* argv[]) {
     Environment e = { NULL, 0, 0 };
+    Options o;
     char* strings;
-    const char* chdirTo = NULL;
-    int nullEnd = 0, i = 1;
+    const char* chdirTo;
+    const char** operands;
+    int nullEnd, i = 0, count, result;
     const char* p;
 
     strings = GetEnvironmentStringsA();
@@ -192,81 +237,21 @@ int main(int argc, char* argv[]) {
         if (*p != '=' && env_push(&e, (char*)p) != 0)
             goto err_memory;
 
-    // options, in the order given; they end at the first word that is not one
-    for (; i < argc; i++) {
-        const char* arg = argv[i];
-
-        if (strcmp(arg, "--") == 0) {
-            i++;
-            break;
-        }
-        if (arg[0] != '-' || arg[1] == '\0')
-            break;
-
-        if (strcmp(arg, "--help") == 0) {
-            print_usage();
-            return 0;
-        } else if (strcmp(arg, "--version") == 0) {
-            puts("env (Winshell) " VERSION);
-            return 0;
-        } else if (strcmp(arg, "--ignore-environment") == 0) {
-            e.count = 0;
-        } else if (strcmp(arg, "--null") == 0) {
-            nullEnd = 1;
-        } else if (strncmp(arg, "--unset=", 8) == 0 || strcmp(arg, "--unset") == 0) {
-            const char* name = arg[7] == '=' ? arg + 8 : (++i < argc ? argv[i] : NULL);
-            if (name == NULL || name[0] == '\0' || strchr(name, '=') != NULL) {
-                fprintf(stderr, "env: cannot unset '%s': Invalid argument\n", name != NULL ? name : "");
-                return 125;
-            }
-            env_remove(&e, name, strlen(name));
-        } else if (strncmp(arg, "--chdir=", 8) == 0 || strcmp(arg, "--chdir") == 0) {
-            chdirTo = arg[7] == '=' ? arg + 8 : (++i < argc ? argv[i] : NULL);
-            if (chdirTo == NULL) {
-                fprintf(stderr, "env: option '--chdir' requires an argument\n");
-                return 125;
-            }
-        } else if (arg[1] != '-') {
-            // short options, which may be grouped; -u and -C take the rest or the next word
-            const char* o;
-            for (o = arg + 1; *o != '\0'; o++) {
-                if (*o == 'i') {
-                    e.count = 0;
-                } else if (*o == '0') {
-                    nullEnd = 1;
-                } else if (*o == 'u' || *o == 'C') {
-                    const char* value = o[1] != '\0' ? o + 1 : (++i < argc ? argv[i] : NULL);
-                    if (value == NULL) {
-                        fprintf(stderr, "env: option requires an argument -- '%c'\n", *o);
-                        return 125;
-                    }
-                    if (*o == 'C') {
-                        chdirTo = value;
-                    } else {
-                        if (value[0] == '\0' || strchr(value, '=') != NULL) {
-                            fprintf(stderr, "env: cannot unset '%s': Invalid argument\n", value);
-                            return 125;
-                        }
-                        env_remove(&e, value, strlen(value));
-                    }
-                    break;
-                } else {
-                    fprintf(stderr, "env: invalid option -- '%c'\nTry 'env --help' for more information.\n", *o);
-                    return 125;
-                }
-            }
-        } else {
-            fprintf(stderr, "env: unrecognized option '%s'\nTry 'env --help' for more information.\n", arg);
-            return 125;
-        }
-    }
+    o.environment = &e;
+    o.chdirTo = NULL;
+    o.nullEnd = 0;
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &count);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    chdirTo = o.chdirTo;
+    nullEnd = o.nullEnd;
 
     // NAME=VALUE words, then the command
-    for (; i < argc && is_assignment(argv[i]); i++)
-        if (env_set(&e, argv[i]) != 0)
+    for (; i < count && is_assignment(operands[i]); i++)
+        if (env_set(&e, (char*)operands[i]) != 0)
             goto err_memory;
 
-    if (i >= argc) {
+    if (i >= count) {
         size_t k;
         if (chdirTo != NULL) {
             fprintf(stderr, "env: must specify a command with --chdir (-C)\n");
@@ -302,7 +287,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    return run(&argv[i], &e);
+    return run((char* const*)&operands[i], &e);
 
 err_memory:
     fprintf(stderr, "env: out of memory\n");

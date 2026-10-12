@@ -4,6 +4,7 @@
 #include <string.h>
 #include "textutil.h"
 #include "vpath.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "sort"
@@ -460,155 +461,109 @@ static void add_key(const Key* key) {
 
 /* ---- main ------------------------------------------------------------------------- */
 
+enum { OPT_BLANKS = 1, OPT_DICT, OPT_FOLD, OPT_GENERAL, OPT_IGNORE, OPT_NUMERIC, OPT_REVERSE, OPT_STABLE,
+       OPT_UNIQUE, OPT_CHECK, OPT_CHECK_QUIET, OPT_MERGE, OPT_KEY, OPT_SEPARATOR, OPT_OUTPUT, OPT_ACCEPTED,
+       OPT_UNSUPPORTED_H, OPT_UNSUPPORTED_M, OPT_UNSUPPORTED_V, OPT_UNSUPPORTED_Z };
+
+static const ArgsOption options[] = {
+    { OPT_BLANKS,    'b', "ignore-leading-blanks", ARGS_NONE },
+    { OPT_DICT,      'd', "dictionary-order",      ARGS_NONE },
+    { OPT_FOLD,      'f', "ignore-case",           ARGS_NONE },
+    { OPT_GENERAL,   'g', "general-numeric-sort",  ARGS_NONE },
+    { OPT_IGNORE,    'i', "ignore-nonprinting",    ARGS_NONE },
+    { OPT_NUMERIC,   'n', "numeric-sort",          ARGS_NONE },
+    { OPT_REVERSE,   'r', "reverse",               ARGS_NONE },
+    { OPT_STABLE,    's', "stable",                ARGS_NONE },
+    { OPT_UNIQUE,    'u', "unique",                ARGS_NONE },
+    { OPT_CHECK,     'c', "check",                 ARGS_NONE },
+    { OPT_CHECK_QUIET, 'C', NULL,                  ARGS_NONE },
+    { OPT_MERGE,     'm', "merge",                 ARGS_NONE },
+    { OPT_KEY,       'k', "key",                   ARGS_REQUIRED },
+    { OPT_SEPARATOR, 't', "field-separator",       ARGS_REQUIRED },
+    { OPT_OUTPUT,    'o', "output",                ARGS_REQUIRED },
+    { OPT_ACCEPTED,  'S', "buffer-size",           ARGS_REQUIRED },
+    { OPT_ACCEPTED,  'T', "temporary-directory",   ARGS_REQUIRED },
+    { OPT_ACCEPTED,  0,   "parallel",              ARGS_REQUIRED },
+    { OPT_UNSUPPORTED_H, 'h', NULL,                ARGS_NONE },
+    { OPT_UNSUPPORTED_M, 'M', NULL,                ARGS_NONE },
+    { OPT_UNSUPPORTED_V, 'V', NULL,                ARGS_NONE },
+    { OPT_UNSUPPORTED_Z, 'z', NULL,                ARGS_NONE },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 2, 0, 0 };
+
+typedef struct {
+    Key         global;
+    const char* outputFile;
+    int         check, checkQuiet;
+} Options;
+
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+
+    switch (id) {
+        case OPT_BLANKS:   o->global.blankStart = o->global.blankEnd = 1; break;
+        case OPT_DICT:     o->global.dict = 1; break;
+        case OPT_FOLD:     o->global.fold = 1; break;
+        case OPT_GENERAL:  o->global.general = 1; break;
+        case OPT_IGNORE:   o->global.ignore = 1; break;
+        case OPT_NUMERIC:  o->global.numeric = 1; break;
+        case OPT_REVERSE:  o->global.reverse = 1; break;
+        case OPT_STABLE:   stable = 1; break;
+        case OPT_UNIQUE:   unique = 1; break;
+        case OPT_CHECK:    o->check = 1; break;
+        case OPT_CHECK_QUIET: o->check = 1; o->checkQuiet = 1; break;
+        case OPT_MERGE:    break;       // the input is sorted as a whole, which gives the same result
+        case OPT_OUTPUT:   o->outputFile = value; break;
+        case OPT_ACCEPTED: break;       // accepted and ignored
+        case OPT_KEY: {
+            Key key;
+            if (parse_key(value, &key) != 0) {
+                fprintf(stderr, PROGRAM ": invalid number at field start: invalid count at start of '%s'\n", value);
+                return -1;
+            }
+            add_key(&key);
+            break;
+        }
+        case OPT_SEPARATOR:
+            if (strcmp(value, "\\0") == 0) {
+                tabSeparator = 0;
+            } else if (value[0] != '\0' && value[1] == '\0') {
+                tabSeparator = (unsigned char)value[0];
+            } else {
+                fprintf(stderr, PROGRAM ": multi-character tab '%s'\n", value);
+                return -1;
+            }
+            break;
+        case OPT_UNSUPPORTED_H: fprintf(stderr, PROGRAM ": option -h is not supported\n"); return -1;
+        case OPT_UNSUPPORTED_M: fprintf(stderr, PROGRAM ": option -M is not supported\n"); return -1;
+        case OPT_UNSUPPORTED_V: fprintf(stderr, PROGRAM ": option -V is not supported\n"); return -1;
+        case OPT_UNSUPPORTED_Z: fprintf(stderr, PROGRAM ": option -z is not supported\n"); return -1;
+    }
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
-    const char** operands = malloc((size_t)(argc + 1) * sizeof *operands);
+    Options o;
+    const char** operands;
     Key global;
-    const char* outputFile = NULL;
-    int check = 0, checkQuiet = 0, optionsEnded = 0, operandCount = 0, status = 0, i;
+    const char* outputFile;
+    int check, checkQuiet, operandCount, status = 0, i, result;
     unsigned char** texts = NULL;
     size_t* lengths = NULL;
     Entry* entries = NULL;
     size_t entryCount = 0, entryCapacity = 0, k;
     FILE* out = stdout;
 
-    if (operands == NULL)
-        return 2;
-    memset(&global, 0, sizeof global);
-
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
-
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            operands[operandCount++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            const char* value = NULL;
-
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--reverse") == 0) {
-                global.reverse = 1;
-            } else if (strcmp(arg, "--numeric-sort") == 0) {
-                global.numeric = 1;
-            } else if (strcmp(arg, "--general-numeric-sort") == 0) {
-                global.general = 1;
-            } else if (strcmp(arg, "--ignore-case") == 0) {
-                global.fold = 1;
-            } else if (strcmp(arg, "--ignore-leading-blanks") == 0) {
-                global.blankStart = global.blankEnd = 1;
-            } else if (strcmp(arg, "--dictionary-order") == 0) {
-                global.dict = 1;
-            } else if (strcmp(arg, "--ignore-nonprinting") == 0) {
-                global.ignore = 1;
-            } else if (strcmp(arg, "--unique") == 0) {
-                unique = 1;
-            } else if (strcmp(arg, "--stable") == 0) {
-                stable = 1;
-            } else if (strcmp(arg, "--check") == 0) {
-                check = 1;
-            } else if (strcmp(arg, "--merge") == 0) {
-                // the input is sorted as a whole, which gives the same result
-            } else if (strncmp(arg, "--key=", 6) == 0) {
-                value = arg + 6;
-                Key key;
-                if (parse_key(value, &key) != 0) {
-                    fprintf(stderr, PROGRAM ": invalid key '%s'\n", value);
-                    return 2;
-                }
-                add_key(&key);
-            } else if (strncmp(arg, "--field-separator=", 18) == 0) {
-                value = arg + 18;
-                if (strcmp(value, "\\0") == 0)
-                    tabSeparator = 0;
-                else if (value[0] != '\0' && value[1] == '\0')
-                    tabSeparator = (unsigned char)value[0];
-                else {
-                    fprintf(stderr, PROGRAM ": multi-character tab '%s'\n", value);
-                    return 2;
-                }
-            } else if (strncmp(arg, "--output=", 9) == 0) {
-                outputFile = arg + 9;
-            } else if (strncmp(arg, "--parallel=", 11) == 0 || strncmp(arg, "--buffer-size=", 14) == 0 ||
-                       strncmp(arg, "--temporary-directory=", 22) == 0) {
-                // accepted and ignored
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 2;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'b': global.blankStart = global.blankEnd = 1; break;
-                    case 'd': global.dict = 1; break;
-                    case 'f': global.fold = 1; break;
-                    case 'g': global.general = 1; break;
-                    case 'i': global.ignore = 1; break;
-                    case 'n': global.numeric = 1; break;
-                    case 'r': global.reverse = 1; break;
-                    case 's': stable = 1; break;
-                    case 'u': unique = 1; break;
-                    case 'c': check = 1; break;
-                    case 'C': check = 1; checkQuiet = 1; break;
-                    case 'm':
-                        break;      // the input is sorted as a whole, which gives the same result
-                    case 'h': case 'M': case 'V': case 'z':
-                        fprintf(stderr, PROGRAM ": option -%c is not supported\n", *p);
-                        return 2;
-                    case 'k':
-                    case 't':
-                    case 'o':
-                    case 'S':
-                    case 'T': {
-                        char option = *p;
-                        const char* value;
-
-                        if (p[1] != '\0') {
-                            value = p + 1;
-                        } else if (i + 1 < argc) {
-                            value = argv[++i];
-                        } else {
-                            fprintf(stderr, PROGRAM ": option requires an argument -- '%c'\n", option);
-                            try_help();
-                            return 2;
-                        }
-
-                        if (option == 'k') {
-                            Key key;
-                            if (parse_key(value, &key) != 0) {
-                                fprintf(stderr, PROGRAM ": invalid number at field start: invalid count at start of '%s'\n", value);
-                                return 2;
-                            }
-                            add_key(&key);
-                        } else if (option == 't') {
-                            if (strcmp(value, "\\0") == 0)
-                                tabSeparator = 0;
-                            else if (value[0] != '\0' && value[1] == '\0')
-                                tabSeparator = (unsigned char)value[0];
-                            else {
-                                fprintf(stderr, PROGRAM ": multi-character tab '%s'\n", value);
-                                return 2;
-                            }
-                        } else if (option == 'o') {
-                            outputFile = value;
-                        }
-                        p += strlen(p) - 1;
-                        break;
-                    }
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 2;
-                }
-            }
-        }
-    }
+    memset(&o, 0, sizeof o);
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    global = o.global;
+    outputFile = o.outputFile;
+    check = o.check;
+    checkQuiet = o.checkQuiet;
 
     // keys without options of their own use the global ones; with no key the whole line is one
     if (keyCount == 0) {

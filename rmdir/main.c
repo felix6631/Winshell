@@ -4,6 +4,7 @@
 #include <windows.h>
 #include "vpath.h"
 #include "fsutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "rmdir"
@@ -23,10 +24,6 @@ static void print_usage(void) {
          "DIRECTORY names are paths of the virtual file system. A directory is only\n"
          "removed when it is empty; the read-only attribute does not prevent it, as\n"
          "permissions do not on UNIX.");
-}
-
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
 }
 
 static int is_separator(char c) {
@@ -90,64 +87,47 @@ static int remove_one(const char* display, const char* native, int ignoreNonEmpt
     return 1;
 }
 
-int main(int argc, char* argv[]) {
-    int parents = 0, verbose = 0, ignoreNonEmpty = 0, optionsEnded = 0, operands = 0, status = 0, i;
+enum { OPT_PARENTS = 1, OPT_VERBOSE, OPT_IGNORE };
 
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
+static const ArgsOption optionList[] = {
+    { OPT_PARENTS, 'p', "parents",                  ARGS_NONE },
+    { OPT_VERBOSE, 'v', "verbose",                  ARGS_NONE },
+    { OPT_IGNORE,  0,   "ignore-fail-on-non-empty", ARGS_NONE },
+    { 0 }
+};
 
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            continue;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--parents") == 0) {
-                parents = 1;
-            } else if (strcmp(arg, "--verbose") == 0) {
-                verbose = 1;
-            } else if (strcmp(arg, "--ignore-fail-on-non-empty") == 0) {
-                ignoreNonEmpty = 1;
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'p': parents = 1; break;
-                    case 'v': verbose = 1; break;
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                }
-            }
-        }
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, optionList, 1, 0, 0 };
+
+typedef struct {
+    int parents, verbose, ignoreNonEmpty;
+} Options;
+
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+    (void)value;
+
+    switch (id) {
+        case OPT_PARENTS: o->parents = 1; break;
+        case OPT_VERBOSE: o->verbose = 1; break;
+        case OPT_IGNORE:  o->ignoreNonEmpty = 1; break;
     }
+    return 0;
+}
 
-    optionsEnded = 0;
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
+int main(int argc, char* argv[]) {
+    Options o = { 0, 0, 0 };
+    const char** operands;
+    int operandCount, status = 0, i, result;
+
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+
+    for (i = 0; i < operandCount; i++) {
+        const char* arg = operands[i];
         char native[VPATH_MAX], display[VPATH_MAX];
-        int kind;
+        int kind = vpath_to_native(arg, native, sizeof native);
 
-        if (!optionsEnded && strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-            continue;
-        }
-        if (!optionsEnded && arg[0] == '-' && arg[1] != '\0')
-            continue;
-
-        operands++;
-        kind = vpath_to_native(arg, native, sizeof native);
         if (kind == VPATH_ROOT) {
             fprintf(stderr, PROGRAM ": failed to remove '%s': Device or resource busy\n", arg);
             status = 1;
@@ -166,29 +146,29 @@ int main(int argc, char* argv[]) {
         }
         strcpy(display, arg);
 
-        if (remove_one(display, native, ignoreNonEmpty, verbose) != 0) {
+        if (remove_one(display, native, o.ignoreNonEmpty, o.verbose) != 0) {
             status = 1;
             continue;
         }
 
         // -p: the parents, one after the other, until something stops it
-        while (parents) {
+        while (o.parents) {
             if (!strip_last_component(native, 0) || !strip_last_component(display, 1))
                 break;
             // a drive, or the root, is where it ends
             if (is_drive_root(native) || strcmp(display, "/") == 0 || display[0] == '\0' ||
                 strcmp(display, ".") == 0 || strcmp(display, "..") == 0)
                 break;
-            if (remove_one(display, native, ignoreNonEmpty, verbose) != 0) {
+            if (remove_one(display, native, o.ignoreNonEmpty, o.verbose) != 0) {
                 status = 1;
                 break;
             }
         }
     }
 
-    if (operands == 0) {
+    if (operandCount == 0) {
         fprintf(stderr, PROGRAM ": missing operand\n");
-        try_help();
+        fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
         return 1;
     }
     return status;

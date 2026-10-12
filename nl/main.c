@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "textutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "nl"
@@ -33,10 +34,6 @@ static void print_usage(void) {
          "rz (right justified, leading zeros).\n"
          "A CR in front of the line feed is part of the line ending, not of the line, so\n"
          "a line with only a CR LF is empty. Lines keep their endings.");
-}
-
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
 }
 
 static char bodyStyle = 't', headerStyle = 'n', footerStyle = 'n';
@@ -106,96 +103,45 @@ static int set_option(char option, const char* value) {
     return -1;
 }
 
-static const struct { const char* name; char option; } longOptions[] = {
-    { "body-numbering", 'b' }, { "section-delimiter", 'd' }, { "footer-numbering", 'f' },
-    { "header-numbering", 'h' }, { "line-increment", 'i' }, { "join-blank-lines", 'l' },
-    { "number-format", 'n' }, { "number-separator", 's' }, { "starting-line-number", 'v' },
-    { "number-width", 'w' },
+/* the id of an option is its letter */
+static const ArgsOption options[] = {
+    { 'b', 'b', "body-numbering",        ARGS_REQUIRED },
+    { 'd', 'd', "section-delimiter",     ARGS_REQUIRED },
+    { 'f', 'f', "footer-numbering",      ARGS_REQUIRED },
+    { 'h', 'h', "header-numbering",      ARGS_REQUIRED },
+    { 'i', 'i', "line-increment",        ARGS_REQUIRED },
+    { 'l', 'l', "join-blank-lines",      ARGS_REQUIRED },
+    { 'n', 'n', "number-format",         ARGS_REQUIRED },
+    { 'p', 'p', "no-renumber",           ARGS_NONE },
+    { 's', 's', "number-separator",      ARGS_REQUIRED },
+    { 'v', 'v', "starting-line-number",  ARGS_REQUIRED },
+    { 'w', 'w', "number-width",          ARGS_REQUIRED },
+    { 0 }
 };
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 0 };
+
+static int on_option(int id, const char* value, void* context) {
+    (void)context;
+    if (id == 'p') {
+        renumber = 0;
+        return 0;
+    }
+    return set_option((char)id, value);
+}
 
 int main(int argc, char* argv[]) {
     const char** operands;
-    size_t operandCount = 0, i;
-    int optionsEnded = 0, status = 0, a;
+    size_t operandCount, i;
+    int status = 0, count, result;
     long long number, blankCount = 0;
     char style;
     size_t separatorLength;
 
-    operands = calloc((size_t)argc + 1, sizeof *operands);
-    if (operands == NULL) {
-        fprintf(stderr, PROGRAM ": out of memory\n");
-        return 1;
-    }
-
-    for (a = 1; a < argc; a++) {
-        const char* arg = argv[a];
-
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            operands[operandCount++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            const char* equals = strchr(arg, '=');
-            size_t nameLength = equals != NULL ? (size_t)(equals - arg - 2) : strlen(arg + 2);
-            size_t k;
-            int found = 0;
-
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--no-renumber") == 0) {
-                renumber = 0;
-                continue;
-            }
-            for (k = 0; k < sizeof longOptions / sizeof longOptions[0]; k++) {
-                if (strlen(longOptions[k].name) == nameLength && strncmp(arg + 2, longOptions[k].name, nameLength) == 0) {
-                    const char* value = equals != NULL ? equals + 1 : (a + 1 < argc ? argv[++a] : NULL);
-                    if (value == NULL) {
-                        fprintf(stderr, PROGRAM ": option '%s' requires an argument\n", arg);
-                        try_help();
-                        return 1;
-                    }
-                    if (set_option(longOptions[k].option, value) != 0)
-                        return 1;
-                    found = 1;
-                    break;
-                }
-            }
-            if (!found) {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                if (*p == 'p') {
-                    renumber = 0;
-                } else if (strchr("bdfhilnsvw", *p) != NULL) {
-                    const char* value;
-                    if (p[1] != '\0') {
-                        value = p + 1;
-                    } else if (a + 1 < argc) {
-                        value = argv[++a];
-                    } else {
-                        fprintf(stderr, PROGRAM ": option requires an argument -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                    }
-                    if (set_option(*p, value) != 0)
-                        return 1;
-                    break;
-                } else {
-                    fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                    try_help();
-                    return 1;
-                }
-            }
-        }
-    }
+    result = args_parse(&spec, argc, argv, on_option, NULL, &operands, &count);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    operandCount = (size_t)count;
 
     text_binary_streams();
     if (operandCount == 0)

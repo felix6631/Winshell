@@ -4,6 +4,7 @@
 #include <string.h>
 #include "textutil.h"
 #include "vpath.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "uniq"
@@ -89,9 +90,41 @@ static int parse_number(const char* text, unsigned long* out, const char* what) 
     return 0;
 }
 
+enum { OPT_COUNT = 1, OPT_REPEATED, OPT_ALL_REPEATED, OPT_UNIQUE, OPT_IGNORE_CASE, OPT_SKIP_FIELDS,
+       OPT_SKIP_CHARS, OPT_CHECK_CHARS };
+
+static const ArgsOption options[] = {
+    { OPT_COUNT,        'c', "count",        ARGS_NONE },
+    { OPT_REPEATED,     'd', "repeated",     ARGS_NONE },
+    { OPT_ALL_REPEATED, 'D', NULL,           ARGS_NONE },
+    { OPT_UNIQUE,       'u', "unique",       ARGS_NONE },
+    { OPT_IGNORE_CASE,  'i', "ignore-case",  ARGS_NONE },
+    { OPT_SKIP_FIELDS,  'f', "skip-fields",  ARGS_REQUIRED },
+    { OPT_SKIP_CHARS,   's', "skip-chars",   ARGS_REQUIRED },
+    { OPT_CHECK_CHARS,  'w', "check-chars",  ARGS_REQUIRED },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 1 };
+
+static int on_option(int id, const char* value, void* context) {
+    (void)context;
+    switch (id) {
+        case OPT_COUNT:        count_option = 1; return 0;
+        case OPT_REPEATED:     repeated = 1; return 0;
+        case OPT_ALL_REPEATED: all_repeated = 1; return 0;
+        case OPT_UNIQUE:       unique_only = 1; return 0;
+        case OPT_IGNORE_CASE:  ignore_case = 1; return 0;
+        case ARGS_NUMBER:      // -N means -f N
+        case OPT_SKIP_FIELDS:  return parse_number(value, &skip_fields, "fields to skip");
+        case OPT_SKIP_CHARS:   return parse_number(value, &skip_chars, "bytes to skip");
+        default:               return parse_number(value, &check_chars, "bytes to compare");
+    }
+}
+
 int main(int argc, char* argv[]) {
-    const char* operands[2];
-    int operandCount = 0, optionsEnded = 0, i;
+    const char** operands;
+    int operandCount, result;
     FILE *in = stdin, *out = stdout;
     unsigned char* text;
     size_t length = 0, offset = 0;
@@ -99,96 +132,12 @@ int main(int argc, char* argv[]) {
     unsigned long groupCount = 0;
     int haveGroup = 0;
 
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
-
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            if (operandCount == 2) {
-                fprintf(stderr, PROGRAM ": extra operand '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-            operands[operandCount++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            const char* value;
-
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--count") == 0) {
-                count_option = 1;
-            } else if (strcmp(arg, "--repeated") == 0) {
-                repeated = 1;
-            } else if (strcmp(arg, "--unique") == 0) {
-                unique_only = 1;
-            } else if (strcmp(arg, "--ignore-case") == 0) {
-                ignore_case = 1;
-            } else if (strncmp(arg, "--skip-fields=", 14) == 0) {
-                value = arg + 14;
-                if (parse_number(value, &skip_fields, "fields to skip") != 0)
-                    return 1;
-            } else if (strncmp(arg, "--skip-chars=", 13) == 0) {
-                value = arg + 13;
-                if (parse_number(value, &skip_chars, "bytes to skip") != 0)
-                    return 1;
-            } else if (strncmp(arg, "--check-chars=", 14) == 0) {
-                value = arg + 14;
-                if (parse_number(value, &check_chars, "bytes to compare") != 0)
-                    return 1;
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            // -N means -f N
-            if (arg[1] >= '0' && arg[1] <= '9') {
-                if (parse_number(arg + 1, &skip_fields, "fields to skip") != 0)
-                    return 1;
-                continue;
-            }
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'c': count_option = 1; break;
-                    case 'd': repeated = 1; break;
-                    case 'D': all_repeated = 1; break;
-                    case 'u': unique_only = 1; break;
-                    case 'i': ignore_case = 1; break;
-                    case 'f':
-                    case 's':
-                    case 'w': {
-                        char option = *p;
-                        const char* value;
-                        unsigned long* target = option == 'f' ? &skip_fields : (option == 's' ? &skip_chars : &check_chars);
-
-                        if (p[1] != '\0') {
-                            value = p + 1;
-                        } else if (i + 1 < argc) {
-                            value = argv[++i];
-                        } else {
-                            fprintf(stderr, PROGRAM ": option requires an argument -- '%c'\n", option);
-                            try_help();
-                            return 1;
-                        }
-                        if (parse_number(value, target, option == 'f' ? "fields to skip" :
-                                                         (option == 's' ? "bytes to skip" : "bytes to compare")) != 0)
-                            return 1;
-                        p += strlen(p) - 1;
-                        break;
-                    }
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                }
-            }
-        }
+    result = args_parse(&spec, argc, argv, on_option, NULL, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    if (operandCount > 2) {
+        fprintf(stderr, PROGRAM ": extra operand '%s'\nTry '" PROGRAM " --help' for more information.\n", operands[2]);
+        return 1;
     }
 
     if (all_repeated && count_option) {

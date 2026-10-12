@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "textutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "head"
@@ -26,10 +27,6 @@ static void print_usage(void) {
          "NUM may have a multiplier suffix: b 512, k 1024, M 1024*1024, G, kB 1000, MB, GB.\n"
          "Lines end at a line feed; a CR in front of it stays with its line, so files with\n"
          "LF and with CR LF line endings are cut at the same places and are not changed.");
-}
-
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
 }
 
 typedef struct {
@@ -144,118 +141,65 @@ static int head_all_but_last(FILE* in, const Mode* mode) {
     return 0;
 }
 
-int main(int argc, char* argv[]) {
-    Mode mode = { 0, 10, 0 };
-    int quiet = 0, verbose = 0, optionsEnded = 0, status = 0, files = 0, shown = 0, i;
-    const char** operands = malloc((size_t)(argc + 1) * sizeof *operands);
+enum { OPT_QUIET = 1, OPT_VERBOSE, OPT_LINES, OPT_BYTES };
 
-    if (operands == NULL)
-        return 1;
+static const ArgsOption options[] = {
+    { OPT_QUIET,   'q', "quiet",   ARGS_NONE },
+    { OPT_QUIET,   0,   "silent",  ARGS_NONE },
+    { OPT_VERBOSE, 'v', "verbose", ARGS_NONE },
+    { OPT_LINES,   'n', "lines",   ARGS_REQUIRED },
+    { OPT_BYTES,   'c', "bytes",   ARGS_REQUIRED },
+    { 0 }
+};
 
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 1 };
 
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            operands[files++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            const char* value = NULL;
-            int bytes = 0, isCount = 0;
+typedef struct {
+    Mode mode;
+    int  quiet, verbose;
+} Options;
 
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--quiet") == 0 || strcmp(arg, "--silent") == 0) {
-                quiet = 1;
-                verbose = 0;
-            } else if (strcmp(arg, "--verbose") == 0) {
-                verbose = 1;
-                quiet = 0;
-            } else if (strncmp(arg, "--lines=", 8) == 0) {
-                value = arg + 8;
-                isCount = 1;
-            } else if (strncmp(arg, "--bytes=", 8) == 0) {
-                value = arg + 8;
-                isCount = bytes = 1;
-            } else if (strcmp(arg, "--lines") == 0 && i + 1 < argc) {
-                value = argv[++i];
-                isCount = 1;
-            } else if (strcmp(arg, "--bytes") == 0 && i + 1 < argc) {
-                value = argv[++i];
-                isCount = bytes = 1;
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+    TextCount count;
+    int bytes = id == OPT_BYTES;
+
+    switch (id) {
+        case OPT_QUIET:   o->quiet = 1; o->verbose = 0; return 0;
+        case OPT_VERBOSE: o->verbose = 1; o->quiet = 0; return 0;
+        case ARGS_NUMBER: // -NUM: the digits are a line count
+            if (text_parse_count(value, &count) != 0) {
+                fprintf(stderr, PROGRAM ": invalid number of lines: '%s'\n", value);
+                return -1;
             }
-
-            if (isCount) {
-                TextCount count;
-                if (text_parse_count(value, &count) != 0) {
-                    fprintf(stderr, PROGRAM ": invalid number of %s: '%s'\n", bytes ? "bytes" : "lines", value);
-                    return 1;
-                }
-                mode.bytes = bytes;
-                mode.count = count.value;
-                mode.fromEnd = count.minus;
+            o->mode.bytes = 0;
+            o->mode.count = count.value;
+            o->mode.fromEnd = 0;
+            return 0;
+        default:
+            if (text_parse_count(value, &count) != 0) {
+                fprintf(stderr, PROGRAM ": invalid number of %s: '%s'\n", bytes ? "bytes" : "lines", value);
+                return -1;
             }
-        } else {
-            const char* p;
-            // -NUM: the digits are a line count
-            if (arg[1] >= '0' && arg[1] <= '9') {
-                TextCount count;
-                if (text_parse_count(arg + 1, &count) != 0) {
-                    fprintf(stderr, PROGRAM ": invalid number of lines: '%s'\n", arg + 1);
-                    return 1;
-                }
-                mode.bytes = 0;
-                mode.count = count.value;
-                mode.fromEnd = 0;
-                continue;
-            }
-
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'q': quiet = 1; verbose = 0; break;
-                    case 'v': verbose = 1; quiet = 0; break;
-                    case 'n':
-                    case 'c': {
-                        char option = *p;
-                        const char* value;
-                        TextCount count;
-
-                        if (p[1] != '\0') {
-                            value = p + 1;
-                        } else if (i + 1 < argc) {
-                            value = argv[++i];
-                        } else {
-                            fprintf(stderr, PROGRAM ": option requires an argument -- '%c'\n", option);
-                            try_help();
-                            return 1;
-                        }
-                        if (text_parse_count(value, &count) != 0) {
-                            fprintf(stderr, PROGRAM ": invalid number of %s: '%s'\n",
-                                    option == 'c' ? "bytes" : "lines", value);
-                            return 1;
-                        }
-                        mode.bytes = option == 'c';
-                        mode.count = count.value;
-                        mode.fromEnd = count.minus;
-                        p += strlen(p) - 1;
-                        break;
-                    }
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                }
-            }
-        }
+            o->mode.bytes = bytes;
+            o->mode.count = count.value;
+            o->mode.fromEnd = count.minus;
+            return 0;
     }
+}
+
+int main(int argc, char* argv[]) {
+    Options o = { { 0, 10, 0 }, 0, 0 };
+    Mode mode;
+    int quiet, verbose, status = 0, files, shown = 0, i, result;
+    const char** operands;
+
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &files);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    mode = o.mode;
+    quiet = o.quiet;
+    verbose = o.verbose;
 
     text_binary_streams();
 

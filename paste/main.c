@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "textutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "paste"
@@ -24,10 +25,6 @@ static void print_usage(void) {
          "standard input, and several of them take the lines of it in turn (paste - -).\n"
          "A CR in front of the line feed is part of the line ending: the lines are joined\n"
          "without it, and the output line ends with CR LF when an input line did.");
-}
-
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
 }
 
 static const char* delimiters = "\t";       // the list as it is written
@@ -77,76 +74,50 @@ static int check_delimiters(const char* list) {
     return 0;
 }
 
+enum { OPT_DELIMITERS = 1, OPT_SERIAL, OPT_ZERO };
+
+static const ArgsOption options[] = {
+    { OPT_DELIMITERS, 'd', "delimiters",      ARGS_REQUIRED },
+    { OPT_SERIAL,     's', "serial",          ARGS_NONE },
+    { OPT_ZERO,       'z', "zero-terminated", ARGS_NONE },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 0 };
+
+typedef struct {
+    int serial, zero;
+} Options;
+
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+
+    switch (id) {
+        case OPT_DELIMITERS: delimiters = value; break;
+        case OPT_SERIAL:     o->serial = 1; break;
+        case OPT_ZERO:       o->zero = 1; break;
+    }
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
+    Options o = { 0, 0 };
     const char** operands;
-    size_t operandCount = 0, i;
-    int serial = 0, zero = 0, optionsEnded = 0, status = 0, a;
+    size_t operandCount, i;
+    int serial, zero, status = 0, count, result;
     LineReader** readers;
     LineReader stdinReader;
     int haveStdin = 0, terminator;
 
-    operands = calloc((size_t)argc + 1, sizeof *operands);
-    if (operands == NULL) {
-        fprintf(stderr, PROGRAM ": out of memory\n");
-        return 1;
-    }
-
-    for (a = 1; a < argc; a++) {
-        const char* arg = argv[a];
-
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            operands[operandCount++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--serial") == 0) {
-                serial = 1;
-            } else if (strcmp(arg, "--zero-terminated") == 0) {
-                zero = 1;
-            } else if (strncmp(arg, "--delimiters=", 13) == 0) {
-                delimiters = arg + 13;
-            } else if (strcmp(arg, "--delimiters") == 0 && a + 1 < argc) {
-                delimiters = argv[++a];
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                if (*p == 's') {
-                    serial = 1;
-                } else if (*p == 'z') {
-                    zero = 1;
-                } else if (*p == 'd') {
-                    if (p[1] != '\0') {
-                        delimiters = p + 1;
-                    } else if (a + 1 < argc) {
-                        delimiters = argv[++a];
-                    } else {
-                        fprintf(stderr, PROGRAM ": option requires an argument -- 'd'\n");
-                        try_help();
-                        return 1;
-                    }
-                    break;
-                } else {
-                    fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                    try_help();
-                    return 1;
-                }
-            }
-        }
-    }
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &count);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    operandCount = (size_t)count;
+    serial = o.serial;
+    zero = o.zero;
 
     if (delimiters[0] == '\0')
-        delimiters = "\\0";             // an empty list is the same as \0: no delimiter at all
+        delimiters = "\\0";            // an empty list is the same as \0: no delimiter at all
     if (check_delimiters(delimiters) != 0)
         return 1;
 

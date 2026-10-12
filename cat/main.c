@@ -7,6 +7,7 @@
 #include <windows.h>
 #include "vpath.h"
 #include "textutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "cat"
@@ -59,10 +60,6 @@ static void print_usage(void) {
          "Examples:\n"
          "  cat f - g  Output f's contents, then standard input, then g's contents.\n"
          "  cat        Copy standard input to standard output.");
-}
-
-static void print_try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
 }
 
 static void emit(int c) {
@@ -254,71 +251,50 @@ static int cat_file(const char* path, int plain) {
     return status;
 }
 
-int main(int argc, char* argv[]) {
-    const char** files = malloc((size_t)(argc + 1) * sizeof *files);
-    int fileCount = 0, optionsEnded = 0, status = 0, i, plain;
+enum { OPT_ALL = 1, OPT_NUMBER_NONBLANK, OPT_E, OPT_ENDS, OPT_NUMBER, OPT_SQUEEZE, OPT_T, OPT_TABS,
+       OPT_IGNORED, OPT_NONPRINTING };
 
-    if (files == NULL)
-        return 1;
+static const ArgsOption options[] = {
+    { OPT_ALL,             'A', "show-all",         ARGS_NONE },
+    { OPT_NUMBER_NONBLANK, 'b', "number-nonblank",  ARGS_NONE },
+    { OPT_E,               'e', NULL,               ARGS_NONE },
+    { OPT_ENDS,            'E', "show-ends",        ARGS_NONE },
+    { OPT_NUMBER,          'n', "number",           ARGS_NONE },
+    { OPT_SQUEEZE,         's', "squeeze-blank",    ARGS_NONE },
+    { OPT_T,               't', NULL,               ARGS_NONE },
+    { OPT_TABS,            'T', "show-tabs",        ARGS_NONE },
+    { OPT_IGNORED,         'u', NULL,               ARGS_NONE },
+    { OPT_NONPRINTING,     'v', "show-nonprinting", ARGS_NONE },
+    { 0 }
+};
 
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 0 };
 
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            files[fileCount++] = arg;
-            continue;
-        }
-
-        if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--show-all") == 0) {
-                opts.showNonprinting = opts.showEnds = opts.showTabs = 1;
-            } else if (strcmp(arg, "--number-nonblank") == 0) {
-                opts.numberNonblank = 1;
-            } else if (strcmp(arg, "--show-ends") == 0) {
-                opts.showEnds = 1;
-            } else if (strcmp(arg, "--number") == 0) {
-                opts.number = 1;
-            } else if (strcmp(arg, "--squeeze-blank") == 0) {
-                opts.squeeze = 1;
-            } else if (strcmp(arg, "--show-tabs") == 0) {
-                opts.showTabs = 1;
-            } else if (strcmp(arg, "--show-nonprinting") == 0) {
-                opts.showNonprinting = 1;
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                print_try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'A': opts.showNonprinting = opts.showEnds = opts.showTabs = 1; break;
-                    case 'b': opts.numberNonblank = 1; break;
-                    case 'e': opts.showNonprinting = opts.showEnds = 1; break;
-                    case 'E': opts.showEnds = 1; break;
-                    case 'n': opts.number = 1; break;
-                    case 's': opts.squeeze = 1; break;
-                    case 't': opts.showNonprinting = opts.showTabs = 1; break;
-                    case 'T': opts.showTabs = 1; break;
-                    case 'u': break;
-                    case 'v': opts.showNonprinting = 1; break;
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        print_try_help();
-                        return 1;
-                }
-            }
-        }
+static int on_option(int id, const char* value, void* context) {
+    (void)value;
+    (void)context;
+    switch (id) {
+        case OPT_ALL:             opts.showNonprinting = opts.showEnds = opts.showTabs = 1; break;
+        case OPT_NUMBER_NONBLANK: opts.numberNonblank = 1; break;
+        case OPT_E:               opts.showNonprinting = opts.showEnds = 1; break;
+        case OPT_ENDS:            opts.showEnds = 1; break;
+        case OPT_NUMBER:          opts.number = 1; break;
+        case OPT_SQUEEZE:         opts.squeeze = 1; break;
+        case OPT_T:               opts.showNonprinting = opts.showTabs = 1; break;
+        case OPT_TABS:            opts.showTabs = 1; break;
+        case OPT_NONPRINTING:     opts.showNonprinting = 1; break;
+        default: break;
     }
+    return 0;
+}
+
+int main(int argc, char* argv[]) {
+    const char** files;
+    int fileCount, status = 0, i, plain, result;
+
+    result = args_parse(&spec, argc, argv, on_option, NULL, &files, &fileCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
 
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);

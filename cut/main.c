@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "textutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "cut"
@@ -224,129 +225,83 @@ static int cut_stream(FILE* in, int mode, int delimiter, int onlyDelimited, cons
     return 0;
 }
 
+enum { OPT_BYTES = 1, OPT_CHARACTERS, OPT_FIELDS, OPT_DELIMITER, OPT_IGNORED, OPT_ONLY_DELIMITED,
+       OPT_COMPLEMENT, OPT_OUTPUT_DELIMITER };
+
+static const ArgsOption options[] = {
+    { OPT_BYTES,            'b', "bytes",            ARGS_REQUIRED },
+    { OPT_CHARACTERS,       'c', "characters",       ARGS_REQUIRED },
+    { OPT_FIELDS,           'f', "fields",           ARGS_REQUIRED },
+    { OPT_DELIMITER,        'd', "delimiter",        ARGS_REQUIRED },
+    { OPT_IGNORED,          'n', NULL,               ARGS_NONE },
+    { OPT_ONLY_DELIMITED,   's', "only-delimited",   ARGS_NONE },
+    { OPT_COMPLEMENT,       0,   "complement",       ARGS_NONE },
+    { OPT_OUTPUT_DELIMITER, 0,   "output-delimiter", ARGS_REQUIRED },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 0 };
+
+typedef struct {
+    int         mode;               // 'b', 'c' or 'f'
+    const char* list;
+    int         delimiter;
+    int         onlyDelimited;
+    const char* outputDelimiter;
+} Options;
+
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+    int newMode = 0;
+
+    switch (id) {
+        case OPT_BYTES:      newMode = 'b'; break;
+        case OPT_CHARACTERS: newMode = 'c'; break;
+        case OPT_FIELDS:     newMode = 'f'; break;
+        case OPT_DELIMITER:
+            if (value[0] == '\0') {
+                o->delimiter = '\0';
+            } else if (value[1] != '\0') {
+                fprintf(stderr, PROGRAM ": the delimiter must be a single character\n");
+                try_help();
+                return -1;
+            } else {
+                o->delimiter = (unsigned char)value[0];
+            }
+            return 0;
+        case OPT_ONLY_DELIMITED:   o->onlyDelimited = 1; return 0;
+        case OPT_COMPLEMENT:       complement_option = 1; return 0;
+        case OPT_OUTPUT_DELIMITER: o->outputDelimiter = value; return 0;
+        default:                   return 0;
+    }
+
+    if (o->mode != 0 && o->mode != newMode) {
+        fprintf(stderr, PROGRAM ": only one type of list may be specified\n");
+        try_help();
+        return -1;
+    }
+    o->mode = newMode;
+    o->list = value;
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
-    int mode = 0, delimiter = '\t', onlyDelimited = 0, optionsEnded = 0, operandCount = 0, status = 0, i;
-    const char* outputDelimiter = NULL;
+    Options o = { 0, NULL, '\t', 0, NULL };
+    int mode, delimiter, onlyDelimited, operandCount, status = 0, i, result;
+    const char* outputDelimiter;
     size_t outputDelimiterLength = 0;
-    const char** operands = malloc((size_t)(argc + 1) * sizeof *operands);
-    const char* list = NULL;
+    const char** operands;
+    const char* list;
     char single[2];
 
-    if (operands == NULL)
-        return 1;
-
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
-
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            operands[operandCount++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            const char* value = NULL;
-            int newMode = 0;
-
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--complement") == 0) {
-                complement_option = 1;
-            } else if (strcmp(arg, "--only-delimited") == 0) {
-                onlyDelimited = 1;
-            } else if (strncmp(arg, "--bytes=", 8) == 0) {
-                value = arg + 8;
-                newMode = 'b';
-            } else if (strncmp(arg, "--characters=", 13) == 0) {
-                value = arg + 13;
-                newMode = 'c';
-            } else if (strncmp(arg, "--fields=", 9) == 0) {
-                value = arg + 9;
-                newMode = 'f';
-            } else if (strncmp(arg, "--delimiter=", 12) == 0) {
-                value = arg + 12;
-                if (value[0] == '\0') {
-                    delimiter = '\0';
-                } else if (value[1] != '\0') {
-                    fprintf(stderr, PROGRAM ": the delimiter must be a single character\n");
-                    try_help();
-                    return 1;
-                } else {
-                    delimiter = (unsigned char)value[0];
-                }
-                value = NULL;
-            } else if (strncmp(arg, "--output-delimiter=", 19) == 0) {
-                outputDelimiter = arg + 19;
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-
-            if (newMode != 0) {
-                if (mode != 0 && mode != newMode) {
-                    fprintf(stderr, PROGRAM ": only one type of list may be specified\n");
-                    try_help();
-                    return 1;
-                }
-                mode = newMode;
-                list = value;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'n': break;
-                    case 's': onlyDelimited = 1; break;
-                    case 'b':
-                    case 'c':
-                    case 'f':
-                    case 'd': {
-                        char option = *p;
-                        const char* value;
-
-                        if (p[1] != '\0') {
-                            value = p + 1;
-                        } else if (i + 1 < argc) {
-                            value = argv[++i];
-                        } else {
-                            fprintf(stderr, PROGRAM ": option requires an argument -- '%c'\n", option);
-                            try_help();
-                            return 1;
-                        }
-
-                        if (option == 'd') {
-                            if (value[0] == '\0') {
-                                delimiter = '\0';
-                            } else if (value[1] != '\0') {
-                                fprintf(stderr, PROGRAM ": the delimiter must be a single character\n");
-                                try_help();
-                                return 1;
-                            } else {
-                                delimiter = (unsigned char)value[0];
-                            }
-                        } else {
-                            if (mode != 0 && mode != option) {
-                                fprintf(stderr, PROGRAM ": only one type of list may be specified\n");
-                                try_help();
-                                return 1;
-                            }
-                            mode = option;
-                            list = value;
-                        }
-                        p += strlen(p) - 1;
-                        break;
-                    }
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                }
-            }
-        }
-    }
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    mode = o.mode;
+    list = o.list;
+    delimiter = o.delimiter;
+    onlyDelimited = o.onlyDelimited;
+    outputDelimiter = o.outputDelimiter;
 
     if (mode == 0) {
         fprintf(stderr, PROGRAM ": you must specify a list of bytes, characters, or fields\n");

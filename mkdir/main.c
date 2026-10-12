@@ -4,6 +4,7 @@
 #include <windows.h>
 #include "vpath.h"
 #include "fsutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "mkdir"
@@ -20,10 +21,6 @@ static void print_usage(void) {
          "\n"
          "DIRECTORY names are paths of the virtual file system. The root / holds the\n"
          "drives only: new directories are made below them, not beside them.");
-}
-
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
 }
 
 static int is_separator(char c) {
@@ -146,88 +143,48 @@ static int make_directory(const char* display, const char* native, int parents, 
     return 0;
 }
 
+enum { OPT_PARENTS = 1, OPT_VERBOSE, OPT_MODE };
+
+static const ArgsOption optionList[] = {
+    { OPT_PARENTS, 'p', "parents", ARGS_NONE },
+    { OPT_VERBOSE, 'v', "verbose", ARGS_NONE },
+    { OPT_MODE,    'm', "mode",    ARGS_REQUIRED },     // ignored: Windows has no mode bits
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, optionList, 1, 0, 0 };
+
+typedef struct {
+    int parents, verbose;
+} Options;
+
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+    (void)value;
+
+    if (id == OPT_PARENTS)
+        o->parents = 1;
+    else if (id == OPT_VERBOSE)
+        o->verbose = 1;
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
-    int parents = 0, verbose = 0, optionsEnded = 0, operands = 0, status = 0, i;
+    Options o = { 0, 0 };
+    const char** operands;
+    int operandCount, status = 0, i, result;
 
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
 
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            continue;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--parents") == 0) {
-                parents = 1;
-            } else if (strcmp(arg, "--verbose") == 0) {
-                verbose = 1;
-            } else if (strncmp(arg, "--mode=", 7) == 0) {
-                // ignored
-            } else if (strcmp(arg, "--mode") == 0 && i + 1 < argc) {
-                i++;
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'p': parents = 1; break;
-                    case 'v': verbose = 1; break;
-                    case 'm':
-                        // the mode is the rest of the word or the next word
-                        if (p[1] == '\0') {
-                            if (i + 1 < argc) {
-                                i++;
-                            } else {
-                                fprintf(stderr, PROGRAM ": option requires an argument -- 'm'\n");
-                                try_help();
-                                return 1;
-                            }
-                        }
-                        p += strlen(p) - 1;
-                        break;
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                }
-            }
-        }
-    }
-
-    // operands: everything that is not an option, nor the argument of -m
-    optionsEnded = 0;
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
+    for (i = 0; i < operandCount; i++) {
+        const char* arg = operands[i];
         char native[VPATH_MAX];
-        int kind;
+        int kind = vpath_to_native(arg, native, sizeof native);
 
-        if (!optionsEnded && strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-            continue;
-        }
-        if (!optionsEnded && arg[0] == '-' && arg[1] != '\0') {
-            // skip the argument of -m / --mode
-            if (strcmp(arg, "--mode") == 0)
-                i++;
-            else if (arg[1] != '-' && strchr(arg, 'm') != NULL && arg[strlen(arg) - 1] == 'm')
-                i++;
-            continue;
-        }
-
-        operands++;
-        kind = vpath_to_native(arg, native, sizeof native);
         if (kind == VPATH_ROOT) {
-            if (parents)
+            if (o.parents)
                 continue;
             fprintf(stderr, PROGRAM ": cannot create directory '%s': File exists\n", arg);
             status = 1;
@@ -240,13 +197,13 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        if (make_directory(arg, native, parents, verbose) != 0)
+        if (make_directory(arg, native, o.parents, o.verbose) != 0)
             status = 1;
     }
 
-    if (operands == 0) {
+    if (operandCount == 0) {
         fprintf(stderr, PROGRAM ": missing operand\n");
-        try_help();
+        fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
         return 1;
     }
     return status;

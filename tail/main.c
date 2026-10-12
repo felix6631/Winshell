@@ -4,6 +4,7 @@
 #include <string.h>
 #include <windows.h>
 #include "textutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "tail"
@@ -32,10 +33,6 @@ static void print_usage(void) {
          "Lines end at a line feed; a CR in front of it stays with its line, so files with\n"
          "LF and with CR LF line endings are cut at the same places and are not changed.\n"
          "Stop -f with Ctrl+C.");
-}
-
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
 }
 
 typedef struct {
@@ -252,132 +249,79 @@ static void follow(const char** names, FILE** files, int count, int headers, dou
     }
 }
 
+enum { OPT_FOLLOW = 1, OPT_QUIET, OPT_VERBOSE, OPT_LINES, OPT_BYTES, OPT_SLEEP };
+
+static const ArgsOption options[] = {
+    { OPT_FOLLOW,  'f', "follow",         ARGS_NONE },
+    { OPT_QUIET,   'q', "quiet",          ARGS_NONE },
+    { OPT_QUIET,   0,   "silent",         ARGS_NONE },
+    { OPT_VERBOSE, 'v', "verbose",        ARGS_NONE },
+    { OPT_LINES,   'n', "lines",          ARGS_REQUIRED },
+    { OPT_BYTES,   'c', "bytes",          ARGS_REQUIRED },
+    { OPT_SLEEP,   's', "sleep-interval", ARGS_REQUIRED },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 1 };
+
+typedef struct {
+    Mode   mode;
+    int    quiet, verbose, follow;
+    double interval;
+} Options;
+
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+    TextCount count;
+    int bytes = id == OPT_BYTES;
+
+    switch (id) {
+        case OPT_FOLLOW:  o->follow = 1; return 0;
+        case OPT_QUIET:   o->quiet = 1; o->verbose = 0; return 0;
+        case OPT_VERBOSE: o->verbose = 1; o->quiet = 0; return 0;
+        case OPT_SLEEP:
+            o->interval = atof(value);
+            if (o->interval <= 0)
+                o->interval = 1.0;
+            return 0;
+        case ARGS_NUMBER: // -NUM is -n NUM
+            if (text_parse_count(value, &count) != 0) {
+                fprintf(stderr, PROGRAM ": invalid number of lines: '%s'\n", value);
+                return -1;
+            }
+            o->mode.bytes = 0;
+            o->mode.count = count.value;
+            o->mode.fromStart = 0;
+            return 0;
+        default:
+            if (text_parse_count(value, &count) != 0) {
+                fprintf(stderr, PROGRAM ": invalid number of %s: '%s'\n", bytes ? "bytes" : "lines", value);
+                return -1;
+            }
+            o->mode.bytes = bytes;
+            o->mode.count = count.value;
+            o->mode.fromStart = count.plus;
+            return 0;
+    }
+}
+
 int main(int argc, char* argv[]) {
-    Mode mode = { 0, 10, 0 };
-    int quiet = 0, verbose = 0, follow_ = 0, optionsEnded = 0, status = 0, operandCount = 0, i;
-    double interval = 1.0;
-    const char** operands = malloc((size_t)(argc + 1) * sizeof *operands);
+    Options o = { { 0, 10, 0 }, 0, 0, 0, 1.0 };
+    Mode mode;
+    int quiet, verbose, follow_, status = 0, operandCount, i, result;
+    double interval;
+    const char** operands;
     FILE** streams;
     int headers, shown = 0, openCount = 0;
 
-    if (operands == NULL)
-        return 1;
-
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
-
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            // "+5" is no option, but the argument of -n when it comes alone as -n +5; handled below
-            operands[operandCount++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            const char* value = NULL;
-            int bytes = 0, isCount = 0;
-
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--follow") == 0) {
-                follow_ = 1;
-            } else if (strcmp(arg, "--quiet") == 0 || strcmp(arg, "--silent") == 0) {
-                quiet = 1;
-                verbose = 0;
-            } else if (strcmp(arg, "--verbose") == 0) {
-                verbose = 1;
-                quiet = 0;
-            } else if (strncmp(arg, "--lines=", 8) == 0) {
-                value = arg + 8;
-                isCount = 1;
-            } else if (strncmp(arg, "--bytes=", 8) == 0) {
-                value = arg + 8;
-                isCount = bytes = 1;
-            } else if (strncmp(arg, "--sleep-interval=", 17) == 0) {
-                interval = atof(arg + 17);
-                if (interval <= 0)
-                    interval = 1.0;
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-
-            if (isCount) {
-                TextCount count;
-                if (text_parse_count(value, &count) != 0) {
-                    fprintf(stderr, PROGRAM ": invalid number of %s: '%s'\n", bytes ? "bytes" : "lines", value);
-                    return 1;
-                }
-                mode.bytes = bytes;
-                mode.count = count.value;
-                mode.fromStart = count.plus;
-            }
-        } else {
-            const char* p;
-
-            // -NUM is -n NUM
-            if (arg[1] >= '0' && arg[1] <= '9') {
-                TextCount count;
-                if (text_parse_count(arg + 1, &count) != 0) {
-                    fprintf(stderr, PROGRAM ": invalid number of lines: '%s'\n", arg + 1);
-                    return 1;
-                }
-                mode.bytes = 0;
-                mode.count = count.value;
-                mode.fromStart = 0;
-                continue;
-            }
-
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'f': follow_ = 1; break;
-                    case 'q': quiet = 1; verbose = 0; break;
-                    case 'v': verbose = 1; quiet = 0; break;
-                    case 'n':
-                    case 'c':
-                    case 's': {
-                        char option = *p;
-                        const char* value;
-
-                        if (p[1] != '\0') {
-                            value = p + 1;
-                        } else if (i + 1 < argc) {
-                            value = argv[++i];
-                        } else {
-                            fprintf(stderr, PROGRAM ": option requires an argument -- '%c'\n", option);
-                            try_help();
-                            return 1;
-                        }
-
-                        if (option == 's') {
-                            interval = atof(value);
-                            if (interval <= 0)
-                                interval = 1.0;
-                        } else {
-                            TextCount count;
-                            if (text_parse_count(value, &count) != 0) {
-                                fprintf(stderr, PROGRAM ": invalid number of %s: '%s'\n",
-                                        option == 'c' ? "bytes" : "lines", value);
-                                return 1;
-                            }
-                            mode.bytes = option == 'c';
-                            mode.count = count.value;
-                            mode.fromStart = count.plus;
-                        }
-                        p += strlen(p) - 1;
-                        break;
-                    }
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                }
-            }
-        }
-    }
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    mode = o.mode;
+    quiet = o.quiet;
+    verbose = o.verbose;
+    follow_ = o.follow;
+    interval = o.interval;
 
     text_binary_streams();
 

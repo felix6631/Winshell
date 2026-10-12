@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "textutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "tac"
@@ -20,10 +21,6 @@ static void print_usage(void) {
          "\n"
          "Lines are not changed: a CR LF ending stays with its line. A last line that\n"
          "has no ending is written first and is joined to the line that follows, as in GNU tac.");
-}
-
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
 }
 
 /** Writes the records of text, last first. A record is what lies between two separators. */
@@ -87,73 +84,47 @@ static int reverse(const unsigned char* text, size_t length, const char* separat
     return 0;
 }
 
+enum { OPT_BEFORE = 1, OPT_REGEX, OPT_SEPARATOR };
+
+static const ArgsOption options[] = {
+    { OPT_BEFORE,    'b', "before",    ARGS_NONE },
+    { OPT_REGEX,     'r', "regex",     ARGS_NONE },
+    { OPT_SEPARATOR, 's', "separator", ARGS_REQUIRED },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 0 };
+
+typedef struct {
+    int         before;
+    const char* separator;
+} Options;
+
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+
+    switch (id) {
+        case OPT_BEFORE:    o->before = 1; return 0;
+        case OPT_SEPARATOR: o->separator = value; return 0;
+        default:
+            fprintf(stderr, PROGRAM ": regular expressions are not supported (-r)\n");
+            return -1;
+    }
+}
+
 int main(int argc, char* argv[]) {
-    const char* separator = "\n";
+    Options o = { 0, "\n" };
+    const char* separator;
     const char** operands;
-    size_t operandCount = 0, separatorLength;
-    int before = 0, optionsEnded = 0, status = 0, a;
+    size_t operandCount, separatorLength;
+    int before, status = 0, count, result;
 
-    operands = calloc((size_t)argc + 1, sizeof *operands);
-    if (operands == NULL) {
-        fprintf(stderr, PROGRAM ": out of memory\n");
-        return 1;
-    }
-
-    for (a = 1; a < argc; a++) {
-        const char* arg = argv[a];
-
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            operands[operandCount++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--before") == 0) {
-                before = 1;
-            } else if (strcmp(arg, "--regex") == 0) {
-                fprintf(stderr, PROGRAM ": --regex is not supported\n");
-                return 1;
-            } else if (strncmp(arg, "--separator=", 12) == 0) {
-                separator = arg + 12;
-            } else if (strcmp(arg, "--separator") == 0 && a + 1 < argc) {
-                separator = argv[++a];
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                if (*p == 'b') {
-                    before = 1;
-                } else if (*p == 'r') {
-                    fprintf(stderr, PROGRAM ": -r is not supported\n");
-                    return 1;
-                } else if (*p == 's') {
-                    if (p[1] != '\0') {
-                        separator = p + 1;
-                    } else if (a + 1 < argc) {
-                        separator = argv[++a];
-                    } else {
-                        fprintf(stderr, PROGRAM ": option requires an argument -- 's'\n");
-                        try_help();
-                        return 1;
-                    }
-                    break;
-                } else {
-                    fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                    try_help();
-                    return 1;
-                }
-            }
-        }
-    }
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &count);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    operandCount = (size_t)count;
+    before = o.before;
+    separator = o.separator;
 
     separatorLength = strlen(separator);
     if (separatorLength == 0) {

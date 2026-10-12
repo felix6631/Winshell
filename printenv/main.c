@@ -4,8 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#include "args.h"
 
 #define VERSION "0.1"
+#define PROGRAM "printenv"
 
 static void print_usage(void) {
     puts("Usage: printenv [OPTION]... [NAME]...\n"
@@ -19,38 +21,35 @@ static void print_usage(void) {
          "Exit status: 0, 1 when a NAME is not in the environment, 2 for a bad option.");
 }
 
+enum { OPT_NULL = 1 };
+
+static const ArgsOption options[] = {
+    { OPT_NULL, '0', "null", ARGS_NONE },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 2, 0, 0 };
+
+static int on_option(int id, const char* value, void* context) {
+    (void)id;
+    (void)value;
+    *(int*)context = 1;
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
-    int nullEnd = 0, i = 1, status = 0, options = 1;
+    int nullEnd = 0, i = 0, status = 0, count, result;
+    const char** operands;
     char terminator;
 
-    for (; i < argc && options; i++) {
-        const char* arg = argv[i];
-        if (strcmp(arg, "--") == 0) {
-            i++;
-            break;
-        }
-        if (arg[0] != '-' || arg[1] == '\0') {
-            break;
-        } else if (strcmp(arg, "--help") == 0) {
-            print_usage();
-            return 0;
-        } else if (strcmp(arg, "--version") == 0) {
-            puts("printenv (Winshell) " VERSION);
-            return 0;
-        } else if (strcmp(arg, "--null") == 0) {
-            nullEnd = 1;
-        } else if (arg[1] != '-' && strspn(arg + 1, "0") == strlen(arg + 1)) {
-            nullEnd = 1;
-        } else {
-            fprintf(stderr, "printenv: invalid option -- '%s'\nTry 'printenv --help' for more information.\n", arg);
-            return 2;
-        }
-    }
+    result = args_parse(&spec, argc, argv, on_option, &nullEnd, &operands, &count);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
 
     terminator = nullEnd ? '\0' : '\n';
     _setmode(_fileno(stdout), _O_BINARY);
 
-    if (i >= argc) {
+    if (i >= count) {
         char* strings = GetEnvironmentStringsA();
         const char* p;
         if (strings == NULL)
@@ -65,15 +64,15 @@ int main(int argc, char* argv[]) {
         return ferror(stdout) ? 2 : 0;
     }
 
-    for (; i < argc; i++) {
+    for (; i < count; i++) {
         DWORD length;
         char* value;
 
-        if (strchr(argv[i], '=') != NULL) {     // a name never has one
+        if (strchr(operands[i], '=') != NULL) {     // a name never has one
             status = 1;
             continue;
         }
-        length = GetEnvironmentVariableA(argv[i], NULL, 0);
+        length = GetEnvironmentVariableA(operands[i], NULL, 0);
         if (length == 0) {
             status = 1;
             continue;
@@ -81,7 +80,7 @@ int main(int argc, char* argv[]) {
         value = malloc(length);
         if (value == NULL)
             return 2;
-        GetEnvironmentVariableA(argv[i], value, length);
+        GetEnvironmentVariableA(operands[i], value, length);
         fputs(value, stdout);
         putchar(terminator);
         free(value);

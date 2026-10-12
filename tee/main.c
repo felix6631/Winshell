@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#include "args.h"
 #include "textutil.h"
 #include "fsutil.h"
 #include "vpath.h"
@@ -27,53 +28,41 @@ static void print_usage(void) {
          "system; \"-\" is a file named -.");
 }
 
+enum { OPT_APPEND = 1, OPT_ACCEPTED };
+
+static const ArgsOption options[] = {
+    { OPT_APPEND,   'a', "append",             ARGS_NONE },
+    { OPT_ACCEPTED, 'i', "ignore-interrupts",  ARGS_NONE },
+    { OPT_ACCEPTED, 'p', NULL,                 ARGS_NONE },
+    { OPT_ACCEPTED, 0,   "output-error",       ARGS_OPTIONAL },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 0 };
+
+static int on_option(int id, const char* value, void* context) {
+    (void)value;
+    if (id == OPT_APPEND)
+        *(int*)context = 1;
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     FILE** files;
     const char** names;
     size_t fileCount = 0, i;
-    int append = 0, optionsEnded = 0, status = 0, a;
+    int append = 0, status = 0, count, result;
     unsigned char buffer[65536];
 
-    files = calloc((size_t)argc, sizeof *files);
-    names = calloc((size_t)argc, sizeof *names);
-    if (files == NULL || names == NULL) {
+    result = args_parse(&spec, argc, argv, on_option, &append, &names, &count);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
+    fileCount = (size_t)count;
+
+    files = calloc(fileCount + 1, sizeof *files);
+    if (files == NULL) {
         fprintf(stderr, PROGRAM ": out of memory\n");
         return 1;
-    }
-
-    for (a = 1; a < argc; a++) {
-        const char* arg = argv[a];
-
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            names[fileCount++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--append") == 0) {
-                append = 1;
-            } else if (strcmp(arg, "--ignore-interrupts") == 0 || strncmp(arg, "--output-error", 14) == 0) {
-                // accepted
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\nTry 'tee --help' for more information.\n", arg);
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                if (*p == 'a') {
-                    append = 1;
-                } else if (*p != 'i' && *p != 'p') {
-                    fprintf(stderr, PROGRAM ": invalid option -- '%c'\nTry 'tee --help' for more information.\n", *p);
-                    return 1;
-                }
-            }
-        }
     }
 
     text_binary_streams();

@@ -4,6 +4,7 @@
 #include <windows.h>
 #include "vpath.h"
 #include "fsutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "touch"
@@ -26,10 +27,6 @@ static void print_usage(void) {
          "\n"
          "Times given without Z are local times. FILE names are paths of the virtual\n"
          "file system. Directories can be touched as well.");
-}
-
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
 }
 
 /** Local time fields to a FILETIME, as UTC. Returns 0 on success. */
@@ -195,102 +192,68 @@ static int touch_one(const char* display, const char* native, int noCreate, cons
     return 0;
 }
 
+enum { OPT_ACCESS = 1, OPT_MODIFICATION, OPT_NO_CREATE, OPT_DATE, OPT_STAMP, OPT_REFERENCE };
+
+static const ArgsOption optionList[] = {
+    { OPT_ACCESS,       'a', NULL,         ARGS_NONE },
+    { OPT_MODIFICATION, 'm', NULL,         ARGS_NONE },
+    { OPT_NO_CREATE,    'c', "no-create",  ARGS_NONE },
+    { OPT_DATE,         'd', "date",       ARGS_REQUIRED },
+    { OPT_STAMP,        't', NULL,         ARGS_REQUIRED },
+    { OPT_REFERENCE,    'r', "reference",  ARGS_REQUIRED },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, optionList, 1, 0, 0 };
+
+typedef struct {
+    int         noCreate, onlyAccess, onlyModification, haveTime;
+    const char* referenceFile;
+    FILETIME    given;
+} Options;
+
+static int on_option(int id, const char* value, void* context) {
+    Options* o = context;
+
+    switch (id) {
+        case OPT_ACCESS:       o->onlyAccess = 1; break;
+        case OPT_MODIFICATION: o->onlyModification = 1; break;
+        case OPT_NO_CREATE:    o->noCreate = 1; break;
+        case OPT_REFERENCE:    o->referenceFile = value; break;
+        default: {
+            int bad = id == OPT_DATE ? parse_date(value, &o->given) : parse_stamp(value, &o->given);
+            if (bad != 0) {
+                fprintf(stderr, PROGRAM ": invalid date format '%s'\n", value);
+                return -1;
+            }
+            o->haveTime = 1;
+        }
+    }
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
-    int noCreate = 0, onlyAccess = 0, onlyModification = 0, haveTime = 0;
-    const char* referenceFile = NULL;
-    FILETIME given, now;
-    int optionsEnded = 0, operands = 0, status = 0, i;
-    FILETIME accessTime, modificationTime;
+    Options o;
+    const char** operands;
+    int operandCount, status = 0, i, result;
+    FILETIME accessTime, modificationTime, now;
     const FILETIME* access;
     const FILETIME* modification;
 
-    memset(&given, 0, sizeof given);
-
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
-
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            continue;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--no-create") == 0) {
-                noCreate = 1;
-            } else if (strncmp(arg, "--date=", 7) == 0 || (strcmp(arg, "--date") == 0 && i + 1 < argc)) {
-                const char* value = arg[6] == '=' ? arg + 7 : argv[++i];
-                if (parse_date(value, &given) != 0) {
-                    fprintf(stderr, PROGRAM ": invalid date format '%s'\n", value);
-                    return 1;
-                }
-                haveTime = 1;
-            } else if (strncmp(arg, "--reference=", 12) == 0) {
-                referenceFile = arg + 12;
-            } else if (strcmp(arg, "--reference") == 0 && i + 1 < argc) {
-                referenceFile = argv[++i];
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'a': onlyAccess = 1; break;
-                    case 'm': onlyModification = 1; break;
-                    case 'c': noCreate = 1; break;
-                    case 'd':
-                    case 't':
-                    case 'r': {
-                        // these take the rest of the word, or the next word
-                        char option = *p;
-                        const char* value;
-                        if (p[1] != '\0') {
-                            value = p + 1;
-                        } else if (i + 1 < argc) {
-                            value = argv[++i];
-                        } else {
-                            fprintf(stderr, PROGRAM ": option requires an argument -- '%c'\n", option);
-                            try_help();
-                            return 1;
-                        }
-                        if (option == 'r') {
-                            referenceFile = value;
-                        } else {
-                            int bad = option == 'd' ? parse_date(value, &given) : parse_stamp(value, &given);
-                            if (bad != 0) {
-                                fprintf(stderr, PROGRAM ": invalid date format '%s'\n", value);
-                                return 1;
-                            }
-                            haveTime = 1;
-                        }
-                        p += strlen(p) - 1;
-                        break;
-                    }
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                }
-            }
-        }
-    }
+    memset(&o, 0, sizeof o);
+    result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
 
     // the time to set: the reference file, a given time, or now
     GetSystemTimeAsFileTime(&now);
     accessTime = modificationTime = now;
-    if (haveTime)
-        accessTime = modificationTime = given;
+    if (o.haveTime)
+        accessTime = modificationTime = o.given;
 
-    if (referenceFile != NULL) {
+    if (o.referenceFile != NULL) {
         char native[VPATH_MAX];
-        int kind = vpath_to_native(referenceFile, native, sizeof native);
+        int kind = vpath_to_native(o.referenceFile, native, sizeof native);
         HANDLE h = INVALID_HANDLE_VALUE;
         FILETIME a, w;
 
@@ -298,7 +261,7 @@ int main(int argc, char* argv[]) {
             h = CreateFileA(native, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
                             FILE_FLAG_BACKUP_SEMANTICS, NULL);
         if (h == INVALID_HANDLE_VALUE || !GetFileTime(h, NULL, &a, &w)) {
-            fprintf(stderr, PROGRAM ": failed to get attributes of '%s': %s\n", referenceFile,
+            fprintf(stderr, PROGRAM ": failed to get attributes of '%s': %s\n", o.referenceFile,
                     kind == 0 ? fs_strerror(GetLastError()) : "No such file or directory");
             if (h != INVALID_HANDLE_VALUE)
                 CloseHandle(h);
@@ -310,60 +273,29 @@ int main(int argc, char* argv[]) {
     }
 
     // -a and -m choose which of the two is changed; with none of them, both
-    access = (onlyModification && !onlyAccess) ? NULL : &accessTime;
-    modification = (onlyAccess && !onlyModification) ? NULL : &modificationTime;
+    access = (o.onlyModification && !o.onlyAccess) ? NULL : &accessTime;
+    modification = (o.onlyAccess && !o.onlyModification) ? NULL : &modificationTime;
 
-    optionsEnded = 0;
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
+    for (i = 0; i < operandCount; i++) {
+        const char* arg = operands[i];
         char native[VPATH_MAX];
-        int kind;
+        int kind = vpath_to_native(arg, native, sizeof native);
 
-        if (!optionsEnded && strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-            continue;
-        }
-        if (!optionsEnded && arg[0] == '-' && arg[1] != '\0') {
-            // skip the argument of the options that take a separate one
-            if (strcmp(arg, "--date") == 0 || strcmp(arg, "--reference") == 0) {
-                i++;
-            } else if (arg[1] != '-') {
-                const char* p;
-                for (p = arg + 1; *p != '\0'; p++) {
-                    if (*p == 'd' || *p == 't' || *p == 'r') {
-                        if (p[1] == '\0')
-                            i++;
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-
-        operands++;
-        kind = vpath_to_native(arg, native, sizeof native);
-        if (kind == VPATH_ROOT) {
-            if (!noCreate) {
-                fprintf(stderr, PROGRAM ": cannot touch '%s': Permission denied\n", arg);
-                status = 1;
-            }
-            continue;
-        }
-        if (kind != 0) {
-            if (!noCreate) {
+        if (kind == VPATH_ROOT || kind != 0) {
+            if (!o.noCreate) {
                 fprintf(stderr, PROGRAM ": cannot touch '%s': Permission denied\n", arg);
                 status = 1;
             }
             continue;
         }
 
-        if (touch_one(arg, native, noCreate, access, modification) != 0)
+        if (touch_one(arg, native, o.noCreate, access, modification) != 0)
             status = 1;
     }
 
-    if (operands == 0) {
+    if (operandCount == 0) {
         fprintf(stderr, PROGRAM ": missing file operand\n");
-        try_help();
+        fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
         return 1;
     }
     return status;

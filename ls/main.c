@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <aclapi.h>
 #include "vpath.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "ls"
@@ -620,83 +621,62 @@ static void list_directory(const char* display, const char* native, int header) 
 
 /* ---- main --------------------------------------------------------------------- */
 
-static void parse_short(const char* arg) {
-    const char* p;
-    for (p = arg + 1; *p != '\0'; p++) {
-        switch (*p) {
-            case 'a': opts.all = 1; break;
-            case 'A': opts.almostAll = 1; break;
-            case 'C': opts.forceColumns = 1; opts.oneColumn = 0; opts.longFormat = 0; break;
-            case 'd': opts.directory = 1; break;
-            case 'F': opts.classify = 1; break;
-            case 'h': opts.human = 1; break;
-            case 'l': opts.longFormat = 1; break;
-            case 'p': opts.slashDirs = 1; break;
-            case 'r': opts.reverse = 1; break;
-            case 'R': opts.recursive = 1; break;
-            case 'S': opts.sortSize = 1; opts.sortTime = 0; break;
-            case 't': opts.sortTime = 1; opts.sortSize = 0; break;
-            case 'U': opts.sortNone = 1; break;
-            case '1': opts.oneColumn = 1; opts.forceColumns = 0; break;
-            default:
-                fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
-                exit(2);
-        }
-    }
-}
+// the id of an option is its letter, except for the options that have no short one
+enum { OPT_COLOR = 256 };
 
-static void parse_long(const char* arg) {
-    if (strcmp(arg, "--help") == 0) {
-        print_usage();
-        exit(0);
-    } else if (strcmp(arg, "--version") == 0) {
-        puts(PROGRAM " (Winshell) " VERSION);
-        exit(0);
-    } else if (strcmp(arg, "--all") == 0) {
-        opts.all = 1;
-    } else if (strcmp(arg, "--almost-all") == 0) {
-        opts.almostAll = 1;
-    } else if (strcmp(arg, "--directory") == 0) {
-        opts.directory = 1;
-    } else if (strcmp(arg, "--classify") == 0) {
-        opts.classify = 1;
-    } else if (strcmp(arg, "--human-readable") == 0) {
-        opts.human = 1;
-    } else if (strcmp(arg, "--reverse") == 0) {
-        opts.reverse = 1;
-    } else if (strcmp(arg, "--recursive") == 0) {
-        opts.recursive = 1;
-    } else if (strcmp(arg, "--color") == 0 || strncmp(arg, "--color=", 8) == 0) {
-        // there is no colour output
-    } else {
-        fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-        fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
-        exit(2);
+static const ArgsOption optionList[] = {
+    { 'a', 'a', "all",            ARGS_NONE },
+    { 'A', 'A', "almost-all",     ARGS_NONE },
+    { 'C', 'C', NULL,             ARGS_NONE },
+    { 'd', 'd', "directory",      ARGS_NONE },
+    { 'F', 'F', "classify",       ARGS_NONE },
+    { 'h', 'h', "human-readable", ARGS_NONE },
+    { 'l', 'l', NULL,             ARGS_NONE },
+    { 'p', 'p', NULL,             ARGS_NONE },
+    { 'r', 'r', "reverse",        ARGS_NONE },
+    { 'R', 'R', "recursive",      ARGS_NONE },
+    { 'S', 'S', NULL,             ARGS_NONE },
+    { 't', 't', NULL,             ARGS_NONE },
+    { 'U', 'U', NULL,             ARGS_NONE },
+    { '1', '1', NULL,             ARGS_NONE },
+    { OPT_COLOR, 0, "color",      ARGS_OPTIONAL },      // there is no colour output
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, optionList, 2, 0, 0 };
+
+static int on_option(int id, const char* value, void* context) {
+    (void)value;
+    (void)context;
+    switch (id) {
+        case 'a': opts.all = 1; break;
+        case 'A': opts.almostAll = 1; break;
+        case 'C': opts.forceColumns = 1; opts.oneColumn = 0; opts.longFormat = 0; break;
+        case 'd': opts.directory = 1; break;
+        case 'F': opts.classify = 1; break;
+        case 'h': opts.human = 1; break;
+        case 'l': opts.longFormat = 1; break;
+        case 'p': opts.slashDirs = 1; break;
+        case 'r': opts.reverse = 1; break;
+        case 'R': opts.recursive = 1; break;
+        case 'S': opts.sortSize = 1; opts.sortTime = 0; break;
+        case 't': opts.sortTime = 1; opts.sortSize = 0; break;
+        case 'U': opts.sortNone = 1; break;
+        case '1': opts.oneColumn = 1; opts.forceColumns = 0; break;
+        default: break;
     }
+    return 0;
 }
 
 int main(int argc, char* argv[]) {
-    const char** operands = malloc((size_t)(argc + 1) * sizeof *operands);
-    int operandCount = 0, optionsEnded = 0, i;
+    const char** operands;
+    int operandCount, i, result;
     EntryList files = { NULL, 0, 0 };
     EntryList directories = { NULL, 0, 0 };   // names are the arguments, native the Windows paths ("" for the root)
 
-    if (operands == NULL)
-        return 2;
-
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            operands[operandCount++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            parse_long(arg);
-        } else {
-            parse_short(arg);
-        }
-    }
+    result = args_parse(&spec, argc, argv, on_option, NULL, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
 
     _setmode(_fileno(stdout), _O_BINARY);
 

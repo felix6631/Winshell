@@ -6,6 +6,7 @@
 #include "textutil.h"
 #include "vpath.h"
 #include "fsutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "wc"
@@ -28,10 +29,6 @@ static void print_usage(void) {
          "Lines are counted by their line feeds, so files with LF and with CR LF line\n"
          "endings give the same line count; a CR counts as white space between words\n"
          "and does not add to the width of a line.");
-}
-
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
 }
 
 typedef struct {
@@ -126,63 +123,44 @@ static void print_counts(const Counts* counts, int width, const char* name) {
     putchar('\n');
 }
 
+enum { OPT_BYTES = 1, OPT_CHARS, OPT_LINES, OPT_WORDS, OPT_WIDTH };
+
+static const ArgsOption options[] = {
+    { OPT_BYTES, 'c', "bytes",           ARGS_NONE },
+    { OPT_CHARS, 'm', "chars",           ARGS_NONE },
+    { OPT_LINES, 'l', "lines",           ARGS_NONE },
+    { OPT_WORDS, 'w', "words",           ARGS_NONE },
+    { OPT_WIDTH, 'L', "max-line-length", ARGS_NONE },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 0 };
+
+static int on_option(int id, const char* value, void* context) {
+    (void)value;
+    (void)context;
+    switch (id) {
+        case OPT_BYTES: show_bytes = 1; break;
+        case OPT_CHARS: show_chars = 1; break;
+        case OPT_LINES: show_lines = 1; break;
+        case OPT_WORDS: show_words = 1; break;
+        case OPT_WIDTH: show_width = 1; break;
+    }
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
-    const char** operands = malloc((size_t)(argc + 1) * sizeof *operands);
-    int operandCount = 0, optionsEnded = 0, status = 0, i, columns, width;
+    const char** operands;
+    int operandCount, status = 0, i, columns, width, result;
     unsigned long long totalSize = 0;
     int stdinInvolved = 0;
     Counts total;
 
-    if (operands == NULL)
-        return 1;
     memset(&total, 0, sizeof total);
 
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
-
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
-            operands[operandCount++] = arg;
-        } else if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--bytes") == 0) {
-                show_bytes = 1;
-            } else if (strcmp(arg, "--chars") == 0) {
-                show_chars = 1;
-            } else if (strcmp(arg, "--lines") == 0) {
-                show_lines = 1;
-            } else if (strcmp(arg, "--words") == 0) {
-                show_words = 1;
-            } else if (strcmp(arg, "--max-line-length") == 0) {
-                show_width = 1;
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'c': show_bytes = 1; break;
-                    case 'm': show_chars = 1; break;
-                    case 'l': show_lines = 1; break;
-                    case 'w': show_words = 1; break;
-                    case 'L': show_width = 1; break;
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                }
-            }
-        }
-    }
+    result = args_parse(&spec, argc, argv, on_option, NULL, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
 
     if (!show_lines && !show_words && !show_chars && !show_bytes && !show_width)
         show_lines = show_words = show_bytes = 1;

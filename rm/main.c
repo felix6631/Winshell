@@ -5,6 +5,7 @@
 #include <windows.h>
 #include "vpath.h"
 #include "fsutil.h"
+#include "args.h"
 
 #define VERSION "0.1"
 #define PROGRAM "rm"
@@ -27,10 +28,6 @@ static void print_usage(void) {
          "Read-only files are removed too. Only when a person is at the console, and\n"
          "without -f, is the removal of one asked about.\n"
          "FILE names are paths of the virtual file system; wildcards are expanded by the shell.");
-}
-
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
 }
 
 /** Whether the path ends after n characters, or after one more separator. */
@@ -92,83 +89,55 @@ static int is_filesystem_root(const char* native) {
     }
 }
 
+enum { OPT_FORCE = 1, OPT_INTERACTIVE, OPT_RECURSIVE, OPT_DIR, OPT_VERBOSE, OPT_ACCEPTED };
+
+static const ArgsOption optionList[] = {
+    { OPT_FORCE,       'f', "force",            ARGS_NONE },
+    { OPT_INTERACTIVE, 'i', "interactive",      ARGS_NONE },
+    { OPT_RECURSIVE,   'r', "recursive",        ARGS_NONE },
+    { OPT_RECURSIVE,   'R', NULL,               ARGS_NONE },
+    { OPT_DIR,         'd', "dir",              ARGS_NONE },
+    { OPT_VERBOSE,     'v', "verbose",          ARGS_NONE },
+    // accepted for compatibility; the roots are protected in any case
+    { OPT_ACCEPTED,    0,   "no-preserve-root", ARGS_NONE },
+    { OPT_ACCEPTED,    0,   "preserve-root",    ARGS_NONE },
+    { 0 }
+};
+
+static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, optionList, 1, 0, 0 };
+
+static int on_option(int id, const char* value, void* context) {
+    FsOptions* o = context;
+    (void)value;
+
+    switch (id) {
+        case OPT_FORCE:       o->force = 1; o->interactive = 0; break;
+        case OPT_INTERACTIVE: o->interactive = 1; o->force = 0; break;
+        case OPT_RECURSIVE:   o->recursive = 1; break;
+        case OPT_DIR:         o->emptyDirs = 1; break;
+        case OPT_VERBOSE:     o->verbose = 1; break;
+        default:              break;
+    }
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     FsOptions options;
-    int optionsEnded = 0, operands = 0, status = 0, i;
+    const char** operands;
+    int operandCount, status = 0, i, result;
 
     memset(&options, 0, sizeof options);
     options.program = PROGRAM;
 
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
+    result = args_parse(&spec, argc, argv, on_option, &options, &operands, &operandCount);
+    if (result != ARGS_OK)
+        return ARGS_STATUS(spec, result);
 
-        if (optionsEnded || arg[0] != '-' || arg[1] == '\0')
-            continue;
-
-        if (strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-        } else if (arg[1] == '-') {
-            if (strcmp(arg, "--help") == 0) {
-                print_usage();
-                return 0;
-            } else if (strcmp(arg, "--version") == 0) {
-                puts(PROGRAM " (Winshell) " VERSION);
-                return 0;
-            } else if (strcmp(arg, "--force") == 0) {
-                options.force = 1;
-                options.interactive = 0;
-            } else if (strcmp(arg, "--interactive") == 0) {
-                options.interactive = 1;
-                options.force = 0;
-            } else if (strcmp(arg, "--recursive") == 0) {
-                options.recursive = 1;
-            } else if (strcmp(arg, "--dir") == 0) {
-                options.emptyDirs = 1;
-            } else if (strcmp(arg, "--verbose") == 0) {
-                options.verbose = 1;
-            } else if (strcmp(arg, "--no-preserve-root") == 0 || strcmp(arg, "--preserve-root") == 0) {
-                // accepted for compatibility; the roots are protected in any case
-            } else {
-                fprintf(stderr, PROGRAM ": unrecognized option '%s'\n", arg);
-                try_help();
-                return 1;
-            }
-        } else {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                switch (*p) {
-                    case 'f': options.force = 1; options.interactive = 0; break;
-                    case 'i': options.interactive = 1; options.force = 0; break;
-                    case 'r':
-                    case 'R': options.recursive = 1; break;
-                    case 'd': options.emptyDirs = 1; break;
-                    case 'v': options.verbose = 1; break;
-                    default:
-                        fprintf(stderr, PROGRAM ": invalid option -- '%c'\n", *p);
-                        try_help();
-                        return 1;
-                }
-            }
-        }
-    }
-
-    // operands are everything that is not an option
-    optionsEnded = 0;
-    for (i = 1; i < argc; i++) {
-        const char* arg = argv[i];
+    for (i = 0; i < operandCount; i++) {
+        const char* arg = operands[i];
         char native[VPATH_MAX], name[VPATH_MAX];
-        int kind;
+        int kind = vpath_to_native(arg, native, sizeof native);
 
-        if (!optionsEnded && strcmp(arg, "--") == 0) {
-            optionsEnded = 1;
-            continue;
-        }
-        if (!optionsEnded && arg[0] == '-' && arg[1] != '\0')
-            continue;
-
-        operands++;
-
-        kind = vpath_to_native(arg, native, sizeof native);
         // the root of the virtual file system holds the drives; it is nothing that can be removed
         if (kind == VPATH_ROOT) {
             if (options.recursive || options.emptyDirs)
@@ -194,7 +163,7 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        // drives, shares and volumes: also in spellings such as \ or \\?\C:\ ; --no-preserve-root
+        // drives, shares and volumes: also in spellings such as \ or \?\C:\ ; --no-preserve-root
         // does not lift this, a mistake here cannot be undone
         if (is_filesystem_root(native)) {
             if (options.recursive || options.emptyDirs) {
@@ -209,9 +178,9 @@ int main(int argc, char* argv[]) {
             status = 1;
     }
 
-    if (operands == 0 && !options.force) {
+    if (operandCount == 0 && !options.force) {
         fprintf(stderr, PROGRAM ": missing operand\n");
-        try_help();
+        fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
         return 1;
     }
     return status;

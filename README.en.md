@@ -133,6 +133,7 @@ The test programs are divided by feature (`test\`).
 | --- | --- |
 | `vpath_test` | unit tests of `common/vpath.c`: virtual path conversion, `..`, the root, buffer limits |
 | `parser_test` | unit tests of the shell parser: words, quotes, variables, lists of commands, pipes, redirection, syntax errors |
+| `args_test` | unit tests of `common/args.c`, the option parser of the tools: grouping, values, abbreviations, number options, errors |
 | `basic_test` | `echo`, `arch`, `pwd` |
 | `cat_test` | `cat`: bytes kept, options, CR LF |
 | `ls_test` | `ls`: sorting, hidden names, the long format, the virtual root |
@@ -196,8 +197,9 @@ Winshell/
 
 ## Adding a new command
 
-1. Create a directory named after the command at the top level and write `main.c` in it.
-2. Copy `arch/Makefile` and change `NAME`.
+1. Create a directory named after the command at the top level and write `main.c` in it. Handle the options with
+   `args_parse` of `common/args.h` (`tee/main.c` is the smallest example: a table of options, a handler, one call).
+2. Copy `tee/Makefile` and change `NAME`, `SRCS` and `HDRS`.
 3. Add `build-<name>` and `clean-<name>` to the `all` and `clean` lists in the top-level `Makefile`.
 
 A sub-project's `Makefile` must provide `all` and `clean` rules and accept the output location through the `BINDIR` macro.

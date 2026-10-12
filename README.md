@@ -133,6 +133,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | --- | --- |
 | `vpath_test` | `common/vpath.c` 단위 테스트: 가상 경로 변환, `..` 처리, 루트, 버퍼 경계 |
 | `parser_test` | 쉘 파서 단위 테스트: 단어, 따옴표, 변수, 명령 목록, 파이프, 리다이렉션, 구문 오류 |
+| `args_test` | `common/args.c` 단위 테스트: 도구의 옵션 파서(묶음, 값, 줄임말, 숫자 옵션, 오류) |
 | `basic_test` | `echo`, `arch`, `pwd` |
 | `cat_test` | `cat`: 바이트 보존, 옵션, CRLF |
 | `ls_test` | `ls`: 정렬, 숨김, 긴 형식, 가상 루트 |
@@ -196,8 +197,9 @@ Winshell/
 
 ## 새 명령어 추가하기
 
-1. 최상위에 명령 이름의 디렉터리를 만들고 `main.c` 를 작성합니다.
-2. `arch/Makefile` 을 복사하여 `NAME` 을 수정합니다.
+1. 최상위에 명령 이름의 디렉터리를 만들고 `main.c` 를 작성합니다. 옵션은 `common/args.h` 의 `args_parse` 로 처리합니다
+   (`tee/main.c` 가 가장 작은 예입니다: 옵션 표, 처리 함수, `args_parse` 호출).
+2. `tee/Makefile` 을 복사하여 `NAME` 과 `SRCS`/`HDRS` 를 수정합니다.
 3. 최상위 `Makefile` 의 `all`, `clean` 목록에 `build-<이름>`, `clean-<이름>` 을 추가합니다.
 
 각 서브 프로젝트의 `Makefile` 은 `all`, `clean` 규칙을 제공하고 `BINDIR` 매크로로 출력 위치를 받아야 합니다.
