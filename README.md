@@ -18,6 +18,7 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `cp` | 완료 (`-a -f -i -n -p -r -R -t -v`) |
 | `cut` | 완료 (`-b -c -f -d -s --complement --output-delimiter`) |
 | `echo` | 완료 (`-n`, `-e`, `-E`, `--help`, `--version`) |
+| `grep` | 완료 (`-E -F -G -e -f -i -v -w -x -c -l -L -m -n -H -h -o -q -s -b -r -A -B -C -NUM -a -I -z -Z --include --exclude --exclude-dir`; 기본/확장 정규식(역참조 포함), 가장 왼쪽의 가장 긴 일치, UTF-8 문자 단위; `-P` 와 색은 미지원) |
 | `head` | 완료 (`-n -c -q -v -NUM`, `-n -K` 는 끝의 K줄만 빼고) |
 | `ls` | 완료 (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` 는 드라이브 목록) |
 | `mkdir` | 완료 (`-p -v -m`; `-m` 은 받기만 함) |
@@ -115,7 +116,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `rm`, `rmdir`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `rm`, `rmdir`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -143,6 +144,8 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `filter_test` | `sort`, `uniq`, `cut`, `tr` |
 | `lines_test` | `tee`, `tac`, `nl`, `paste`: 줄 끝, 구분자, 섹션, 표준 입력 번갈아 읽기 |
 | `env_test` | `env`, `printenv`: 환경 변경, `-i`/`-u`, 명령 실행과 종료 상태, `-C` |
+| `regex_test` | `common/regex.c` 단위 테스트: 기본/확장 문법, 가장 긴 일치, 집합과 클래스, 단어 경계, 역참조, UTF-8, 오류 메시지 |
+| `grep_test` | `grep`: CRLF, UTF-8, 바이너리 파일, `-r`, 문맥, 종료 상태, 흐르는 입력 |
 | `shell_run_test` | 쉘: 명령 실행, 따옴표, 파이프, 리다이렉션 |
 | `shell_cd_test` | 쉘: `cd`, 가상 파일 시스템, 와일드카드 |
 | `shell_lists_test` | 쉘: `; && \|\|`, 종료 상태, 변수, `exit` |
@@ -173,6 +176,7 @@ Winshell/
 ├─ cut/            cut 명령
 ├─ echo/           echo 명령
 ├─ env/            env 명령
+├─ grep/           grep 명령
 ├─ head/           head 명령
 ├─ ls/             ls 명령
 ├─ mkdir/          mkdir 명령
@@ -191,7 +195,7 @@ Winshell/
 ├─ tr/             tr 명령
 ├─ uniq/           uniq 명령
 ├─ wc/             wc 명령
-├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기)
+├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)
 ```

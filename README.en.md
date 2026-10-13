@@ -18,6 +18,7 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `cp` | Done (`-a -f -i -n -p -r -R -t -v`) |
 | `cut` | Done (`-b -c -f -d -s --complement --output-delimiter`) |
 | `echo` | Done (`-n`, `-e`, `-E`, `--help`, `--version`) |
+| `grep` | Done (`-E -F -G -e -f -i -v -w -x -c -l -L -m -n -H -h -o -q -s -b -r -A -B -C -NUM -a -I -z -Z --include --exclude --exclude-dir`; basic and extended expressions (with back references), leftmost-longest matches, UTF-8 characters; `-P` and colours are not supported) |
 | `head` | Done (`-n -c -q -v -NUM`, `-n -K` leaves out the last K lines) |
 | `ls` | Done (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` lists the drives) |
 | `mkdir` | Done (`-p -v -m`; `-m` is accepted and ignored) |
@@ -115,7 +116,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `rm`, `rmdir`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `rm`, `rmdir`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -143,6 +144,8 @@ The test programs are divided by feature (`test\`).
 | `filter_test` | `sort`, `uniq`, `cut`, `tr` |
 | `lines_test` | `tee`, `tac`, `nl`, `paste`: line endings, separators, sections, standard input taken in turn |
 | `env_test` | `env`, `printenv`: changing the environment, `-i`/`-u`, running a command and its status, `-C` |
+| `regex_test` | unit tests of `common/regex.c`: basic and extended syntax, longest match, sets and classes, word boundaries, back references, UTF-8, error messages |
+| `grep_test` | `grep`: CR LF, UTF-8, binary files, `-r`, context, exit status, input that comes as it is written |
 | `shell_run_test` | shell: running commands, quoting, pipes, redirection |
 | `shell_cd_test` | shell: `cd`, the virtual file system, wildcards |
 | `shell_lists_test` | shell: `; && \|\|`, exit status, variables, `exit` |
@@ -173,6 +176,7 @@ Winshell/
 ├─ cut/            cut command
 ├─ echo/           echo command
 ├─ env/            env command
+├─ grep/           grep command
 ├─ head/           head command
 ├─ ls/             ls command
 ├─ mkdir/          mkdir command
@@ -191,7 +195,7 @@ Winshell/
 ├─ tr/             tr command
 ├─ uniq/           uniq command
 ├─ wc/             wc command
-├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines)
+├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
 ```

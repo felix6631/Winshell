@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <windows.h>
+#include <shellapi.h>
 
 static void try_help(const ArgsSpec* spec) {
     fprintf(stderr, "Try '%s --help' for more information.\n", spec->program);
@@ -32,10 +34,55 @@ static const ArgsOption* find_long(const ArgsSpec* spec, const char* name, size_
     return *ambiguous ? NULL : found;
 }
 
+/**
+ * The arguments as UTF-8. The C runtime hands out the command line in the ANSI code page, which loses
+ * what that page does not have (and a Korean page makes UTF-8 text into other characters); the wide
+ * command line has everything. Returns a new argv (NULL-terminated, never freed) or NULL to go on
+ * with the one that was given.
+ */
+static char** utf8_arguments(int* argc) {
+    int count = 0, i;
+    wchar_t** wide = CommandLineToArgvW(GetCommandLineW(), &count);
+    char** result;
+
+    if (wide == NULL)
+        return NULL;
+    result = calloc((size_t)count + 1, sizeof *result);
+    if (result == NULL) {
+        LocalFree(wide);
+        return NULL;
+    }
+    for (i = 0; i < count; i++) {
+        int bytes = WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, NULL, 0, NULL, NULL);
+        result[i] = bytes > 0 ? malloc((size_t)bytes) : NULL;
+        if (result[i] == NULL || WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, result[i], bytes, NULL, NULL) == 0) {
+            LocalFree(wide);
+            return NULL;                // a leak of what was converted: the program is starting
+        }
+    }
+    LocalFree(wide);
+    *argc = count;
+    return result;
+}
+
+void args_real_arguments(int* argc, char*** argv) {
+    // the real command line of the program, not an array that a test made up
+    if (*argv == __argv) {
+        int utf8Count;
+        char** utf8 = utf8_arguments(&utf8Count);
+        if (utf8 != NULL) {
+            *argv = utf8;
+            *argc = utf8Count;
+        }
+    }
+}
+
 int args_parse(const ArgsSpec* spec, int argc, char* argv[], ArgsHandler handler, void* context,
                const char*** operandsOut, int* operandCountOut) {
     const char** operands;
     int count = 0, optionsEnded = 0, a;
+
+    args_real_arguments(&argc, &argv);
 
     operands = calloc((size_t)argc + 1, sizeof *operands);
     if (operands == NULL) {

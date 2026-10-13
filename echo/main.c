@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include "args.h"
 
 #define VERSION "0.1"
 
@@ -120,6 +121,8 @@ static int parse_option(const char* arg, int* newline, int* escapes) {
 int main(int argc, char* argv[]) {
     int newline = 1, escapes = 0;
     int i = 1;
+
+    args_real_arguments(&argc, &argv);
 
     if (argc == 2) {
         if (strcmp(argv[1], "--help") == 0) {

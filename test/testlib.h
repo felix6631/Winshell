@@ -231,6 +231,48 @@ static char* command_line(const char* program, const char* arguments) {
  * Standard input is inputLength bytes of input, or the file inputPath when that is not NULL.
  * Returns 0 when the program was started.
  */
+/**
+ * CreateProcess with the arguments in UTF-8, as the tests write them: the ANSI version would read
+ * the bytes in the code page of the system and change what the program is given. The paths of the
+ * program and of the directory come from the system and are in that code page.
+ */
+static BOOL create_process_utf8(const char* program, const char* arguments, const char* cwd,
+                                const STARTUPINFOA* si, PROCESS_INFORMATION* pi) {
+    int programChars = MultiByteToWideChar(CP_ACP, 0, program, -1, NULL, 0);
+    int argumentChars = arguments != NULL ? MultiByteToWideChar(CP_UTF8, 0, arguments, -1, NULL, 0) : 0;
+    int cwdChars = cwd != NULL ? MultiByteToWideChar(CP_ACP, 0, cwd, -1, NULL, 0) : 0;
+    wchar_t* line = malloc((size_t)(programChars + argumentChars + 8) * sizeof *line);
+    wchar_t* wideCwd = cwdChars > 0 ? malloc((size_t)cwdChars * sizeof *wideCwd) : NULL;
+    STARTUPINFOW wide;
+    BOOL started = FALSE;
+
+    if (line != NULL && (cwd == NULL || wideCwd != NULL)) {
+        wchar_t* p = line;
+        *p++ = L'"';
+        MultiByteToWideChar(CP_ACP, 0, program, -1, p, programChars);
+        p += programChars - 1;
+        *p++ = L'"';
+        if (argumentChars > 1) {
+            *p++ = L' ';
+            MultiByteToWideChar(CP_UTF8, 0, arguments, -1, p, argumentChars);
+        } else {
+            *p = L'\0';
+        }
+        if (wideCwd != NULL)
+            MultiByteToWideChar(CP_ACP, 0, cwd, -1, wideCwd, cwdChars);
+        ZeroMemory(&wide, sizeof wide);
+        wide.cb = sizeof wide;
+        wide.dwFlags = si->dwFlags;
+        wide.hStdInput = si->hStdInput;
+        wide.hStdOutput = si->hStdOutput;
+        wide.hStdError = si->hStdError;
+        started = CreateProcessW(NULL, line, NULL, NULL, TRUE, 0, NULL, wideCwd, &wide, pi);
+    }
+    free(line);
+    free(wideCwd);
+    return started;
+}
+
 static int run_program_ex(const char* program, const char* arguments, const char* input, size_t inputLength,
                           const char* inputPath, const char* cwd, DWORD timeoutMs, RunResult* result) {
     char inPath[MAX_PATH + 64], outPath[MAX_PATH + 64], errPath[MAX_PATH + 64];
@@ -275,7 +317,7 @@ static int run_program_ex(const char* program, const char* arguments, const char
     si.hStdError = hErr;
     ZeroMemory(&pi, sizeof pi);
 
-    started = CreateProcessA(NULL, commandLine, NULL, NULL, TRUE, 0, NULL, cwd, &si, &pi);
+    started = create_process_utf8(program, arguments, cwd, &si, &pi);
     free(commandLine);
 
     if (!started) {
@@ -361,7 +403,7 @@ static int proc_start(Process* p, const char* program, const char* arguments, co
     si.hStdError = hErr;
     ZeroMemory(&pi, sizeof pi);
 
-    started = CreateProcessA(NULL, commandLine, NULL, NULL, TRUE, 0, NULL, cwd, &si, &pi);
+    started = create_process_utf8(program, arguments, cwd, &si, &pi);
     free(commandLine);
     CloseHandle(inputRead);
     CloseHandle(hOut);

@@ -19,7 +19,7 @@ all: $(TARGET)
 $(TARGET): $(SRCS) $(HDRS) ..\common\vec.h
 	@if not exist "$(BINDIR)" mkdir "$(BINDIR)"
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
-	cl $(CFLAGS) /Fo$(OBJDIR)\ /Fe"$(TARGET)" $(SRCS) $(LIBS)
+	cl $(CFLAGS) /Fo$(OBJDIR)\ /Fe"$(TARGET)" $(SRCS) $(LIBS) shell32.lib
 
 clean:
 	@if exist "$(TARGET)" del "$(TARGET)"

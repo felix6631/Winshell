@@ -422,6 +422,8 @@ static void test_mv(void) {
     make_sized_file(d, "ro.txt", 1, FILE_ATTRIBUTE_READONLY);
     write_text(d, "n.txt", "N");
     run_tool(d, "mv", "n.txt ro.txt", NULL, &r);
+    if (r.exitCode != 0)
+        printf("    mv said: %s\n", r.err != NULL ? r.err : "(nothing)");
     CHECK_INT(r.exitCode, 0);
     expect_content(d, "ro.txt", "N");
     run_result_free(&r);

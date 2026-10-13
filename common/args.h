@@ -52,6 +52,13 @@ typedef int (*ArgsHandler)(int id, const char* value, void* context);
 #define ARGS_EXIT   1           /* --help or --version was answered: exit with status 0 */
 #define ARGS_FAILED (-1)        /* a message was printed: exit with spec->usageStatus */
 
+/**
+ * main(argc, argv) as UTF-8: replaces them by the arguments of the wide command line, which keeps
+ * what the ANSI code page of the C runtime would lose. args_parse does this itself; a tool that does
+ * not use it calls this first. Does nothing for an argv that is not the program's own.
+ */
+void args_real_arguments(int* argc, char*** argv);
+
 /** The exit status of a tool whose args_parse did not return ARGS_OK. */
 #define ARGS_STATUS(spec, result) ((result) == ARGS_EXIT ? 0 : (spec).usageStatus)
 

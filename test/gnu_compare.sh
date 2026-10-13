@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Compares head, tail, wc, sort, uniq, cut, tr, cat, tac, nl, paste and tee with the GNU tools: the output bytes and the
+# Compares head, tail, wc, sort, uniq, cut, tr, cat, tac, nl, paste, tee and grep with the GNU tools: the output bytes and the
 # exit codes of many combinations of options and inputs have to be the same.
 #
 # The GNU tools are the ones of MSYS2 or Git for Windows (an environment with bash). They are
@@ -63,6 +63,9 @@ b3
 
 TEXTS="words.txt nums.txt table.txt tabs.txt dup.txt fields.txt lines.txt empty.txt nonl.txt blank.txt big.txt"
 
+# GNU_ONLY=grep bash test/gnu_compare.sh : only that section (head, tail, wc, sort, uniq, cut, tr, cat, tac, nl, paste, tee, grep)
+want() { [ -z "$GNU_ONLY" ] || [ "$GNU_ONLY" = "$1" ]; }
+
 # ---- comparing ----------------------------------------------------------------------------
 total=0
 bad=0
@@ -94,6 +97,7 @@ compare_stdin() {
     fi
 }
 
+if want head; then
 echo "== head"
 for f in $TEXTS; do
     for o in "" "-n 3" "-n 0" "-n 100" "-n -2" "-n -100" "-c 7" "-c -5" "-c 0" "-n 1k" "-3" "-c 1k"; do
@@ -107,6 +111,9 @@ compare head -v -n 2 lines.txt
 compare head nosuch.txt
 compare head -n x lines.txt
 
+fi
+
+if want tail; then
 echo "== tail"
 for f in $TEXTS; do
     for o in "" "-n 3" "-n 0" "-n 100" "-n +3" "-n +1" "-n +100" "-c 7" "-c -5" "-c +4" "-c +1000" "-c 3b" "-3"; do
@@ -118,6 +125,9 @@ compare tail -q -n 2 lines.txt words.txt
 compare tail -v -n 2 lines.txt
 compare tail nosuch.txt
 
+fi
+
+if want wc; then
 echo "== wc"
 for f in $TEXTS; do
     for o in "" -l -w -c -m -L -lw -lwc -lwcmL -cl; do
@@ -131,6 +141,9 @@ compare wc nosuch.txt lines.txt
 compare_stdin lines.txt wc
 compare_stdin lines.txt wc -l
 
+fi
+
+if want sort; then
 echo "== sort"
 for f in $TEXTS; do
     for o in "" -r -u -f -b -d -n -rn -nu -s -fu "-k2" "-k1,1" "-k2,2n" "-k2,2nr" "-k1.2" "-k1.2,1.3" \
@@ -143,6 +156,9 @@ compare sort -o out_file.txt words.txt
 compare sort nosuch.txt
 compare sort -k0 words.txt
 
+fi
+
+if want uniq; then
 echo "== uniq"
 for f in dup.txt words.txt fields.txt empty.txt nonl.txt blank.txt; do
     for o in "" -c -d -D -u -i -ci "-f1" "-f 1 -c" "-s 2" "-w 1" "-w 2 -c" "-d -c" "-u -c" "-i -d"; do
@@ -151,6 +167,9 @@ for f in dup.txt words.txt fields.txt empty.txt nonl.txt blank.txt; do
 done
 compare_stdin dup.txt uniq -c
 
+fi
+
+if want cut; then
 echo "== cut"
 for f in table.txt tabs.txt words.txt empty.txt nonl.txt big.txt; do
     for o in "-c1" "-c1-3" "-c2-" "-c-2" "-c1,3" "-c3,1" "-b1-2,4" "-b 2-3 --complement" "-f1" "-f2" "-f1,3" "-f2-" \
@@ -165,6 +184,9 @@ compare cut -f0 table.txt
 compare cut -c1 -f1 table.txt
 compare cut -f1 -d:: table.txt
 
+fi
+
+if want tr; then
 echo "== tr"
 for args in "a-z A-Z" "[:lower:] [:upper:]" "[:upper:] [:lower:]" "abc xyz" "abc x" "a-c 12" "-d a-c" "-d [:digit:]" \
             "-d [:space:]" "-s a-z" "-s ' '" "-c a-z _" "-cd a-z" "-cs a-z \\n" "-ds a-c d" "-s a-b A-B" \
@@ -189,6 +211,9 @@ for args in "" "a" "-d a b" "z-a x" "[:foo:] x" "a-c [x*] y" "[a*] b"; do
     fi
 done
 
+fi
+
+if want cat; then
 echo "== cat"
 for f in $TEXTS; do
     for o in "" -n -b -s -E -T -v -A -e -t -ns -bs -nE; do
@@ -198,6 +223,9 @@ done
 compare cat nosuch.txt lines.txt
 compare cat -n lines.txt words.txt
 
+fi
+
+if want tac; then
 echo "== tac"
 for f in $TEXTS sections.txt; do
     for o in "" -b "-s :" "-b -s :" "-s ab" "-bs ab" "-s ''"; do
@@ -215,6 +243,9 @@ compare tac nosuch.txt lines.txt
 compare_stdin words.txt tac
 compare_stdin nonl.txt tac -s a
 
+fi
+
+if want nl; then
 echo "== nl"
 for f in $TEXTS sections.txt; do
     for o in "" -ba -bn -ba\ -l2 -ba\ -l3 -n\ ln -n\ rz -n\ rn -w3 -w10 -s: -s\ -- "-v 10 -i 5" "-v -3" -i-2 -p "-ha -fa" "-ba -ha -fa" "-ba -p" "-d xy -ba" "-d x" "-nrz -w 3 -v 98 -ba"; do
@@ -236,6 +267,9 @@ compare nl -n xx lines.txt
 compare nl -b x lines.txt
 compare_stdin words.txt nl -ba
 
+fi
+
+if want paste; then
 echo "== paste"
 for f in $TEXTS; do
     for o in "" -s "-d :" "-d ,;" "-s -d ,;" "-d '\n'" "-d '\0'" "-d '\t\\'" "-s -d '\0'" -z; do
@@ -274,6 +308,9 @@ for o in "" "-s" "-d ,"; do
 done
 compare_stdin lines.txt paste - words.txt -
 
+fi
+
+if want tee; then
 echo "== tee"
 for f in words.txt nonl.txt empty.txt big.txt; do
     for o in "" -a; do
@@ -294,6 +331,129 @@ ours tee < words.txt > got.out 2> got.err; grc=$?
 if ! cmp -s exp.out got.out || [ $erc != $grc ]; then
     bad=$((bad + 1))
     echo "DIFFERS: tee (no file)"
+fi
+
+fi
+
+if want grep; then
+echo "== grep"
+# UTF-8 locale for the GNU tool: a character is a character, as it is here
+printf 'abc\nabcabc\nxyz\nfoo.bar\nfoo+bar\n(paren)\n[brk]\nA1b2\n a b \n\nfoo  bar\nBAR baz\n' > re.txt
+printf '가나다\nabc 한글 def\nÉcole\nécole\nñandú\n한\nx\n' > utf.txt
+mkdir -p tree/sub tree/.hid
+printf 'needle here\nplain\n' > tree/a.txt
+printf 'another needle\n' > tree/sub/b.c
+printf 'hidden needle\n' > tree/.hid/c.txt
+printf 'bin\0needle\n' > tree/bin.dat
+
+compare_grep() {
+    total=$((total + 1))
+    LC_ALL=C.UTF-8 gnu grep "$@" > exp.out 2> exp.err < /dev/null; local erc=$?
+    ours grep "$@" > got.out 2> got.err < /dev/null; local grc=$?
+    if ! cmp -s exp.out got.out || [ $erc != $grc ]; then
+        bad=$((bad + 1))
+        echo "DIFFERS: grep $* (status $erc, ours $grc)"
+    fi
+}
+
+GREP_FILES="words.txt re.txt dup.txt nonl.txt blank.txt"
+BRE_PATTERNS=("o" "foo" "^f" "r$" "." "a.c" "x*" "[a-c]" "[^a-c]" "[[:digit:]]\+" "\(ab\)*c" "a\{2\}" "ab\|ba" \
+              "\bfoo" "foo\>" "\w\+" "\W" "\s" "o\{1,\}" "^$" "^" "$" "*a" "a\{0\}" "[]a]" "[a-]" "\(a\)\1" \
+              "\<a" "o\?" "A" "bar" "^.\{3\}$" "[[:upper:]]" "b\+" "^\(.\)\(.\).\2\1" "fo*" "\.")
+ERE_PATTERNS=("a|b" "(ab)+" "a{2,3}" "x?y" "^(abc)+$" "o+" "(foo|bar)+" "^$|x" "a|" "(a)(b)\2" "[0-9]+" \
+              "\(paren\)" "^[^ ]+ [^ ]+$" "b{0,1}c" "(^| )foo" ".+" "a**" "()" "(a|b)*c" "foo\.bar" "a{,2}b")
+GREP_OPTIONS=("" "-i" "-v" "-c" "-n" "-o" "-w" "-x" "-on" "-b" "-nb" "-vc" "-ci" "-ow" "-m1" "-A1" "-B1" "-C1" "-H" "-q")
+
+for f in $GREP_FILES; do
+    for pat in "${BRE_PATTERNS[@]}"; do
+        for o in "" -i -v -c -n -o -w -x -m1 -C1 -ow; do
+            compare_grep $o -e "$pat" $f
+        done
+    done
+    for pat in "${ERE_PATTERNS[@]}"; do
+        for o in "" -i -v -c -o -w -x -n; do
+            compare_grep -E $o -e "$pat" $f
+        done
+    done
+    for o in "${GREP_OPTIONS[@]}"; do
+        compare_grep $o foo $f
+        compare_grep -F $o 'o' $f
+    done
+done
+
+# several files, several patterns, and what a name does to the output
+compare_grep foo words.txt re.txt dup.txt
+compare_grep -c o words.txt re.txt nosuch.txt
+compare_grep -l o words.txt re.txt dup.txt empty.txt
+compare_grep -L o words.txt re.txt dup.txt empty.txt
+compare_grep -n -H foo re.txt
+compare_grep -h foo words.txt re.txt
+compare_grep -e foo -e abc -e xyz re.txt
+compare_grep -E -e 'a|b' -e 'c' re.txt
+compare_grep -F -e foo -e 'o.b' re.txt
+compare_grep -F -x -e abc -e xyz re.txt
+compare_grep -F -w -e foo -e bar re.txt
+compare_grep -f re.txt words.txt
+compare_grep -f empty.txt words.txt
+compare_grep -v -f empty.txt words.txt | head -0
+compare_grep -A2 -B2 -n foo re.txt words.txt
+compare_grep -C1 -n o dup.txt big.txt
+compare_grep -m2 -A1 o words.txt
+compare_grep -m0 o words.txt
+compare_grep -c -m2 o words.txt
+compare_grep -on -b o re.txt
+compare_grep -ob -i 'AB' re.txt
+compare_grep -2 foo re.txt
+compare_grep -A 0 foo re.txt
+compare_grep -ni -w -e foo -e baz re.txt
+compare_grep -x '' blank.txt
+compare_grep -c '' empty.txt
+compare_grep -c '^' nonl.txt
+compare_grep -w '' re.txt
+compare_grep -o '' re.txt
+compare_grep -E 'a{1,2}{2}' re.txt
+compare_grep -E '{1}' re.txt
+compare_grep -E -c '{1}x' re.txt
+compare_grep -- -x re.txt
+compare_grep -e '' re.txt
+compare_grep -z foo re.txt
+compare_grep -zc '' re.txt
+compare_grep -Z -l foo words.txt re.txt
+compare_grep -Z -c foo words.txt re.txt
+compare_grep -a foo tree/bin.dat
+compare_grep foo tree/bin.dat
+compare_grep -c needle tree/bin.dat
+compare_grep -I needle tree/bin.dat
+compare_grep -r needle tree
+compare_grep -rn needle tree/sub
+compare_grep -rl needle tree
+compare_grep -rc needle tree
+compare_grep -rh needle tree
+compare_grep -r --include='*.c' needle tree
+compare_grep -r --exclude='*.txt' needle tree
+compare_grep -r --exclude-dir=sub needle tree
+compare_grep needle tree/a.txt tree/sub
+compare_grep -s needle tree/sub
+compare_grep -d skip needle tree/a.txt tree/sub
+
+# UTF-8: a character is one character
+for pat in "." "^.$" "^..$" "[가-힣]" "[^a-z]" "é" "É" "^.\{3\}$" "한" "c 한" "\w\+" "[[:alpha:]]\+"; do
+    for o in "" -i -o -c -v -n; do
+        compare_grep $o -e "$pat" utf.txt
+    done
+done
+compare_grep -E '^.{2}$' utf.txt
+compare_grep -io 'école' utf.txt
+compare_grep -F -i 'ÉCOLE' utf.txt
+
+# errors: the status is what counts
+for bad_pattern in '\(' '\)' 'a\{' 'a\{1' 'a\{2,1\}' '[' '[a' '[[:foo:]]' '[:alpha:]' '[b-a]' '\1' 'a\' '\(a\)\2'; do
+    compare_grep -e "$bad_pattern" re.txt
+done
+for bad_pattern in '(' ')' 'a{1' 'a{2,1}' '[' '(a' 'a)' '\1' 'a\' '+' '*a' '?' '(*a)' '(+)'; do
+    compare_grep -E -e "$bad_pattern" re.txt
+done
+
 fi
 
 echo
