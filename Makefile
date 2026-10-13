@@ -16,7 +16,7 @@ BINDIR = $(MAKEDIR)\bin
 
 # build-NAME 과 clean-NAME 은 NAME 디렉터리에서 그 도구의 Makefile 을 실행합니다.
 # 새 도구는 아래 BUILD 목록에 build-<이름> 만 추가하면 됩니다.
-BUILD = build-shell build-arch build-cat build-cp build-cut build-echo build-env build-grep build-head build-ls build-mkdir \
+BUILD = build-shell build-arch build-cat build-cp build-cut build-echo build-env build-expr build-grep build-head build-ls build-mkdir \
         build-mv build-nl build-paste build-printenv build-pwd build-rm build-rmdir build-sed build-sort build-tac \
         build-tail build-tee build-touch build-tr build-uniq build-wc
 CLEAN = $(BUILD:build-=clean-)
