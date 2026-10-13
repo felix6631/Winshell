@@ -11,7 +11,8 @@
  * cat, sort, uniq, cut, head, tail and wc, each with options picked at
  * random. tr is left out: it works on bytes, and a CR is a byte like any other.
  *
- * Environment: WS_ITER number of random texts (default 25), WS_SEED the seed.
+ * Environment: WS_ITER number of random texts (default 8, which takes about
+ * ten seconds; a longer run for a change of these tools: WS_ITER=100), WS_SEED the seed.
  * A failure prints the seed, the tool and its options, and the input.
  */
 
@@ -262,7 +263,7 @@ static void check_tool(const ToolSet* set, const char* options, const Line* line
 int main(void) {
     const char* iterations = getenv("WS_ITER");
     const char* seed = getenv("WS_SEED");
-    int count = iterations != NULL ? atoi(iterations) : 25, i;
+    int count = iterations != NULL ? atoi(iterations) : 8, i;
     unsigned long long base = seed != NULL ? (unsigned long long)_strtoui64(seed, NULL, 10) : 20260101ULL;
 
     tools_init("equiv_test");

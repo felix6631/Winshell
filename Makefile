@@ -41,6 +41,7 @@ asan:
 
 ## GNU 도구(MSYS2 의 bash 가 있는 환경)와 출력을 대조합니다: bash test/gnu_compare.sh
 gnu: all
+	@cd test && $(MAKE) /nologo gnu
 	@bash test/gnu_compare.sh
 
 clean: $(CLEAN) clean-test

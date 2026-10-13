@@ -48,11 +48,19 @@ TESTS = $(OUT)\vpath_test.exe $(OUT)\parser_test.exe $(OUT)\args_test.exe $(OUT)
 
 all: $(TESTS)
 
-check: all
-	@.\runall.bat $(OUT)
+# runs the test programs, several at a time
+$(OUT)\runall.exe: runall.c
+	@if not exist $(OUT) mkdir $(OUT)
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ runall.c
+
+check: all $(OUT)\runall.exe
+	@$(OUT)\runall.exe $(OUT)
+
+# the program that runs the combinations of gnu_compare.sh (nmake gnu at the top builds it)
+gnu: $(OUT)\gnu_batch.exe
 
 check-asan:
-	@$(MAKE) /nologo OUT=out-asan EXTRA="/fsanitize=address /Zi" all
+	@$(MAKE) /nologo OUT=out-asan EXTRA="/fsanitize=address /Zi" all out-asan\runall.exe
 	@.\runasan.bat
 
 .SUFFIXES: .c .exe
