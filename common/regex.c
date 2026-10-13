@@ -1176,6 +1176,50 @@ void regex_free(Regex* regex) {
     free(regex);
 }
 
+/** One pattern of the list as a tree. The groups of it are numbered after *groupBase, which then grows by them. */
+static Node* parse_one_pattern(Parser* p, const char* pattern, int flags, int* groupBase) {
+    const unsigned char* bytes = (const unsigned char*)pattern;
+    size_t length = strlen(pattern), i = 0, n = 0;
+    Node* one;
+
+    if (VEC_RESERVE(p->chars, p->charCapacity, length + 1) != 0) {
+        p->nomem = 1;
+        fail(p, "Memory exhausted");
+    }
+    while (i < length) {
+        size_t used;
+        p->chars[n++] = decode_char(bytes + i, length - i, &used);
+        i += used;
+    }
+
+    p->pat = p->chars;
+    p->length = n;
+    p->i = 0;
+    p->groupBase = *groupBase;
+    p->groupsHere = 0;
+    memset(p->closedHere, 0, sizeof p->closedHere);
+
+    if (flags & REGEX_FIXED) {
+        size_t j;
+        one = new_node(p, N_EMPTY);
+        for (j = 0; j < n; j++)
+            one = make_cat(p, one, make_char(p, p->chars[j]));
+    } else {
+        one = parse_pattern(p);
+        *groupBase += p->groupsHere;
+    }
+    return one;
+}
+
+/** The match has to be the whole line (-x) or a whole word (-w). */
+static Node* anchor_tree(Parser* p, Node* tree, int flags) {
+    if (flags & REGEX_LINE)
+        return make_cat(p, make_cat(p, make_assert(p, A_BOL), tree), make_assert(p, A_EOL));
+    if (flags & REGEX_WORD)
+        return make_cat(p, make_cat(p, make_assert(p, A_NOT_WORD_BEFORE), tree), make_assert(p, A_NOT_WORD_AFTER));
+    return tree;
+}
+
 Regex* regex_compile(const char* const* patterns, size_t count, int flags, char* error, size_t errorSize) {
     Parser p;
     Regex* re = NULL;
@@ -1198,36 +1242,7 @@ Regex* regex_compile(const char* const* patterns, size_t count, int flags, char*
     tree = new_node(&p, N_NONE);        // no pattern at all matches nothing
 
     for (k = 0; k < count; k++) {
-        const unsigned char* bytes = (const unsigned char*)patterns[k];
-        size_t length = strlen(patterns[k]), i = 0, n = 0;
-        Node* one;
-
-        if (VEC_RESERVE(p.chars, p.charCapacity, length + 1) != 0) {
-            p.nomem = 1;
-            fail(&p, "Memory exhausted");
-        }
-        while (i < length) {
-            size_t used;
-            p.chars[n++] = decode_char(bytes + i, length - i, &used);
-            i += used;
-        }
-
-        p.pat = p.chars;
-        p.length = n;
-        p.i = 0;
-        p.groupBase = groupBase;
-        p.groupsHere = 0;
-        memset(p.closedHere, 0, sizeof p.closedHere);
-
-        if (flags & REGEX_FIXED) {
-            size_t j;
-            one = new_node(&p, N_EMPTY);
-            for (j = 0; j < n; j++)
-                one = make_cat(&p, one, make_char(&p, p.chars[j]));
-        } else {
-            one = parse_pattern(&p);
-            groupBase += p.groupsHere;
-        }
+        Node* one = parse_one_pattern(&p, patterns[k], flags, &groupBase);
 
         if (k == 0) {
             tree = one;
@@ -1238,13 +1253,7 @@ Regex* regex_compile(const char* const* patterns, size_t count, int flags, char*
             tree = alt;
         }
     }
-
-    if (flags & REGEX_LINE) {
-        tree = make_cat(&p, make_cat(&p, make_assert(&p, A_BOL), tree), make_assert(&p, A_EOL));
-    } else if (flags & REGEX_WORD) {
-        tree = make_cat(&p, make_cat(&p, make_assert(&p, A_NOT_WORD_BEFORE), tree),
-                        make_assert(&p, A_NOT_WORD_AFTER));
-    }
+    tree = anchor_tree(&p, tree, flags);
 
     e.withSaves = p.hasBackref || (flags & REGEX_GROUPS) != 0;
     emit_node(&e, tree);

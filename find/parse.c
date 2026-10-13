@@ -211,16 +211,15 @@ static Node* parse_primary(Parser* p);
 
 static Node* parse_comma(Parser* p);
 
-static Node* parse_predicate(Parser* p, const char* word) {
-    Node* n = new_node(p, N_TEST);
+/** The tests: sets n and returns 1; 0 when the word is not one of them; -1 after a message. */
+static int parse_test(Parser* p, const char* word, Node* n) {
     const char* a;
-    FindOptions* o = p->options;
 
 #define NEED(name)                                      \
     do {                                                \
         a = argument(p, name);                          \
         if (a == NULL)                                  \
-            return NULL;                                \
+            return -1;                                  \
     } while (0)
 #define IS(name) (strcmp(word, name) == 0)
 
@@ -236,7 +235,7 @@ static Node* parse_predicate(Parser* p, const char* word) {
         NEED(word);
         n->pred = P_REGEX;
         if (compile_regex(p, n, a, IS("-iregex")) != 0)
-            return NULL;
+            return -1;
     } else if (IS("-regextype")) {
         NEED(word);
         n->pred = P_OPTION;
@@ -248,7 +247,7 @@ static Node* parse_predicate(Parser* p, const char* word) {
             p->regexFlags = REGEX_EXTENDED;
         else if (strcmp(a, "posix-basic") != 0 && strcmp(a, "grep") != 0) {
             fail(p, "Unknown regular expression type `%s'", a);
-            return NULL;
+            return -1;
         }
     } else if (IS("-type") || IS("-xtype")) {
         size_t i;
@@ -259,11 +258,11 @@ static Node* parse_predicate(Parser* p, const char* word) {
             if (strchr("bcdpfls", a[i]) != NULL && (i == 0 || a[i - 1] == ',')) {
                 if (a[i + 1] != '\0' && a[i + 1] != ',') {
                     fail(p, "Must separate multiple arguments to -type using: ','%s", "");
-                    return NULL;
+                    return -1;
                 }
             } else if (a[i] != ',') {
                 fail(p, "Unknown argument to -type: %s", a + i);
-                return NULL;
+                return -1;
             }
         }
     } else if (IS("-size")) {
@@ -280,7 +279,7 @@ static Node* parse_predicate(Parser* p, const char* word) {
         n->pred = P_SIZE;
         n->unit = unit;
         if (parse_number(p, "-size", text, &n->number, 1, &n->compare) != 0)
-            return NULL;
+            return -1;
     } else if (IS("-empty")) {
         n->pred = P_EMPTY;
     } else if (IS("-newer") || IS("-anewer") || IS("-cnewer")) {
@@ -288,28 +287,49 @@ static Node* parse_predicate(Parser* p, const char* word) {
         n->pred = P_NEWER;
         n->type = IS("-anewer") ? 'a' : IS("-cnewer") ? 'c' : 'm';
         if (file_time(p, a, 'm', &n->reference) != 0)
-            return NULL;
+            return -1;
     } else if (IS("-mtime") || IS("-atime") || IS("-ctime")) {
         NEED(word);
         n->pred = P_TIME;
         n->type = word[1];
         n->unit = 'd';
         if (parse_number(p, word, a, &n->number, 1, &n->compare) != 0)
-            return NULL;
+            return -1;
     } else if (IS("-mmin") || IS("-amin") || IS("-cmin")) {
         NEED(word);
         n->pred = P_MIN;
         n->type = word[1];
         n->unit = 'm';
         if (parse_number(p, word, a, &n->number, 1, &n->compare) != 0)
-            return NULL;
+            return -1;
     } else if (IS("-readable")) {
         n->pred = P_READABLE;
     } else if (IS("-writable")) {
         n->pred = P_WRITABLE;
     } else if (IS("-executable")) {
         n->pred = P_EXECUTABLE;
-    } else if (IS("-prune")) {
+    } else {
+        return 0;
+    }
+#undef NEED
+#undef IS
+    return 1;
+}
+
+/** The actions and the global options: sets n and returns 1; 0 when the word is not one of them; -1 after a message. */
+static int parse_action(Parser* p, const char* word, Node* n) {
+    const char* a;
+    FindOptions* o = p->options;
+
+#define NEED(name)                                      \
+    do {                                                \
+        a = argument(p, name);                          \
+        if (a == NULL)                                  \
+            return -1;                                  \
+    } while (0)
+#define IS(name) (strcmp(word, name) == 0)
+
+    if (IS("-prune")) {
         n->pred = P_PRUNE;
     } else if (IS("-quit")) {
         n->pred = P_QUIT;
@@ -329,16 +349,13 @@ static Node* parse_predicate(Parser* p, const char* word) {
         n->pred = P_DELETE;
         o->depthFirst = 1;
         o->hasAction = 1;
-    } else if (IS("-exec") || IS("-execdir") || IS("-ok") || IS("-okdir")) {
-        free(n);
-        return parse_exec(p, word, IS("-execdir") || IS("-okdir"), IS("-ok") || IS("-okdir"));
     } else if (IS("-maxdepth") || IS("-mindepth")) {
         long long value;
         int compare;
         NEED(word);
         n->pred = P_OPTION;
         if (parse_number(p, word, a, &value, 0, &compare) != 0)
-            return NULL;
+            return -1;
         if (IS("-maxdepth"))
             o->maxDepth = (int)value;
         else
@@ -353,11 +370,32 @@ static Node* parse_predicate(Parser* p, const char* word) {
                IS("-noignore_readdir_race") || IS("-nowarn") || IS("-warn")) {
         n->pred = P_OPTION;
     } else {
-        fail(p, "unknown predicate `%s'", word);
-        return NULL;
+        return 0;
     }
 #undef NEED
 #undef IS
+    return 1;
+}
+
+static Node* parse_predicate(Parser* p, const char* word) {
+    Node* n;
+    int result;
+
+    if (strcmp(word, "-exec") == 0 || strcmp(word, "-execdir") == 0 || strcmp(word, "-ok") == 0 ||
+        strcmp(word, "-okdir") == 0)
+        return parse_exec(p, word, strcmp(word, "-execdir") == 0 || strcmp(word, "-okdir") == 0,
+                          strcmp(word, "-ok") == 0 || strcmp(word, "-okdir") == 0);
+
+    n = new_node(p, N_TEST);
+    result = parse_test(p, word, n);
+    if (result == 0)
+        result = parse_action(p, word, n);
+    if (result == 0)
+        fail(p, "unknown predicate `%s'", word);
+    if (result <= 0) {
+        free(n);
+        return NULL;
+    }
     return n;
 }
 

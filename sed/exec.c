@@ -600,6 +600,94 @@ static size_t find_terminator(void) {
     return (size_t)-1;
 }
 
+/** g G h H x: the hold space. The ending goes with the text: a last line without one gets the one of what it is mixed with. */
+static void hold_command(int name) {
+    switch (name) {
+        case 'g':
+            ps.length = 0;
+            buf_add(&ps, hs.data, hs.length);
+            psEnding = hsEnding;
+            break;
+        case 'G':
+            buf_add_byte(&ps, terminator);
+            buf_add(&ps, hs.data, hs.length);
+            if (hsEnding == 0)
+                psEnding = 0;
+            else if (psEnding == 0)
+                psEnding = hsEnding;
+            break;
+        case 'h':
+            hs.length = 0;
+            buf_add(&hs, ps.data, ps.length);
+            hsEnding = psEnding;
+            break;
+        case 'H':
+            buf_add_byte(&hs, terminator);
+            buf_add(&hs, ps.data, ps.length);
+            if (psEnding == 0)
+                hsEnding = 0;
+            else if (hsEnding == 0)
+                hsEnding = psEnding;
+            break;
+        default: {      // x
+            Buf t = ps;
+            int e = psEnding;
+            ps = hs;
+            hs = t;
+            psEnding = hsEnding;
+            hsEnding = e;
+            break;
+        }
+    }
+}
+
+/** P and W: the pattern space up to its first line feed. */
+static void print_first_line(Output* o) {
+    size_t at = find_terminator();
+    if (at == (size_t)-1)
+        write_line(o, ps.data, ps.length, psEnding);
+    else
+        write_line(o, ps.data, at, psEnding == 2 ? 2 : 1);
+}
+
+/** D: deletes up to the first line feed and starts over with what is left, or acts as d. */
+static CycleResult delete_first_line(void) {
+    size_t at = find_terminator();
+    if (at == (size_t)-1) {
+        ps.length = 0;
+        return CYCLE_DELETE;
+    }
+    memmove(ps.data, ps.data + at + 1, ps.length - at - 1);
+    ps.length -= at + 1;
+    return CYCLE_RESTART;
+}
+
+/** R: queues the next line of the file. */
+static void queue_next_line(Command* c) {
+    struct Reader* r = reader_for(c);
+    TextLine line;
+    Buf text;
+
+    if (r == NULL || !r->open || text_reader_next(&r->lines, &line) <= 0)
+        return;
+    memset(&text, 0, sizeof text);
+    buf_add(&text, line.content, line.length);
+    buf_add_byte(&text, '\n');
+    queue_append('t', text.data, text.length);
+    free(text.data);
+}
+
+/** s: substitutes and does what the flags ask for. */
+static void substitute_command(const Command* c) {
+    if (!substitute(c->sub))
+        return;
+    replaced = 1;
+    if (c->sub->print)
+        print_pattern(out);
+    if (c->sub->out != NULL)
+        print_pattern(c->sub->out);
+}
+
 static CycleResult execute_program(void) {
     size_t pc = 0;
 
@@ -634,58 +722,17 @@ static CycleResult execute_program(void) {
             case 'd':
                 ps.length = 0;
                 return CYCLE_DELETE;
-            case 'D': {
-                size_t at = find_terminator();
-                if (at == (size_t)-1) {
-                    ps.length = 0;
-                    return CYCLE_DELETE;
-                }
-                memmove(ps.data, ps.data + at + 1, ps.length - at - 1);
-                ps.length -= at + 1;
-                return CYCLE_RESTART;
-            }
+            case 'D':
+                return delete_first_line();
             case 'F': {
                 const char* name = allNames[streamBase + psFile];
                 write_raw(out, name, strlen(name));
                 write_raw(out, "\n", 1);
                 break;
             }
-            // the ending goes with the text: a last line without one gets the one of what it is mixed with
-            case 'g':
-                ps.length = 0;
-                buf_add(&ps, hs.data, hs.length);
-                psEnding = hsEnding;
+            case 'g': case 'G': case 'h': case 'H': case 'x':
+                hold_command(c->name);
                 break;
-            case 'G':
-                buf_add_byte(&ps, terminator);
-                buf_add(&ps, hs.data, hs.length);
-                if (hsEnding == 0)
-                    psEnding = 0;
-                else if (psEnding == 0)
-                    psEnding = hsEnding;
-                break;
-            case 'h':
-                hs.length = 0;
-                buf_add(&hs, ps.data, ps.length);
-                hsEnding = psEnding;
-                break;
-            case 'H':
-                buf_add_byte(&hs, terminator);
-                buf_add(&hs, ps.data, ps.length);
-                if (psEnding == 0)
-                    hsEnding = 0;
-                else if (hsEnding == 0)
-                    hsEnding = psEnding;
-                break;
-            case 'x': {
-                Buf t = ps;
-                int e = psEnding;
-                ps = hs;
-                hs = t;
-                psEnding = hsEnding;
-                hsEnding = e;
-                break;
-            }
             case 'l':
                 list_pattern(c->number >= 0 ? c->number : config->lineWrap);
                 break;
@@ -704,11 +751,9 @@ static CycleResult execute_program(void) {
             case 'p':
                 print_pattern(out);
                 break;
-            case 'P': {
-                size_t at = find_terminator();
-                write_line(out, ps.data, at == (size_t)-1 ? ps.length : at, at == (size_t)-1 ? psEnding : (psEnding == 2 ? 2 : 1));
+            case 'P':
+                print_first_line(out);
                 break;
-            }
             case 'q':
                 quitStatus = c->number >= 0 ? (int)c->number : 0;
                 return CYCLE_QUIT;
@@ -718,27 +763,11 @@ static CycleResult execute_program(void) {
             case 'r':
                 queue_append('r', c->text, c->length);
                 break;
-            case 'R': {
-                struct Reader* r = reader_for(c);
-                TextLine line;
-                if (r != NULL && r->open && text_reader_next(&r->lines, &line) > 0) {
-                    Buf text;
-                    memset(&text, 0, sizeof text);
-                    buf_add(&text, line.content, line.length);
-                    buf_add_byte(&text, '\n');
-                    queue_append('t', text.data, text.length);
-                    free(text.data);
-                }
+            case 'R':
+                queue_next_line(c);
                 break;
-            }
             case 's':
-                if (substitute(c->sub)) {
-                    replaced = 1;
-                    if (c->sub->print)
-                        print_pattern(out);
-                    if (c->sub->out != NULL)
-                        print_pattern(c->sub->out);
-                }
+                substitute_command(c);
                 break;
             case 't':
                 if (replaced) {
@@ -760,11 +789,9 @@ static CycleResult execute_program(void) {
             case 'w':
                 print_pattern(c->out);
                 break;
-            case 'W': {
-                size_t at = find_terminator();
-                write_line(c->out, ps.data, at == (size_t)-1 ? ps.length : at, at == (size_t)-1 ? psEnding : (psEnding == 2 ? 2 : 1));
+            case 'W':
+                print_first_line(c->out);
                 break;
-            }
             case 'y':
                 translate(c);
                 break;

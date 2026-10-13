@@ -533,6 +533,54 @@ static int looks_binary(FILE* in) {
 }
 
 /** Searches one open input. Returns how many lines were selected. */
+/** The bytes a line takes in the file, with its ending. */
+static unsigned long long line_bytes(const TextLine* line) {
+    return line->length + (line->ending == 2 ? 2 : (line->ending == 1 ? 1 : 0));
+}
+
+/** Writes a selected line (with the context before it). Returns 1 when only "Binary file ... matches" was said. */
+static int print_selected(Search* s, Context* c, const char* name, const TextLine* line, unsigned long long lineNo,
+                          unsigned long long offset, long after, int binary) {
+    if (binary && !config.text) {
+        printf("Binary file %s matches\n", name);
+        s->printedSomething = 1;
+        return 1;
+    }
+    flush_before(s, c, name);
+    if (config.onlyMatching) {
+        if (!config.invert)
+            print_matches(s, name, line, lineNo, offset);
+    } else {
+        print_separator(s, c, lineNo);
+        print_line(s, name, line->content, line->length, line->ending, lineNo, offset, ':');
+    }
+    c->lastPrinted = lineNo;
+    s->printedSomething = 1;
+    c->afterLeft = after;
+    return 0;
+}
+
+/** After the last selected line (-m): the lines of trailing context that are still due. */
+static void print_trailing_context(Search* s, Context* c, LineReader* reader, const char* name,
+                                   unsigned long long* lineNo, unsigned long long* offset) {
+    TextLine line;
+    while (c->afterLeft > 0 && text_reader_next(reader, &line)) {
+        (*lineNo)++;
+        print_line(s, name, line.content, line.length, line.ending, *lineNo, *offset, '-');
+        *offset += line_bytes(&line);
+        c->afterLeft--;
+    }
+}
+
+static void free_context(Context* c) {
+    long k;
+    if (c->ring == NULL)
+        return;
+    for (k = 0; k < c->ringSize; k++)
+        free(c->ring[k].data);
+    free(c->ring);
+}
+
 static unsigned long long search_stream(Search* s, FILE* in, const char* name) {
     LineReader reader;
     TextLine line;
@@ -559,7 +607,7 @@ static unsigned long long search_stream(Search* s, FILE* in, const char* name) {
         int isSelected;
 
         lineNo++;
-        offset += line.length + (line.ending == 2 ? 2 : (line.ending == 1 ? 1 : 0));
+        offset += line_bytes(&line);
 
         if (!binary && !config.text && !config.nullData && memchr(line.content, '\0', line.length) != NULL)
             binary = 1;
@@ -574,33 +622,11 @@ static unsigned long long search_stream(Search* s, FILE* in, const char* name) {
                 break;
             if (config.listMatching || config.listNonMatching)
                 break;
-            if (!quietOutput) {
-                if (binary && !config.text) {
-                    printf("Binary file %s matches\n", name);
-                    s->printedSomething = 1;
-                    break;
-                }
-                flush_before(s, &c, name);
-                if (config.onlyMatching) {
-                    if (!config.invert)
-                        print_matches(s, name, &line, lineNo, thisOffset);
-                } else {
-                    print_separator(s, &c, lineNo);
-                    print_line(s, name, line.content, line.length, line.ending, lineNo, thisOffset, ':');
-                }
-                c.lastPrinted = lineNo;
-                s->printedSomething = 1;
-                c.afterLeft = after;
-            }
+            if (!quietOutput && print_selected(s, &c, name, &line, lineNo, thisOffset, after, binary))
+                break;
             if (config.maxCount >= 0 && selected >= (unsigned long long)config.maxCount) {
-                // the trailing context of the last line is still written
-                while (!quietOutput && c.afterLeft > 0 && text_reader_next(&reader, &line)) {
-                    lineNo++;
-                    offset += line.length + (line.ending == 2 ? 2 : (line.ending == 1 ? 1 : 0));
-                    print_line(s, name, line.content, line.length, line.ending, lineNo,
-                               offset - line.length - (line.ending == 2 ? 2 : (line.ending == 1 ? 1 : 0)), '-');
-                    c.afterLeft--;
-                }
+                if (!quietOutput)
+                    print_trailing_context(s, &c, &reader, name, &lineNo, &offset);
                 break;
             }
         } else if (!quietOutput) {
@@ -623,12 +649,7 @@ static unsigned long long search_stream(Search* s, FILE* in, const char* name) {
     text_reader_free(&reader);
 
 done:
-    if (c.ring != NULL) {
-        long k;
-        for (k = 0; k < c.ringSize; k++)
-            free(c.ring[k].data);
-        free(c.ring);
-    }
+    free_context(&c);
     return selected;
 }
 
@@ -766,9 +787,36 @@ static void search_path(Search* s, const char* path, const char* display, int to
 
 /* ---- main ------------------------------------------------------------------------------ */
 
+/** The flags of the regular expression engine that the options ask for. */
+static int regex_flags(void) {
+    int flags = 0;
+
+    if (config.extended)
+        flags |= REGEX_EXTENDED;
+    if (config.fixed)
+        flags |= REGEX_FIXED;
+    if (config.icase)
+        flags |= REGEX_ICASE;
+    if (config.line)
+        flags |= REGEX_LINE;
+    else if (config.word)
+        flags |= REGEX_WORD;
+    return flags;
+}
+
+/** -A, -B and -C: how many lines of context come after and before a selected line. */
+static void set_context(Search* search) {
+    long context = config.context >= 0 ? config.context : 0;
+
+    search->after = config.after >= 0 ? config.after : context;
+    search->before = config.before >= 0 ? config.before : context;
+    search->context = search->after > 0 || search->before > 0 || config.context >= 0 ||
+                      config.after >= 0 || config.before >= 0;
+}
+
 int main(int argc, char* argv[]) {
     const char** operands;
-    int operandCount, result, i, flags = 0;
+    int operandCount, result, i;
     char error[256];
     Search search;
     const char* defaultOperand = "-";
@@ -796,31 +844,14 @@ int main(int argc, char* argv[]) {
         operandCount--;
     }
 
-    if (config.extended)
-        flags |= REGEX_EXTENDED;
-    if (config.fixed)
-        flags |= REGEX_FIXED;
-    if (config.icase)
-        flags |= REGEX_ICASE;
-    if (config.line)
-        flags |= REGEX_LINE;
-    else if (config.word)
-        flags |= REGEX_WORD;
-
     memset(&search, 0, sizeof search);
-    search.regex = regex_compile(config.patterns, config.patternCount, flags, error, sizeof error);
+    search.regex = regex_compile(config.patterns, config.patternCount, regex_flags(), error, sizeof error);
     if (search.regex == NULL) {
         fprintf(stderr, PROGRAM ": %s\n", error);
         return 2;
     }
 
-    {
-        long context = config.context >= 0 ? config.context : 0;
-        search.after = config.after >= 0 ? config.after : context;
-        search.before = config.before >= 0 ? config.before : context;
-        search.context = search.after > 0 || search.before > 0 || config.context >= 0 ||
-                         config.after >= 0 || config.before >= 0;
-    }
+    set_context(&search);
     search.terminator = config.nullData ? '\0' : '\n';
 
     text_binary_streams();
