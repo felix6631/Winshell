@@ -18,6 +18,7 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `cp` | Done (`-a -f -i -n -p -r -R -t -v`) |
 | `cut` | Done (`-b -c -f -d -s --complement --output-delimiter`) |
 | `echo` | Done (`-n`, `-e`, `-E`, `--help`, `--version`) |
+| `sed` | Done (`-n -e -f -E -r -i[SUFFIX] -s -z -l -u --sandbox`; commands `s y p P d D n N g G h H x l = a i c r R w W q Q b t T z F : { }`, addresses `N $ /re/ first~step addr,+N addr,~N 0,/re/ !`, flags of `s` `g p N I w`, `\1`..`\9 & \U \L \u \l \E`; CR LF endings and a last line without an ending are kept, UTF-8 characters; the `e` command and the `M` flag are not supported) |
 | `grep` | Done (`-E -F -G -e -f -i -v -w -x -c -l -L -m -n -H -h -o -q -s -b -r -A -B -C -NUM -a -I -z -Z --include --exclude --exclude-dir`; basic and extended expressions (with back references), leftmost-longest matches, UTF-8 characters; `-P` and colours are not supported) |
 | `head` | Done (`-n -c -q -v -NUM`, `-n -K` leaves out the last K lines) |
 | `ls` | Done (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` lists the drives) |
@@ -116,7 +117,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `rm`, `rmdir`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `rm`, `rmdir`, `sed`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -145,6 +146,7 @@ The test programs are divided by feature (`test\`).
 | `lines_test` | `tee`, `tac`, `nl`, `paste`: line endings, separators, sections, standard input taken in turn |
 | `env_test` | `env`, `printenv`: changing the environment, `-i`/`-u`, running a command and its status, `-C` |
 | `regex_test` | unit tests of `common/regex.c`: basic and extended syntax, longest match, sets and classes, word boundaries, back references, UTF-8, error messages |
+| `sed_test` | `sed`: substitution, addresses, commands, `-i` and backups, `w`/`r` files, CR LF and the end of the last line, exit status, UTF-8 |
 | `grep_test` | `grep`: CR LF, UTF-8, binary files, `-r`, context, exit status, input that comes as it is written |
 | `shell_utf8_test` | shell: Korean names and directories, wildcards that match a character, variables, redirection (Windows 10 1903 or later) |
 | `shell_run_test` | shell: running commands, quoting, pipes, redirection |
@@ -160,7 +162,7 @@ The test programs are divided by feature (`test\`).
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
 - The test programs are run by `test\out\runall.exe`, several at a time (each has its own work directory, so they do not collide). A program that passed shows one summary line, a failed one all of its output. `WS_JOBS=N` sets how many run at once (default: half of the processors), `WS_VERBOSE=1` shows all output.
 - **AddressSanitizer:** `nmake asan` rebuilds all tools and tests with `/fsanitize=address` (`bin-asan\`, `test\out-asan\`) and runs them. Memory errors are reported with their location and fail the test. The environment variable `WINSHELL_BIN` selects the directory of tools the tests use.
-- **Comparison with GNU:** `test\gnu_compare.sh` compares `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `tac`, `nl`, `paste`, `tee` and `grep` with the GNU tools in over three thousand combinations of options and inputs (`LC_ALL=C`, `C.UTF-8` for grep). The script collects the combinations and `test\out\gnu_batch.exe` runs them several at a time (much faster than starting the programs from the MSYS bash: about 30 seconds). `GNU_ONLY=grep` runs one section, `GNU_IMMEDIATE=1` makes the script run them itself, one by one. What is meant to differ (a CR LF ending is not part of the line, `sort -z/-h/-M/-V` are refused, characters are UTF-8) is not compared.
+- **Comparison with GNU:** `test\gnu_compare.sh` compares `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `tac`, `nl`, `paste`, `tee`, `grep` and `sed` with the GNU tools in over three thousand combinations of options and inputs (`LC_ALL=C`, `C.UTF-8` for grep). The script collects the combinations and `test\out\gnu_batch.exe` runs them several at a time (much faster than starting the programs from the MSYS bash: about 30 seconds). `GNU_ONLY=grep` runs one section, `GNU_IMMEDIATE=1` makes the script run them itself, one by one. What is meant to differ (a CR LF ending is not part of the line, `sort -z/-h/-M/-V` are refused, characters are UTF-8) is not compared.
 - **`mv` to another drive:** with the environment variable `WINSHELL_TEST_CROSS_DEVICE` set, `mv` does not try the rename and takes the copy-and-remove path. The tests run that code on one volume with it, and for real when a second fixed drive that can be written to exists.
 - When adding a command, add its cases to the `*_test.c` of its feature. The shared parts are `testlib.h` (checks, running programs) and `testtools.h` (work directory, running tools, fixtures). Output is compared without telling LF and CRLF apart (`lf_only`).
 - Ctrl+C handling is not part of the automatic tests because it needs a real console.
@@ -179,6 +181,7 @@ Winshell/
 ├─ echo/           echo command
 ├─ env/            env command
 ├─ grep/           grep command
+├─ sed/            sed command (script.c parses the script, exec.c runs it)
 ├─ head/           head command
 ├─ ls/             ls command
 ├─ mkdir/          mkdir command

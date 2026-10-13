@@ -137,6 +137,8 @@ int args_parse(const ArgsSpec* spec, int argc, char* argv[], ArgsHandler handler
                         return ARGS_FAILED;
                     }
                 }
+                if (option->argument == ARGS_OPTIONAL && p[1] != '\0')
+                    value = p + 1;      // only attached to the option: -i.bak
                 if (handler(option->id, value, context) != 0)
                     return ARGS_FAILED;
                 if (value != NULL)

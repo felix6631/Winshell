@@ -20,7 +20,7 @@
 
 #define ARGS_NONE      0        /* the option has no value */
 #define ARGS_REQUIRED  1        /* the option has a value */
-#define ARGS_OPTIONAL  2        /* long options only: --name or --name=VALUE */
+#define ARGS_OPTIONAL  2        /* --name or --name=VALUE; a short option takes only a value attached to it (-i.bak) */
 
 /** The id with which a number option (-5) is reported; its value is the digits. */
 #define ARGS_NUMBER    (-1)

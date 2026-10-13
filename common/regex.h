@@ -29,6 +29,7 @@ typedef struct Regex Regex;
 #define REGEX_FIXED      4      /* the patterns are plain strings */
 #define REGEX_WORD       8      /* a match has to be a whole word (grep -w) */
 #define REGEX_LINE       16     /* a match has to be the whole text (grep -x) */
+#define REGEX_GROUPS     32     /* regex_groups will be used: keep what the groups matched */
 
 /**
  * Compiles the patterns into one expression that matches what any of them matches.
@@ -56,5 +57,17 @@ void regex_input_free(RegexInput* input);
  * An empty match has *start == *end.
  */
 int regex_search(const Regex* regex, const RegexInput* input, size_t from, size_t* start, size_t* end);
+
+/** The number of groups (parenthesized subexpressions) of the expression, which is the n of \n. */
+size_t regex_group_count(const Regex* regex);
+
+/**
+ * The groups of a match that regex_search found: spans[2n] and spans[2n + 1] are the start and the end
+ * (in characters of the input) of group n, group 0 being the whole match; a group that took no part is
+ * (size_t)-1. spans has 2 * (regex_group_count + 1) entries. Among the ways to match the same text the
+ * first one in the order of a backtracking matcher (greedy, leftmost alternative) is taken.
+ * Returns 0 when the groups could not be found (the whole match is set anyway).
+ */
+int regex_groups(const Regex* regex, const RegexInput* input, size_t start, size_t end, size_t* spans);
 
 #endif //REGEX_H

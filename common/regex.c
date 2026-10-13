@@ -998,6 +998,9 @@ typedef struct {
     int             found;
     size_t          bestEnd;
     long            steps;
+    size_t          required;   /* (size_t)-1, or the end that a match has to have (regex_groups) */
+    size_t*         result;     /* with required: the captures of the first match that ends there */
+    int             done;
 } Backtrack;
 
 static void backtrack(Backtrack* b, int pc, size_t pos) {
@@ -1006,11 +1009,19 @@ static void backtrack(Backtrack* b, int pc, size_t pos) {
     for (;;) {
         const Inst* in = &re->program[pc];
 
-        if (++b->steps > BACKTRACK_STEPS)
+        if (++b->steps > BACKTRACK_STEPS || b->done)
             return;
 
         switch (in->op) {
             case I_MATCH:
+                if (b->required != (size_t)-1) {
+                    if (pos == b->required) {
+                        memcpy(b->result, b->caps, (b->groups + 1) * 2 * sizeof *b->result);
+                        b->found = 1;
+                        b->done = 1;
+                    }
+                    return;
+                }
                 if (!b->found || pos > b->bestEnd) {
                     b->found = 1;
                     b->bestEnd = pos;
@@ -1075,6 +1086,7 @@ static int search_backtracking(const Regex* re, const uint32_t* t, size_t n, siz
     b.re = re;
     b.t = t;
     b.n = n;
+    b.required = (size_t)-1;
     b.caps = malloc(slots * sizeof *b.caps);
     if (b.caps == NULL)
         return 0;
@@ -1102,6 +1114,48 @@ int regex_search(const Regex* regex, const RegexInput* input, size_t from, size_
     if (regex->hasBackref)
         return search_backtracking(regex, input->chars, input->length, from, start, end);
     return search_automaton(regex, input->chars, input->length, from, start, end);
+}
+
+size_t regex_group_count(const Regex* regex) {
+    return (size_t)regex->groupCount;
+}
+
+int regex_groups(const Regex* regex, const RegexInput* input, size_t start, size_t end, size_t* spans) {
+    Backtrack b;
+    size_t slots = ((size_t)regex->groupCount + 1) * 2, k;
+    int found;
+
+    for (k = 0; k < slots; k++)
+        spans[k] = (size_t)-1;
+    spans[0] = start;
+    spans[1] = end;
+    if (regex->groupCount == 0)
+        return 1;
+
+    memset(&b, 0, sizeof b);
+    b.re = regex;
+    b.t = input->chars;
+    b.n = input->length;
+    b.groups = (size_t)regex->groupCount;
+    b.required = end;
+    b.caps = malloc(slots * sizeof *b.caps);
+    b.result = malloc(slots * sizeof *b.result);
+    if (b.caps == NULL || b.result == NULL) {
+        free(b.caps);
+        free(b.result);
+        return 0;
+    }
+    for (k = 0; k < slots; k++)
+        b.caps[k] = (size_t)-1;
+    backtrack(&b, 0, start);
+    found = b.found;
+    if (found) {
+        for (k = 2; k < slots; k++)
+            spans[k] = b.result[k];
+    }
+    free(b.caps);
+    free(b.result);
+    return found;
 }
 
 /* ---- compiling ------------------------------------------------------------------ */
@@ -1192,7 +1246,7 @@ Regex* regex_compile(const char* const* patterns, size_t count, int flags, char*
                         make_assert(&p, A_NOT_WORD_AFTER));
     }
 
-    e.withSaves = p.hasBackref;
+    e.withSaves = p.hasBackref || (flags & REGEX_GROUPS) != 0;
     emit_node(&e, tree);
     emit(&e, I_MATCH, 0, 0, 0);
     if (e.tooBig) {
