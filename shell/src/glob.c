@@ -27,6 +27,7 @@
 #include <windows.h>
 #include "parser.h"
 #include "vpath.h"
+#include "utf8.h"
 #include "vec.h"
 
 typedef struct {
@@ -91,11 +92,15 @@ static const char* class_end(const char* p, const char* end) {
     return NULL;
 }
 
-static int same_character(char a, char b) {
-    return tolower((unsigned char)a) == tolower((unsigned char)b);
+/** The character at *p (of which at most `left` bytes are there); *p moves past it. */
+static uint32_t take_char(const char** p, size_t left) {
+    size_t length;
+    uint32_t c = utf8_decode((const unsigned char*)*p, left, &length);
+    *p += length;
+    return c;
 }
 
-/** Matches the pattern [p, pEnd) against the whole name. */
+/** Matches the pattern [p, pEnd) against the whole name, a character at a time, ignoring case. */
 static int match(const char* p, const char* pEnd, const char* name) {
     while (p < pEnd) {
         if (*p == '*') {
@@ -103,59 +108,59 @@ static int match(const char* p, const char* pEnd, const char* name) {
                 p++;
             if (p == pEnd)
                 return 1;
-            for (;; name++) {
+            for (;;) {
                 if (match(p, pEnd, name))
                     return 1;
                 if (*name == '\0')
                     return 0;
+                take_char(&name, 4);            // whole characters only
             }
         } else if (*p == '?') {
             if (*name == '\0')
                 return 0;
             p++;
-            name++;
+            take_char(&name, 4);
         } else if (*p == '[' && class_end(p, pEnd) != NULL) {
             const char* end = class_end(p, pEnd);
             const char* q = p + 1;
             int negate = 0, found = 0;
-            char c = *name;
+            uint32_t c;
 
-            if (c == '\0')
+            if (*name == '\0')
                 return 0;
+            c = utf8_fold(take_char(&name, 4));
             if (*q == '!' || *q == '^') {
                 negate = 1;
                 q++;
             }
             while (q < end) {
-                char low, high;
+                uint32_t low, high;
                 if (*q == GLOB_ESCAPE && q + 1 < end)
                     q++;
-                low = *q++;
+                low = utf8_fold(take_char(&q, (size_t)(end - q)));
                 high = low;
                 if (q + 1 < end && *q == '-') {
                     q++;
                     if (*q == GLOB_ESCAPE && q + 1 < end)
                         q++;
-                    high = *q++;
+                    high = utf8_fold(take_char(&q, (size_t)(end - q)));
                 }
-                {
-                    char lc = (char)tolower((unsigned char)c);
-                    char ll = (char)tolower((unsigned char)low), lh = (char)tolower((unsigned char)high);
-                    if (lc >= ll && lc <= lh)
-                        found = 1;
-                }
+                if (c >= low && c <= high)
+                    found = 1;
             }
             if (found == negate)
                 return 0;
             p = end + 1;
-            name++;
         } else {
+            uint32_t want, have;
             if (*p == GLOB_ESCAPE && p + 1 < pEnd)
                 p++;
-            if (*name == '\0' || !same_character(*p, *name))
+            if (*name == '\0')
                 return 0;
-            p++;
-            name++;
+            want = take_char(&p, (size_t)(pEnd - p));
+            have = take_char(&name, 4);
+            if (utf8_fold(want) != utf8_fold(have))
+                return 0;
         }
     }
     return *name == '\0';

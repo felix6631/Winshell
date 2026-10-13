@@ -146,6 +146,7 @@ The test programs are divided by feature (`test\`).
 | `env_test` | `env`, `printenv`: changing the environment, `-i`/`-u`, running a command and its status, `-C` |
 | `regex_test` | unit tests of `common/regex.c`: basic and extended syntax, longest match, sets and classes, word boundaries, back references, UTF-8, error messages |
 | `grep_test` | `grep`: CR LF, UTF-8, binary files, `-r`, context, exit status, input that comes as it is written |
+| `shell_utf8_test` | shell: Korean names and directories, wildcards that match a character, variables, redirection (Windows 10 1903 or later) |
 | `shell_run_test` | shell: running commands, quoting, pipes, redirection |
 | `shell_cd_test` | shell: `cd`, the virtual file system, wildcards |
 | `shell_lists_test` | shell: `; && \|\|`, exit status, variables, `exit` |
@@ -216,6 +217,9 @@ Winshell/
   - Windows paths such as `C:\Users\me` keep working everywhere. UNC paths such as `\\server\share` are outside of the virtual tree and are passed to Windows unchanged.
   - `cd` is a builtin of the shell, which tells its children about the current directory through the environment variable `PWD`. While in `/`, the Windows directory is the root of the system drive, and relative paths do not refer to any file.
   - Every command converts the paths it receives itself. When a new command opens a file, use `vpath_to_native` from `common/vpath.h`.
+- **UTF-8:** every program carries `common/utf8.manifest`, which makes it run in the UTF-8 code page: arguments, names of files, the environment and the input are UTF-8, and files with Korean names are handled as they are.
+  - The shell reads the console with `ReadConsoleW` and puts the console code page into UTF-8 while it runs, giving it back at the end. The wildcards `?` and `[가-힣]` match one character, not one byte.
+  - The manifest takes effect from Windows 10 version 1903. On an older Windows the programs run in the ANSI code page of the system, as before; ASCII names are the same everywhere. A tool run directly from `cmd` writes UTF-8, so `chcp 65001` is needed there.
 - **Compatibility (goal):** use only basic system calls to stay compatible down to Windows XP. This has not been verified yet.
 
 ## Planned

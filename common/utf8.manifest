@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Makes the "A" functions of Windows, and with them the C runtime, work in UTF-8: names of files,
+  arguments, the environment and the data are UTF-8, as on UNIX. It is in effect from Windows 10
+  version 1903; on an older Windows the program runs in the ANSI code page of the system, as before.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

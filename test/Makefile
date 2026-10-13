@@ -15,6 +15,7 @@
 ##   filter_test         sort, uniq, cut, tr
 ##   env_test            env, printenv
 ##   lines_test          tee, tac, nl, paste
+##   shell_utf8_test     쉘: 한글 이름, 와일드카드가 글자 하나에 일치함, 변수
 ##   grep_test           grep: CRLF, UTF-8, 바이너리, -r, 문맥, 흐르는 입력
 ##   shell_run_test      쉘: 명령 실행, 따옴표, 파이프, 리다이렉션
 ##   shell_cd_test       쉘: cd, 가상 파일 시스템, 와일드카드
@@ -42,7 +43,7 @@ TESTS = $(OUT)\vpath_test.exe $(OUT)\parser_test.exe $(OUT)\args_test.exe $(OUT)
         $(OUT)\basic_test.exe $(OUT)\cat_test.exe $(OUT)\ls_test.exe $(OUT)\fileops_test.exe \
         $(OUT)\dirs_test.exe $(OUT)\text_test.exe $(OUT)\filter_test.exe \
         $(OUT)\shell_run_test.exe $(OUT)\shell_cd_test.exe $(OUT)\shell_lists_test.exe \
-        $(OUT)\shell_pipeline_test.exe $(OUT)\env_test.exe $(OUT)\lines_test.exe $(OUT)\grep_test.exe \
+        $(OUT)\shell_pipeline_test.exe $(OUT)\env_test.exe $(OUT)\lines_test.exe $(OUT)\grep_test.exe $(OUT)\shell_utf8_test.exe \
         $(OUT)\equiv_test.exe $(OUT)\limits_test.exe $(OUT)\sharing_test.exe $(OUT)\async_test.exe
 
 all: $(TESTS)
@@ -59,28 +60,28 @@ check-asan:
 # a test program of one file that runs the programs of the project
 {.}.c{$(OUT)}.exe:
 	@if not exist $(OUT) mkdir $(OUT)
-	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ $<
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ $< /link /MANIFEST:EMBED /MANIFESTINPUT:..\common\utf8.manifest
 
 $(OUT)\basic_test.exe $(OUT)\cat_test.exe $(OUT)\ls_test.exe $(OUT)\fileops_test.exe $(OUT)\dirs_test.exe \
 $(OUT)\text_test.exe $(OUT)\filter_test.exe $(OUT)\shell_run_test.exe $(OUT)\shell_cd_test.exe \
 $(OUT)\shell_lists_test.exe $(OUT)\shell_pipeline_test.exe $(OUT)\equiv_test.exe $(OUT)\limits_test.exe \
-$(OUT)\sharing_test.exe $(OUT)\async_test.exe $(OUT)\env_test.exe $(OUT)\lines_test.exe $(OUT)\grep_test.exe: testlib.h testtools.h
+$(OUT)\sharing_test.exe $(OUT)\async_test.exe $(OUT)\env_test.exe $(OUT)\lines_test.exe $(OUT)\grep_test.exe $(OUT)\shell_utf8_test.exe: testlib.h testtools.h
 
 $(OUT)\vpath_test.exe: vpath_test.c testlib.h ..\common\vpath.c ..\common\vpath.h
 	@if not exist $(OUT) mkdir $(OUT)
-	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ vpath_test.c ..\common\vpath.c
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ vpath_test.c ..\common\vpath.c /link /MANIFEST:EMBED /MANIFESTINPUT:..\common\utf8.manifest
 
-$(OUT)\regex_test.exe: regex_test.c testlib.h ..\common\regex.c ..\common\regex.h ..\common\vec.h
+$(OUT)\regex_test.exe: regex_test.c testlib.h ..\common\regex.c ..\common\utf8.c ..\common\regex.h ..\common\vec.h
 	@if not exist $(OUT) mkdir $(OUT)
-	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ regex_test.c ..\common\regex.c
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ regex_test.c ..\common\regex.c ..\common\utf8.c /link /MANIFEST:EMBED /MANIFESTINPUT:..\common\utf8.manifest
 
 $(OUT)\args_test.exe: args_test.c testlib.h ..\common\args.c ..\common\args.h
 	@if not exist $(OUT) mkdir $(OUT)
-	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ args_test.c ..\common\args.c shell32.lib
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ args_test.c ..\common\args.c /link /MANIFEST:EMBED /MANIFESTINPUT:..\common\utf8.manifest
 
 $(OUT)\parser_test.exe: parser_test.c testlib.h ..\shell\src\parser.c ..\shell\src\list.c ..\shell\src\variables.c ..\shell\include\parser.h ..\shell\include\variables.h ..\common\vpath.c
 	@if not exist $(OUT) mkdir $(OUT)
-	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ parser_test.c ..\shell\src\parser.c ..\shell\src\list.c ..\shell\src\variables.c ..\common\vpath.c
+	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ parser_test.c ..\shell\src\parser.c ..\shell\src\list.c ..\shell\src\variables.c ..\common\vpath.c /link /MANIFEST:EMBED /MANIFESTINPUT:..\common\utf8.manifest
 
 clean:
 	@if exist out rmdir /s /q out

@@ -31,9 +31,81 @@ static BOOL WINAPI winshell_ctrlHandler(DWORD type) {
     }
 }
 
+/* the code pages of the console before the shell changed them */
+static UINT savedInputCodePage, savedOutputCodePage;
+
+static void restore_console_code_pages(void) {
+    if (savedInputCodePage != 0)
+        SetConsoleCP(savedInputCodePage);
+    if (savedOutputCodePage != 0)
+        SetConsoleOutputCP(savedOutputCodePage);
+}
+
+/**
+ * The programs of the shell write UTF-8 (see common/utf8.manifest), and so do the lines it reads: the
+ * console is put into UTF-8 for as long as the shell runs, and given back at the end.
+ */
+static void use_utf8_console(void) {
+    DWORD mode;
+
+    if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) || GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode)) {
+        savedInputCodePage = GetConsoleCP();
+        savedOutputCodePage = GetConsoleOutputCP();
+        SetConsoleCP(CP_UTF8);
+        SetConsoleOutputCP(CP_UTF8);
+        atexit(restore_console_code_pages);
+    }
+}
+
 static void winshell_terminalInit(void) {
     SetConsoleCtrlHandler(winshell_ctrlHandler, TRUE);
+    use_utf8_console();
     builtin_init();
+}
+
+/**
+ * One line typed at the console, as UTF-8 with its line ending. The wide function is used so that
+ * what is typed (an IME composes Korean, for one) arrives whole whatever the code page is.
+ * Returns NULL at the end of input (Ctrl+Z) and when Ctrl+C interrupted the reading.
+ */
+static char* read_console_line(HANDLE in) {
+    wchar_t* wide = NULL;
+    size_t length = 0, capacity = 0;
+    char* line;
+    int bytes;
+
+    for (;;) {
+        wchar_t chunk[512];
+        DWORD got = 0;
+
+        if (!ReadConsoleW(in, chunk, 512, &got, NULL) || got == 0) {
+            free(wide);
+            return NULL;
+        }
+        if (VEC_RESERVE(wide, capacity, length + got + 1) != 0) {
+            free(wide);
+            return NULL;
+        }
+        memcpy(wide + length, chunk, got * sizeof *chunk);
+        length += got;
+        if (chunk[got - 1] == L'\n')
+            break;
+    }
+
+    // Ctrl+Z at the start of a line is the end of the input
+    if (wide[0] == 0x1A) {
+        free(wide);
+        return NULL;
+    }
+
+    bytes = WideCharToMultiByte(CP_UTF8, 0, wide, (int)length, NULL, 0, NULL, NULL);
+    line = malloc((size_t)bytes + 1);
+    if (line != NULL) {
+        WideCharToMultiByte(CP_UTF8, 0, wide, (int)length, line, bytes, NULL, NULL);
+        line[bytes] = '\0';
+    }
+    free(wide);
+    return line;
 }
 
 /**
@@ -43,7 +115,14 @@ static void winshell_terminalInit(void) {
  */
 static char* read_line(void) {
     size_t length = 0, capacity = BUFSIZ;
-    char* line = malloc(capacity);
+    char* line;
+    HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode;
+
+    if (in != INVALID_HANDLE_VALUE && GetConsoleMode(in, &mode))
+        return read_console_line(in);
+
+    line = malloc(capacity);
     if (line == NULL)
         return NULL;
 

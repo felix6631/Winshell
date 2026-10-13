@@ -16,10 +16,10 @@ CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common $(INCLUDES
 
 all: $(TARGET)
 
-$(TARGET): $(SRCS) $(HDRS) ..\common\vec.h
+$(TARGET): $(SRCS) $(HDRS) ..\common\vec.h ..\common\utf8.manifest
 	@if not exist "$(BINDIR)" mkdir "$(BINDIR)"
 	@if not exist $(OBJDIR) mkdir $(OBJDIR)
-	cl $(CFLAGS) /Fo$(OBJDIR)\ /Fe"$(TARGET)" $(SRCS) $(LIBS) shell32.lib
+	cl $(CFLAGS) /Fo$(OBJDIR)\ /Fe"$(TARGET)" $(SRCS) $(LIBS) /link /MANIFEST:EMBED /MANIFESTINPUT:..\common\utf8.manifest
 
 clean:
 	@if exist "$(TARGET)" del "$(TARGET)"
