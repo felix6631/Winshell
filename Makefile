@@ -18,7 +18,7 @@ BINDIR = $(MAKEDIR)\bin
 # 새 도구는 아래 BUILD 목록에 build-<이름> 만 추가하면 됩니다.
 BUILD = build-shell build-arch build-cat build-cp build-cut build-echo build-env build-expr build-find build-grep build-head build-ls build-mkdir \
         build-mv build-nl build-paste build-printenv build-pwd build-rm build-rmdir build-sed build-sort build-tac \
-        build-tail build-tee build-touch build-tr build-uniq build-wc
+        build-tail build-tee build-touch build-tr build-uniq build-wc build-xargs
 CLEAN = $(BUILD:build-=clean-)
 
 all: bindir $(BUILD)
