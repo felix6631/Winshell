@@ -420,6 +420,36 @@ static void add_with_case(Buf* dst, const unsigned char* s, size_t length, CaseS
     }
 }
 
+/** The right hand side of s for one match: its text, groups (spans, or the match when 0) and case changes. */
+static void append_replacement(Buf* result, const Substitution* sub, size_t start, size_t end, const size_t* spans) {
+    CaseState state = { 0, 0 };
+    size_t k;
+
+    for (k = 0; k < sub->partCount; k++) {
+        const Part* part = &sub->parts[k];
+
+        if (part->kind == PART_TEXT) {
+            add_with_case(result, part->text, part->length, &state);
+        } else if (part->kind == PART_GROUP) {
+            size_t from = start, to = end;
+            if (part->number > 0) {
+                from = spans != NULL ? spans[2 * part->number] : (size_t)-1;
+                to = spans != NULL ? spans[2 * part->number + 1] : (size_t)-1;
+            }
+            if (from != (size_t)-1 && to != (size_t)-1 && from <= to)
+                add_with_case(result, ps.data + regexInput.offset[from],
+                              regexInput.offset[to] - regexInput.offset[from], &state);
+        } else if (part->number == 'E') {
+            state.mode = 0;
+            state.once = 0;
+        } else if (part->number == 'U' || part->number == 'L') {
+            state.mode = part->number;
+        } else {
+            state.once = part->number;
+        }
+    }
+}
+
 /** s: returns 1 when something was replaced. */
 static int substitute(const Substitution* sub) {
     Regex* re = sub->regex != NULL ? sub->regex : lastRegex;
@@ -453,34 +483,10 @@ static int substitute(const Substitution* sub) {
         }
         count++;
         if (count >= sub->number) {
-            CaseState state = { 0, 0 };
-            size_t k;
-
             buf_add(&result, ps.data + regexInput.offset[copied], regexInput.offset[start] - regexInput.offset[copied]);
             if (spans != NULL)
                 regex_groups(re, &regexInput, start, end, spans);
-            for (k = 0; k < sub->partCount; k++) {
-                const Part* part = &sub->parts[k];
-                if (part->kind == PART_TEXT) {
-                    add_with_case(&result, part->text, part->length, &state);
-                } else if (part->kind == PART_GROUP) {
-                    size_t from = start, to = end;
-                    if (part->number > 0) {
-                        from = spans != NULL ? spans[2 * part->number] : (size_t)-1;
-                        to = spans != NULL ? spans[2 * part->number + 1] : (size_t)-1;
-                    }
-                    if (from != (size_t)-1 && to != (size_t)-1 && from <= to)
-                        add_with_case(&result, ps.data + regexInput.offset[from],
-                                      regexInput.offset[to] - regexInput.offset[from], &state);
-                } else if (part->number == 'E') {
-                    state.mode = 0;
-                    state.once = 0;
-                } else if (part->number == 'U' || part->number == 'L') {
-                    state.mode = part->number;
-                } else {
-                    state.once = part->number;
-                }
-            }
+            append_replacement(&result, sub, start, end, spans);
             copied = end;
             didReplace = 1;
             if (!sub->global)

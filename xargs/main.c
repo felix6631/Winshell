@@ -556,6 +556,32 @@ static void show_limits(void) {
             DEFAULT_MAX_CHARS, config.maxChars);
 }
 
+/** Reads the items of the input one by one and hands them to the batches (or runs the -I command). */
+static void process_items(Input* input) {
+    while (!fatal) {
+        char* item;
+        int endsLine;
+        int r = next_item(input, &item, &endsLine);
+
+        if (r < 0) {
+            status = 1;
+            break;
+        }
+        if (r == 0)
+            break;
+        if (config.eofString != NULL && config.delimiter < 0 && strcmp(item, config.eofString) == 0) {
+            free(item);
+            break;
+        }
+        if (config.replace) {
+            run_replace(item);
+            free(item);
+        } else {
+            add_item(item, endsLine);
+        }
+    }
+}
+
 int main(int argc, char* argv[]) {
     const char** operands;
     int operandCount, result, i;
@@ -599,28 +625,7 @@ int main(int argc, char* argv[]) {
     input.length = length;
     input.pos = 0;
 
-    while (!fatal) {
-        char* item;
-        int endsLine;
-        int r = next_item(&input, &item, &endsLine);
-
-        if (r < 0) {
-            status = 1;
-            break;
-        }
-        if (r == 0)
-            break;
-        if (config.eofString != NULL && config.delimiter < 0 && strcmp(item, config.eofString) == 0) {
-            free(item);
-            break;
-        }
-        if (config.replace) {
-            run_replace(item);
-            free(item);
-        } else {
-            add_item(item, endsLine);
-        }
-    }
+    process_items(&input);
 
     if (!fatal && result == ARGS_OK) {
         if (batchCount > 0)

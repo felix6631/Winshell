@@ -47,6 +47,36 @@ static int on_option(int id, const char* value, void* context) {
     return 0;
 }
 
+/**
+ * Opens the files; one that cannot be opened is reported and left out. Returns 1 when there was one.
+ * files gets the opened ones in front, *opened their number.
+ */
+static int open_outputs(const char** names, size_t count, int append, FILE** files, size_t* opened) {
+    size_t i, n = 0;
+    int failed = 0;
+
+    for (i = 0; i < count; i++) {
+        char native[VPATH_MAX];
+        FILE* file = NULL;
+        int converted = vpath_to_native(names[i], native, sizeof native) == 0;
+
+        if (converted)
+            file = fopen(native, append ? "ab" : "wb");
+        if (file == NULL) {
+            DWORD attributes = converted ? GetFileAttributesA(native) : INVALID_FILE_ATTRIBUTES;
+            const char* reason = errno == ENOENT ? "No such file or directory" : fs_strerror(GetLastError());
+            if (errno == EISDIR || (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY)))
+                reason = "Is a directory";
+            fprintf(stderr, PROGRAM ": %s: %s\n", names[i], reason);
+            failed = 1;
+            continue;
+        }
+        files[n++] = file;
+    }
+    *opened = n;
+    return failed;
+}
+
 int main(int argc, char* argv[]) {
     FILE** files;
     const char** names;
@@ -67,29 +97,8 @@ int main(int argc, char* argv[]) {
 
     text_binary_streams();
 
-    // the files that could be opened; the others are reported now and left out
-    {
-        size_t opened = 0;
-        for (i = 0; i < fileCount; i++) {
-            char native[VPATH_MAX];
-            FILE* file = NULL;
-            int converted = vpath_to_native(names[i], native, sizeof native) == 0;
-
-            if (converted)
-                file = fopen(native, append ? "ab" : "wb");
-            if (file == NULL) {
-                DWORD attributes = converted ? GetFileAttributesA(native) : INVALID_FILE_ATTRIBUTES;
-                const char* reason = errno == ENOENT ? "No such file or directory" : fs_strerror(GetLastError());
-                if (errno == EISDIR || (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY)))
-                    reason = "Is a directory";
-                fprintf(stderr, PROGRAM ": %s: %s\n", names[i], reason);
-                status = 1;
-                continue;
-            }
-            files[opened++] = file;
-        }
-        fileCount = opened;
-    }
+    if (open_outputs(names, fileCount, append, files, &fileCount) != 0)
+        status = 1;
 
     for (;;) {
         long got = text_read_some(stdin, buffer, sizeof buffer);

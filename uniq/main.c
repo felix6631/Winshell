@@ -122,15 +122,50 @@ static int on_option(int id, const char* value, void* context) {
     }
 }
 
+/** Writes what -c, -d, -D and -u select. A group is written when it ends; with -D its lines come as they are read. */
+static void write_groups(const unsigned char* text, size_t length, FILE* out) {
+    size_t offset = 0;
+    TextLine group, line;
+    unsigned long groupCount = 0;
+    int haveGroup = 0;
+
+    for (;;) {
+        int more = text_next_line(text, length, &offset, &line);
+        int sameGroup = more && haveGroup && same_lines(&group, &line);
+
+        if (haveGroup && !sameGroup) {
+            int show = all_repeated ? 0 : (repeated ? groupCount > 1 : (unique_only ? groupCount == 1 : 1));
+            if (show) {
+                if (count_option)
+                    fprintf(out, "%7lu ", groupCount);
+                text_write_line(&group, out);
+            }
+        }
+
+        if (!more)
+            break;
+
+        if (sameGroup) {
+            groupCount++;
+            if (all_repeated) {
+                if (groupCount == 2)
+                    text_write_line(&group, out);       // the first one of the group, now known to be repeated
+                text_write_line(&line, out);
+            }
+        } else {
+            group = line;
+            groupCount = 1;
+            haveGroup = 1;
+        }
+    }
+}
+
 int main(int argc, char* argv[]) {
     const char** operands;
     int operandCount, result;
     FILE *in = stdin, *out = stdout;
     unsigned char* text;
-    size_t length = 0, offset = 0;
-    TextLine group, line;
-    unsigned long groupCount = 0;
-    int haveGroup = 0;
+    size_t length = 0;
 
     result = args_parse(&spec, argc, argv, on_option, NULL, &operands, &operandCount);
     if (result != ARGS_OK)
@@ -166,36 +201,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Lines of a group are written when the group ends. With -D all of them are written as they come.
-    for (;;) {
-        int more = text_next_line(text, length, &offset, &line);
-        int sameGroup = more && haveGroup && same_lines(&group, &line);
-
-        if (haveGroup && !sameGroup) {
-            int show = all_repeated ? 0 : (repeated ? groupCount > 1 : (unique_only ? groupCount == 1 : 1));
-            if (show) {
-                if (count_option)
-                    fprintf(out, "%7lu ", groupCount);
-                text_write_line(&group, out);
-            }
-        }
-
-        if (!more)
-            break;
-
-        if (sameGroup) {
-            groupCount++;
-            if (all_repeated) {
-                if (groupCount == 2)
-                    text_write_line(&group, out);       // the first one of the group, now known to be repeated
-                text_write_line(&line, out);
-            }
-        } else {
-            group = line;
-            groupCount = 1;
-            haveGroup = 1;
-        }
-    }
+    write_groups(text, length, out);
 
     if (out != stdout)
         fclose(out);

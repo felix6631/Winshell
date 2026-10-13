@@ -688,8 +688,52 @@ static int emit(Emitter* e, Op op, int x, int y, uint32_t c) {
     return (int)e->length++;
 }
 
+static void emit_node(Emitter* e, const Node* n);
+
+/** e{min,max}: min copies, then the optional ones. */
+static void emit_repeat(Emitter* e, const Node* n) {
+    int min = n->min, max = n->max, k, split;
+
+    for (k = 0; k < min; k++)
+        emit_node(e, n->a);
+
+    if (max < 0) {
+        // a*: L1: split L2, L3; L2: a; jmp L1; L3:
+        int l1 = (int)e->length;
+        split = emit(e, I_SPLIT, 0, 0, 0);
+        if (split < 0)
+            return;
+        e->code[split].x = (int)e->length;
+        emit_node(e, n->a);
+        emit(e, I_JMP, l1, 0, 0);
+        e->code[split].y = (int)e->length;
+    } else if (max > min) {
+        // up to max-min more, each one only if the one before it was taken: (a(a(a)?)?)?
+        // every split leaves to the end of all of them when it is not taken
+        int count = max - min;
+        int* splits = malloc((size_t)count * sizeof *splits);
+
+        if (splits == NULL) {
+            e->tooBig = 1;
+            return;
+        }
+        for (k = 0; k < count; k++) {
+            splits[k] = emit(e, I_SPLIT, 0, 0, 0);
+            if (splits[k] < 0) {
+                free(splits);
+                return;
+            }
+            e->code[splits[k]].x = (int)e->length;
+            emit_node(e, n->a);
+        }
+        for (k = 0; k < count; k++)
+            e->code[splits[k]].y = (int)e->length;
+        free(splits);
+    }
+}
+
 static void emit_node(Emitter* e, const Node* n) {
-    int split, jump, k;
+    int split, jump;
 
     if (e->tooBig)
         return;
@@ -739,47 +783,9 @@ static void emit_node(Emitter* e, const Node* n) {
         case N_ASSERT:
             emit(e, I_ASSERT, (int)n->assertKind, 0, 0);
             break;
-        case N_REPEAT: {
-            int min = n->min, max = n->max;
-
-            for (k = 0; k < min; k++)
-                emit_node(e, n->a);
-
-            if (max < 0) {
-                // a*: L1: split L2, L3; L2: a; jmp L1; L3:
-                int l1 = (int)e->length;
-                split = emit(e, I_SPLIT, 0, 0, 0);
-                if (split < 0)
-                    return;
-                e->code[split].x = (int)e->length;
-                emit_node(e, n->a);
-                emit(e, I_JMP, l1, 0, 0);
-                e->code[split].y = (int)e->length;
-            } else if (max > min) {
-                // up to max-min more, each one only if the one before it was taken: (a(a(a)?)?)?
-                // every split leaves to the end of all of them when it is not taken
-                int count = max - min;
-                int* splits = malloc((size_t)count * sizeof *splits);
-
-                if (splits == NULL) {
-                    e->tooBig = 1;
-                    return;
-                }
-                for (k = 0; k < count; k++) {
-                    splits[k] = emit(e, I_SPLIT, 0, 0, 0);
-                    if (splits[k] < 0) {
-                        free(splits);
-                        return;
-                    }
-                    e->code[splits[k]].x = (int)e->length;
-                    emit_node(e, n->a);
-                }
-                for (k = 0; k < count; k++)
-                    e->code[splits[k]].y = (int)e->length;
-                free(splits);
-            }
+        case N_REPEAT:
+            emit_repeat(e, n);
             break;
-        }
     }
 }
 

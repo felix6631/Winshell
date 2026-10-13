@@ -488,31 +488,11 @@ static int parse_replacement(Parser* p, const Buf* raw, Substitution* sub) {
     return 0;
 }
 
-static int parse_substitute(Parser* p, Command* cmd) {
-    Buf pattern, replacement;
-    Substitution* sub;
-    int delimiter, icase = 0, status = 0;
+/** The flags after the s command: g p N i I w FILE. Returns 0, or -1 after a message. */
+static int parse_substitute_flags(Parser* p, Substitution* sub, int* icase) {
     long number = 0;
     int numberSeen = 0;
 
-    memset(&pattern, 0, sizeof pattern);
-    memset(&replacement, 0, sizeof replacement);
-    sub = calloc(1, sizeof *sub);
-    if (sub == NULL)
-        return fail(p, "memory exhausted");
-    sub->number = 1;
-    cmd->sub = sub;
-
-    if (at_end(p) || peek(p) == '\n' || peek(p) == '\\')
-        return fail(p, "unterminated `s' command");
-    delimiter = p->text[p->pos++];
-    if (read_delimited(p, delimiter, 1, &pattern) != 0 || read_delimited(p, delimiter, 0, &replacement) != 0) {
-        free(pattern.data);
-        free(replacement.data);
-        return fail(p, "unterminated `s' command");
-    }
-
-    // the flags
     for (;;) {
         int c = peek(p);
         if (c == 'g') {
@@ -526,7 +506,7 @@ static int parse_substitute(Parser* p, Command* cmd) {
             sub->print = 1;
             p->pos++;
         } else if (c == 'i' || c == 'I') {
-            icase = 1;
+            *icase = 1;
             p->pos++;
         } else if (c == 'm' || c == 'M') {
             return fail(p, "the M flag is not supported");
@@ -555,6 +535,36 @@ static int parse_substitute(Parser* p, Command* cmd) {
         } else {
             break;
         }
+    }
+    return 0;
+}
+
+static int parse_substitute(Parser* p, Command* cmd) {
+    Buf pattern, replacement;
+    Substitution* sub;
+    int delimiter, icase = 0, status = 0;
+
+    memset(&pattern, 0, sizeof pattern);
+    memset(&replacement, 0, sizeof replacement);
+    sub = calloc(1, sizeof *sub);
+    if (sub == NULL)
+        return fail(p, "memory exhausted");
+    sub->number = 1;
+    cmd->sub = sub;
+
+    if (at_end(p) || peek(p) == '\n' || peek(p) == '\\')
+        return fail(p, "unterminated `s' command");
+    delimiter = p->text[p->pos++];
+    if (read_delimited(p, delimiter, 1, &pattern) != 0 || read_delimited(p, delimiter, 0, &replacement) != 0) {
+        free(pattern.data);
+        free(replacement.data);
+        return fail(p, "unterminated `s' command");
+    }
+
+    if (parse_substitute_flags(p, sub, &icase) != 0) {
+        free(pattern.data);
+        free(replacement.data);
+        return -1;
     }
 
     status = compile_regex(p, &pattern, icase, &sub->regex);
@@ -638,6 +648,56 @@ static int add_command(Parser* p, const Command* cmd, size_t* index) {
     return 0;
 }
 
+/** { opens a block that } closes; each knows the other (target). */
+static int parse_block(Parser* p, Command* cmd, int addresses) {
+    size_t index;
+
+    if (cmd->name == '{') {
+        if (add_command(p, cmd, &index) != 0)
+            return -1;
+        if (VEC_RESERVE(p->blocks, p->blockCapacity, p->blockCount + 1) != 0)
+            return fail(p, "memory exhausted");
+        p->blocks[p->blockCount++] = index;
+        return 0;
+    }
+    if (addresses > 0)
+        return fail(p, "} doesn't want any addresses");
+    if (p->blockCount == 0)
+        return fail(p, "unexpected `}'");
+    if (add_command(p, cmd, &index) != 0)
+        return -1;
+    p->script->commands[p->blocks[--p->blockCount]].target = index;
+    return read_end(p);
+}
+
+/** r R w W: the name of a file; w and W open it at once. */
+static int parse_file_command(Parser* p, Command* cmd) {
+    if (p->config->sandbox)
+        return fail(p, "e/r/w commands disabled in sandbox mode");
+    if (read_word(p, cmd, 1) != 0)
+        return -1;
+    if (cmd->length == 0)
+        return fail(p, "missing filename in r/R/w/W commands");
+    if (cmd->name == 'w' || cmd->name == 'W') {
+        cmd->out = sed_output_open((const char*)cmd->text);
+        if (cmd->out == NULL)
+            return fail(p, "couldn't open file %s", (const char*)cmd->text);
+    }
+    return 0;
+}
+
+/** q Q l: an optional number. */
+static int parse_number_command(Parser* p, Command* cmd, int addresses) {
+    long number;
+
+    if ((cmd->name == 'q' || cmd->name == 'Q') && addresses > 1)
+        return fail(p, "command only uses one address");
+    skip_blanks(p);
+    if (read_number(p, &number) == 0)
+        cmd->number = number;
+    return read_end(p);
+}
+
 static int parse_command(Parser* p, Command* cmd) {
     int name = p->text[p->pos++];
     int addresses = cmd->first.kind != ADDR_NONE ? (cmd->second.kind != ADDR_NONE ? 2 : 1) : 0;
@@ -647,22 +707,8 @@ static int parse_command(Parser* p, Command* cmd) {
     cmd->number = -1;
 
     switch (name) {
-        case '{':
-            if (add_command(p, cmd, &index) != 0)
-                return -1;
-            if (VEC_RESERVE(p->blocks, p->blockCapacity, p->blockCount + 1) != 0)
-                return fail(p, "memory exhausted");
-            p->blocks[p->blockCount++] = index;
-            return 0;
-        case '}':
-            if (addresses > 0)
-                return fail(p, "} doesn't want any addresses");
-            if (p->blockCount == 0)
-                return fail(p, "unexpected `}'");
-            if (add_command(p, cmd, &index) != 0)
-                return -1;
-            p->script->commands[p->blocks[--p->blockCount]].target = index;
-            return read_end(p);
+        case '{': case '}':
+            return parse_block(p, cmd, addresses);
         case '=': case 'd': case 'D': case 'g': case 'G': case 'h': case 'H': case 'n': case 'N':
         case 'p': case 'P': case 'x': case 'z': case 'F':
             if (read_end(p) != 0)
@@ -687,31 +733,13 @@ static int parse_command(Parser* p, Command* cmd) {
                 return -1;
             break;
         case 'r': case 'R': case 'w': case 'W':
-            if (p->config->sandbox)
-                return fail(p, "e/r/w commands disabled in sandbox mode");
-            if (read_word(p, cmd, 1) != 0)
-                return -1;
-            if (cmd->length == 0)
-                return fail(p, "missing filename in r/R/w/W commands");
-            if (name == 'w' || name == 'W') {
-                cmd->out = sed_output_open((const char*)cmd->text);
-                if (cmd->out == NULL)
-                    return fail(p, "couldn't open file %s", (const char*)cmd->text);
-            }
-            break;
-        case 'q': case 'Q': case 'l': {
-            long number;
-            if (name == 'q' || name == 'Q') {
-                if (addresses > 1)
-                    return fail(p, "command only uses one address");
-            }
-            skip_blanks(p);
-            if (read_number(p, &number) == 0)
-                cmd->number = number;
-            if (read_end(p) != 0)
+            if (parse_file_command(p, cmd) != 0)
                 return -1;
             break;
-        }
+        case 'q': case 'Q': case 'l':
+            if (parse_number_command(p, cmd, addresses) != 0)
+                return -1;
+            break;
         case 's':
             if (parse_substitute(p, cmd) != 0)
                 return -1;
@@ -732,57 +760,38 @@ static int parse_command(Parser* p, Command* cmd) {
     return add_command(p, cmd, &index);
 }
 
-static int parse_all(Parser* p) {
+/** The addresses and the ! of a command; the command itself is read by parse_command. */
+static int parse_addresses(Parser* p, Command* cmd) {
+    if (parse_first_address(p, &cmd->first) != 0)
+        return -1;
+    if (cmd->first.kind != ADDR_NONE) {
+        skip_blanks(p);
+        if (peek(p) == ',') {
+            p->pos++;
+            skip_blanks(p);
+            if (parse_second_address(p, &cmd->second) != 0)
+                return -1;
+        }
+    }
+    if (cmd->first.kind == ADDR_ZERO && cmd->second.kind != ADDR_REGEX)
+        return fail(p, "invalid usage of line address 0");
+
+    skip_blanks(p);
+    while (peek(p) == '!') {
+        cmd->negate = 1;
+        p->pos++;
+        skip_blanks(p);
+    }
+    if (at_end(p) || peek(p) == '\n' || peek(p) == ';')
+        return fail(p, "missing command");
+    return 0;
+}
+
+/** b, t and T name a label (or none: the end of the script): finds where it is. */
+static int resolve_jumps(Parser* p) {
     Script* script = p->script;
     size_t i, j;
 
-    if (p->length >= 2 && p->text[0] == '#' && p->text[1] == 'n' && (p->length == 2 || p->text[2] == '\n'))
-        script->quiet = 1;
-
-    for (;;) {
-        Command cmd;
-
-        while (!at_end(p) && (isspace(p->text[p->pos]) || p->text[p->pos] == ';'))
-            p->pos++;
-        if (at_end(p))
-            break;
-        if (p->text[p->pos] == '#') {
-            while (!at_end(p) && p->text[p->pos] != '\n')
-                p->pos++;
-            continue;
-        }
-
-        memset(&cmd, 0, sizeof cmd);
-        if (parse_first_address(p, &cmd.first) != 0)
-            return -1;
-        if (cmd.first.kind != ADDR_NONE) {
-            skip_blanks(p);
-            if (peek(p) == ',') {
-                p->pos++;
-                skip_blanks(p);
-                if (parse_second_address(p, &cmd.second) != 0)
-                    return -1;
-            }
-        }
-        if (cmd.first.kind == ADDR_ZERO && cmd.second.kind != ADDR_REGEX)
-            return fail(p, "invalid usage of line address 0");
-
-        skip_blanks(p);
-        while (peek(p) == '!') {
-            cmd.negate = 1;
-            p->pos++;
-            skip_blanks(p);
-        }
-        if (at_end(p) || peek(p) == '\n' || peek(p) == ';')
-            return fail(p, "missing command");
-        if (parse_command(p, &cmd) != 0)
-            return -1;
-    }
-
-    if (p->blockCount > 0)
-        return fail(p, "unmatched `{'");
-
-    // the jumps
     for (i = 0; i < script->count; i++) {
         Command* c = &script->commands[i];
         if (c->name != 'b' && c->name != 't' && c->name != 'T')
@@ -803,6 +812,38 @@ static int parse_all(Parser* p) {
         c->target = j;
     }
     return 0;
+}
+
+static int parse_all(Parser* p) {
+    Script* script = p->script;
+
+    if (p->length >= 2 && p->text[0] == '#' && p->text[1] == 'n' && (p->length == 2 || p->text[2] == '\n'))
+        script->quiet = 1;
+
+    for (;;) {
+        Command cmd;
+
+        while (!at_end(p) && (isspace(p->text[p->pos]) || p->text[p->pos] == ';'))
+            p->pos++;
+        if (at_end(p))
+            break;
+        if (p->text[p->pos] == '#') {
+            while (!at_end(p) && p->text[p->pos] != '\n')
+                p->pos++;
+            continue;
+        }
+
+        memset(&cmd, 0, sizeof cmd);
+        if (parse_addresses(p, &cmd) != 0)
+            return -1;
+        if (parse_command(p, &cmd) != 0)
+            return -1;
+    }
+
+    if (p->blockCount > 0)
+        return fail(p, "unmatched `{'");
+
+    return resolve_jumps(p);
 }
 
 int sed_parse(const ScriptChunk* chunks, size_t chunkCount, const SedConfig* config, Script* script,

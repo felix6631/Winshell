@@ -120,6 +120,73 @@ static int in_class(const char* name, size_t length, int c) {
  * Expands a set string. isSecond allows [c*n] constructs; the ones without a
  * count are recorded and filled when the length of the first set is known.
  */
+/**
+ * The constructs in brackets: [:class:], [=c=] and [c*n]. Returns 1 with *pp moved past it, 0 when what is
+ * there is not one of them (a plain character), -1 after a message.
+ */
+static int expand_bracket(const char** pp, int isSecond, Set* set, size_t* capacity) {
+    const char* p = *pp;
+
+    if (p[0] == '[' && p[1] == ':') {
+        const char* end = strstr(p + 2, ":]");
+        if (end != NULL) {
+            int c, known = 0;
+            for (c = 0; c < 256 && !known; c++)
+                if (in_class(p + 2, (size_t)(end - (p + 2)), c) >= 0)
+                    known = 1;
+            if (!known) {
+                fprintf(stderr, PROGRAM ": invalid character class '%.*s'\n", (int)(end - (p + 2)), p + 2);
+                return -1;
+            }
+            for (c = 0; c < 256; c++)
+                if (in_class(p + 2, (size_t)(end - (p + 2)), c) > 0)
+                    add_byte(set, capacity, (unsigned char)c);
+            *pp = end + 2;
+            return 1;
+        }
+    } else if (p[0] == '[' && p[1] == '=' && p[2] != '\0' && p[3] == '=' && p[4] == ']') {
+        add_byte(set, capacity, (unsigned char)p[2]);
+        *pp = p + 5;
+        return 1;
+    } else if (p[0] == '[') {
+        const char* q = p + 1;
+        int c = read_char(&q);
+        if (c >= 0 && *q == '*') {
+            const char* close = strchr(q + 1, ']');
+            if (close != NULL) {
+                const char* count = q + 1;
+                int digitsOnly = 1;
+                const char* d;
+                for (d = count; d < close; d++)
+                    if (*d < '0' || *d > '9')
+                        digitsOnly = 0;
+                if (digitsOnly) {
+                    if (!isSecond) {
+                        fprintf(stderr, PROGRAM ": the [c*] repeat construct may not appear in string1\n");
+                        return -1;
+                    }
+                    if (close == count) {
+                        // [c*]: as many as the first set needs
+                        if (VEC_GROW_BY_COUNT(set->fillAt, set->fills) != 0 ||
+                            VEC_GROW_BY_COUNT(set->fillChar, set->fills) != 0)
+                            return -1;
+                        set->fillAt[set->fills] = set->length;
+                        set->fillChar[set->fills] = (unsigned char)c;
+                        set->fills++;
+                    } else {
+                        unsigned long n = strtoul(count, NULL, count[0] == '0' ? 8 : 10);
+                        while (n-- > 0)
+                            add_byte(set, capacity, (unsigned char)c);
+                    }
+                    *pp = close + 1;
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 static int expand_set(const char* text, int isSecond, Set* set) {
     const char* p = text;
     size_t capacity = 0;
@@ -127,64 +194,11 @@ static int expand_set(const char* text, int isSecond, Set* set) {
     memset(set, 0, sizeof *set);
 
     while (*p != '\0') {
-        // [:class:], [=c=], [c*n]
-        if (p[0] == '[' && p[1] == ':') {
-            const char* end = strstr(p + 2, ":]");
-            if (end != NULL) {
-                int c, known = 0;
-                for (c = 0; c < 256 && !known; c++)
-                    if (in_class(p + 2, (size_t)(end - (p + 2)), c) >= 0)
-                        known = 1;
-                if (!known) {
-                    fprintf(stderr, PROGRAM ": invalid character class '%.*s'\n", (int)(end - (p + 2)), p + 2);
-                    return -1;
-                }
-                for (c = 0; c < 256; c++)
-                    if (in_class(p + 2, (size_t)(end - (p + 2)), c) > 0)
-                        add_byte(set, &capacity, (unsigned char)c);
-                p = end + 2;
-                continue;
-            }
-        } else if (p[0] == '[' && p[1] == '=' && p[2] != '\0' && p[3] == '=' && p[4] == ']') {
-            add_byte(set, &capacity, (unsigned char)p[2]);
-            p += 5;
+        int handled = expand_bracket(&p, isSecond, set, &capacity);
+        if (handled < 0)
+            return -1;
+        if (handled > 0)
             continue;
-        } else if (p[0] == '[') {
-            const char* q = p + 1;
-            int c = read_char(&q);
-            if (c >= 0 && *q == '*') {
-                const char* close = strchr(q + 1, ']');
-                if (close != NULL) {
-                    const char* count = q + 1;
-                    int digitsOnly = 1;
-                    const char* d;
-                    for (d = count; d < close; d++)
-                        if (*d < '0' || *d > '9')
-                            digitsOnly = 0;
-                    if (digitsOnly) {
-                        if (!isSecond) {
-                            fprintf(stderr, PROGRAM ": the [c*] repeat construct may not appear in string1\n");
-                            return -1;
-                        }
-                        if (close == count) {
-                            // [c*]: as many as the first set needs
-                            if (VEC_GROW_BY_COUNT(set->fillAt, set->fills) != 0 ||
-                                VEC_GROW_BY_COUNT(set->fillChar, set->fills) != 0)
-                                return -1;
-                            set->fillAt[set->fills] = set->length;
-                            set->fillChar[set->fills] = (unsigned char)c;
-                            set->fills++;
-                        } else {
-                            unsigned long n = strtoul(count, NULL, count[0] == '0' ? 8 : 10);
-                            while (n-- > 0)
-                                add_byte(set, &capacity, (unsigned char)c);
-                        }
-                        p = close + 1;
-                        continue;
-                    }
-                }
-            }
-        }
 
         {
             int first = read_char(&p);
