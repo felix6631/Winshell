@@ -129,6 +129,21 @@ static void test_substitution(void) {
     expect_c("-c \"echo $()\"", "\n", 0);
 }
 
+static void test_conditions(void) {
+    printf("test, [ and && ||\n");
+    write_text(workDir, "present.txt", "x\n");
+
+    // [ is a program like any other: its ] is an argument, and a lone [ is no wildcard
+    expect_script("c1.sh", "[ -f present.txt ] && echo yes || echo no\n[ -f absent.txt ] && echo yes || echo no\n", "",
+                  "yes\nno\n", 0);
+    expect_script("c2.sh", "x=abc\n[ \"$x\" = abc ] && echo same\n[ \"$x\" != abc ] || echo different-not\n", "",
+                  "same\ndifferent-not\n", 0);
+    expect_script("c3.sh", "test 3 -gt 2 && echo bigger\ntest -z \"$(echo)\" && echo empty\n", "", "bigger\nempty\n", 0);
+    expect_script("c4.sh", "n=$(echo 7)\n[ $n -eq 7 ] && echo seven\n[ $# -eq 2 ] && echo two\n", "a b", "seven\ntwo\n", 0);
+    expect_script("c5.sh", "true && echo t\nfalse || echo f\nfalse\necho $?\ntrue\necho $?\n", "", "t\nf\n1\n0\n", 0);
+    expect_script("c6.sh", "[ -d /c ]\necho $?\n[ 1 -eq x ] 2> nul\necho $?\n", "", "0\n2\n", 0);
+}
+
 static void test_source(void) {
     printf("source\n");
     write_text(workDir, "lib.sh", "echo lib $1 $#\nv=from_lib\n");
@@ -160,6 +175,7 @@ int main(void) {
     tools_init("shell_script_test");
     test_scripts();
     test_substitution();
+    test_conditions();
     test_source();
     return test_summary("shell_script_test");
 }

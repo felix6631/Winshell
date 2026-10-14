@@ -30,7 +30,12 @@ foreach ($tool in $tools) {
             $missing++
         }
     }
-    if ($tool -ne 'shell' -and $testSources -notmatch ('"' + [regex]::Escape($tool) + '"')) {
+    # the program a directory builds is named by its Makefile (test_cmd makes test and [)
+    $exe = $tool
+    $makefile = Get-Content (Join-Path $root "$tool\Makefile") -ErrorAction SilentlyContinue
+    foreach ($line in $makefile) { if ($line -match '^NAME\s*=\s*(\S+)') { $exe = $Matches[1] } }
+    if ($tool -ne 'shell' -and $testSources -notmatch ('"' + [regex]::Escape($exe) + '"') -and
+        $testSources -notmatch ('"' + [regex]::Escape($tool) + '"')) {
         Write-Host "MISSING  $tool : no test in test\*.c runs it"
         $missing++
     }

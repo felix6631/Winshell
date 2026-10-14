@@ -49,6 +49,9 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `nl` | Done (`a t n` for `-b -h -f`, `-n -w -s -v -i -l -p -d`; the `p` regular-expression style is not supported) |
 | `paste` | Done (`-d -s -z`; `- -` takes the lines of standard input in turn) |
 | `touch` | Done (`-a -c -d -m -r -t`; `-d` uses the same reader of dates as `date -d` (`common/datetime.c`): `@SECONDS`, ISO dates and times, month names, `yesterday`, `3 days ago`, zones) |
+| `test_cmd` | Done (installed as `test` and `[`: strings `= == != < >`, integers `-eq -ne -lt -le -gt -ge`, files `-e -f -d -s -r -w -x -L -h -c -nt -ot -ef -O -G -N -t`, `! ( ) -a -o`; as in GNU one to four arguments are read by their number; `[` wants its `]`; exit status 0/1/2; `-r -w -x` mean can be opened / not read-only / a directory or a PATHEXT extension on Windows) |
+| `true` | Done (ignores its arguments, 0) |
+| `false` | Done (ignores its arguments, 1) |
 | `tr` | Done (`-c -C -d -s -t`, classes `[:alpha:]` etc.) |
 | `uniq` | Done (`-c -d -D -u -i -f -s -w`) |
 | `wc` | Done (`-l -w -m -c -L`) |
@@ -142,7 +145,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `which`, `xargs`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `false`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `uniq`, `wc`, `which`, `xargs`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -186,6 +189,7 @@ The test programs are divided by feature (`test\`).
 | `shell_utf8_test` | shell: Korean names and directories, wildcards that match a character, variables, redirection (Windows 10 1903 or later) |
 | `shell_run_test` | shell: running commands, quoting, pipes, redirection |
 | `shell_script_test` | shell scripts: file/`-c`/`source`, `$0 $1.. $# $@`, command substitution (`$(...)`, backticks), comments, exit status |
+| `test_cmd_test` | `test`, `[`, `true`, `false`: strings, integers, files, expressions, the rules of the number of arguments, errors |
 | `shell_cd_test` | shell: `cd`, the virtual file system, wildcards |
 | `shell_lists_test` | shell: `; && \|\|`, exit status, variables, `exit` |
 | `shell_pipeline_test` | shell: the commands together with pipes, redirection and wildcards |
@@ -198,7 +202,7 @@ The test programs are divided by feature (`test\`).
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
 - The test programs are run by `test\out\runall.exe`, several at a time (each has its own work directory, so they do not collide). A program that passed shows one summary line, a failed one all of its output. `WS_JOBS=N` sets how many run at once (default: half of the processors), `WS_VERBOSE=1` shows all output.
 - **AddressSanitizer:** `nmake asan` rebuilds all tools and tests with `/fsanitize=address` (`bin-asan\`, `test\out-asan\`) and runs them. Memory errors are reported with their location and fail the test. The environment variable `WINSHELL_BIN` selects the directory of tools the tests use.
-- **Comparison with GNU:** `test\gnu_compare.sh` compares `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `tac`, `nl`, `paste`, `tee`, `grep`, `sed`, `expr`, `find`, `xargs`, `basename`, `dirname`, `date`, `realpath`, `diff` and `comm` with the GNU tools in over three thousand combinations of options and inputs (`LC_ALL=C`, `C.UTF-8` for grep). The script collects the combinations and `test\out\gnu_batch.exe` runs them several at a time (much faster than starting the programs from the MSYS bash: about 30 seconds). `GNU_ONLY=grep` runs one section, `GNU_IMMEDIATE=1` makes the script run them itself, one by one. What is meant to differ (a CR LF ending is not part of the line, `sort -z/-h/-M/-V` are refused, characters are UTF-8) is not compared.
+- **Comparison with GNU:** `test\gnu_compare.sh` compares `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `tac`, `nl`, `paste`, `tee`, `grep`, `sed`, `expr`, `find`, `xargs`, `basename`, `dirname`, `date`, `realpath`, `diff`, `comm`, `test`, `true` and `false` with the GNU tools in over three thousand combinations of options and inputs (`LC_ALL=C`, `C.UTF-8` for grep). The script collects the combinations and `test\out\gnu_batch.exe` runs them several at a time (much faster than starting the programs from the MSYS bash: about 30 seconds). `GNU_ONLY=grep` runs one section, `GNU_IMMEDIATE=1` makes the script run them itself, one by one. What is meant to differ (a CR LF ending is not part of the line, `sort -z/-h/-M/-V` are refused, characters are UTF-8) is not compared.
 - **`mv` to another drive:** with the environment variable `WINSHELL_TEST_CROSS_DEVICE` set, `mv` does not try the rename and takes the copy-and-remove path. The tests run that code on one volume with it, and for real when a second fixed drive that can be written to exists.
 - When adding a command, add its cases to the `*_test.c` of its feature. The shared parts are `testlib.h` (checks, running programs) and `testtools.h` (work directory, running tools, fixtures). Output is compared without telling LF and CRLF apart (`lf_only`).
 - Ctrl+C handling is not part of the automatic tests because it needs a real console.
@@ -249,6 +253,9 @@ Winshell/
 ├─ wc/             wc command
 ├─ which/          which command
 ├─ xargs/          xargs command
+├─ false/        false command
+├─ test_cmd/     test_cmd command
+├─ true/         true command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
