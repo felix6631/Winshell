@@ -7,11 +7,7 @@
 #include "testtools.h"
 
 static void expect(const char* arguments, const char* output, int status) {
-    RunResult r;
-    run_tool(workDir, "expr", arguments, "", &r);
-    CHECK_STR(r.out, output);
-    CHECK_INT(r.exitCode, status);
-    run_result_free(&r);
+    expect_run("expr", arguments, "", output, status);
 }
 
 int main(void) {

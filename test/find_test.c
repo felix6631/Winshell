@@ -8,11 +8,7 @@
 #include "testtools.h"
 
 static void expect(const char* arguments, const char* output, int status) {
-    RunResult r;
-    run_tool(workDir, "find", arguments, "", &r);
-    CHECK_STR(r.out, output);
-    CHECK_INT(r.exitCode, status);
-    run_result_free(&r);
+    expect_run("find", arguments, "", output, status);
 }
 
 static void make_tree(void) {

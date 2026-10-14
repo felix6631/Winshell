@@ -8,11 +8,7 @@
 #include "testtools.h"
 
 static void expect(const char* arguments, const char* output, int status) {
-    RunResult r;
-    run_tool(workDir, "realpath", arguments, "", &r);
-    CHECK_STR(r.out, output);
-    CHECK_INT(r.exitCode, status);
-    run_result_free(&r);
+    expect_run("realpath", arguments, "", output, status);
 }
 
 int main(void) {

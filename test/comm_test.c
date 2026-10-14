@@ -7,14 +7,7 @@
 #include "testtools.h"
 
 static void expect(const char* arguments, const char* input, const char* expected, int status) {
-    RunResult r;
-
-    run_tool(workDir, "comm", arguments, input, &r);
-    if (r.out == NULL || strcmp(r.out, expected) != 0)
-        printf("    for: comm %s\n    got: \"%s\"\n", arguments, r.out == NULL ? "(null)" : r.out);
-    CHECK_STR(r.out, expected);
-    CHECK_INT(r.exitCode, status);
-    run_result_free(&r);
+    expect_run("comm", arguments, input, expected, status);
 }
 
 int main(void) {

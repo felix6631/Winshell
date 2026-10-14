@@ -5,9 +5,6 @@
 obj/
 bin/
 
-*.md
-!README.md
-!README.en.md
 out/
 *.pdb
 *.ilk

@@ -43,15 +43,24 @@ static void run_tool(const char* cwd, const char* name, const char* arguments, c
 }
 
 /* ---- head, tail, wc -------------------------------------------------------------- */
-/** Runs a tool with arguments and standard input and compares the output bytes. */
-static void text_expect(const char* tool, const char* arguments, const char* input, const char* expected) {
+/**
+ * Runs bin\<tool>.exe in the work directory with the arguments and the standard input, and checks the bytes it
+ * wrote to standard output and its exit status. A difference shows the tool, its arguments and what it wrote.
+ */
+static void expect_run(const char* tool, const char* arguments, const char* input, const char* expected, int status) {
     RunResult r;
+
     run_tool(workDir, tool, arguments, input, &r);
     if (r.out == NULL || strcmp(r.out, expected) != 0)
         printf("    for: %s %s\n    got: \"%s\"\n", tool, arguments, r.out == NULL ? "(null)" : r.out);
     CHECK_STR(r.out, expected);
-    CHECK_INT(r.exitCode, 0);
+    CHECK_INT(r.exitCode, status);
     run_result_free(&r);
+}
+
+/** The same for a tool that has to succeed. */
+static void text_expect(const char* tool, const char* arguments, const char* input, const char* expected) {
+    expect_run(tool, arguments, input, expected, 0);
 }
 
 /** Writes a file of the given size, clearing attributes an earlier run may have set. */
