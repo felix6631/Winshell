@@ -101,6 +101,7 @@ typedef struct {
     Command* commands;
     size_t   count;
     int      quiet;             // the first line of the script is #n
+    Output*  outputs;           // the files of the w commands, opened when the script was parsed
 } Script;
 
 /** A piece of the script: an -e option or the content of an -f file. */
@@ -128,10 +129,10 @@ int sed_parse(const ScriptChunk* chunks, size_t chunkCount, const SedConfig* con
               char* error, size_t errorSize);
 
 /**
- * The output for a file name of a w command (opened, and emptied, at once): /dev/stdout and
+ * The output for a file name of a w command (opened, and emptied, at once; the script keeps them): /dev/stdout and
  * /dev/stderr are the standard streams. Returns NULL after a message when it cannot be opened.
  */
-Output* sed_output_open(const char* name);
+Output* sed_output_open(Script* script, const char* name);
 
 /** Runs the script over the files ("-" is standard input). Returns the exit status. */
 int sed_run(Script* script, const SedConfig* config, const char* const* files, size_t fileCount);

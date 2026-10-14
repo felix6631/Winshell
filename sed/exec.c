@@ -40,45 +40,47 @@ typedef struct {
 
 typedef enum { CYCLE_END, CYCLE_DELETE, CYCLE_RESTART, CYCLE_QUIT, CYCLE_QUIT_SILENT } CycleResult;
 
-static Output outStdout = { "/dev/stdout", NULL, 0, NULL };
-static Output* outputs;                 // the files of the w commands
+/** Everything one run of the script keeps: the input, the pattern and hold space, the output. */
+typedef struct {
+    Script*          script;
+    const SedConfig* config;
+    int              terminator;
 
-static const SedConfig* config;
-static Script* script;
-static int terminator;
+    const char* const* inputFiles;      // of the stream
+    size_t           inputCount, nextInput;
+    FILE*            currentFile;
+    LineReader       reader;
+    int              readerOpen;
+    size_t           readerIndex;
+    const char* const* allNames;        // for F: the names of all the files
+    Line             look;              // the line read ahead
 
-static const char* const* inputFiles;
-static size_t inputCount, nextInput;
-static FILE* currentFile;
-static LineReader reader;
-static int readerOpen;
-static size_t readerIndex;
-static const char* const* allNames;     // for F: the names of all the files
-static Line look;
+    Buf              ps, hs;            // the pattern space and the hold space
+    int              psEnding, hsEnding;
+    size_t           psFile;
+    size_t           streamBase;        // the index in the list of all files of the first one of the stream
+    long             lineNumber;
+    int              replaced;          // for t and T
+    Regex*           lastRegex;
+    RegexInput       regexInput;
 
-static Buf ps, hs;
-static int psEnding;
-static int hsEnding = 1;
-static size_t psFile;
-static size_t streamBase;               // the index in the list of all files of the first one of the stream
-static long lineNumber;
-static int replaced;
-static Regex* lastRegex;
-static RegexInput regexInput;
-static Output* out;
-static Append* appends;
-static size_t appendCount, appendCapacity;
-static int exitStatus;
-static int quitStatus = -1;
-static int quitting;
+    Output           stdoutOutput;      // standard output
+    Output*          out;               // where the lines go: standard output, or the file that -i edits
+    Append*          appends;
+    size_t           appendCount, appendCapacity;
+
+    int              exitStatus;
+    int              quitStatus;
+    int              quitting;
+} Executor;
 
 /* ---- output -------------------------------------------------------------------------------- */
 
-Output* sed_output_open(const char* name) {
+Output* sed_output_open(Script* script, const char* name) {
     Output* o;
     char native[VPATH_MAX];
 
-    for (o = outputs; o != NULL; o = o->next)
+    for (o = script->outputs; o != NULL; o = o->next)
         if (strcmp(o->name, name) == 0)
             return o;
 
@@ -103,55 +105,55 @@ Output* sed_output_open(const char* name) {
         }
     }
     o->name = _strdup(name);
-    o->next = outputs;
-    outputs = o;
+    o->next = script->outputs;
+    script->outputs = o;
     return o;
 }
 
-static void put_missing_newline(Output* o) {
+static void put_missing_newline(Executor* x, Output* o) {
     if (o->missingNewline) {
-        fputc(terminator, o->file);
+        fputc(x->terminator, o->file);
         o->missingNewline = 0;
     }
 }
 
-static void finish_write(Output* o) {
-    if (config->unbuffered || o->file == stderr)
+static void finish_write(Executor* x, Output* o) {
+    if (x->config->unbuffered || o->file == stderr)
         fflush(o->file);
 }
 
-static void write_raw(Output* o, const void* data, size_t length) {
-    put_missing_newline(o);
+static void write_raw(Executor* x, Output* o, const void* data, size_t length) {
+    put_missing_newline(x, o);
     fwrite(data, 1, length, o->file);
-    finish_write(o);
+    finish_write(x, o);
 }
 
-/** A line with its ending: 0 none (nothing follows, until more is written), 1 the terminator, 2 CR LF. */
-static void write_line(Output* o, const void* data, size_t length, int ending) {
-    put_missing_newline(o);
+/** A line with its ending: 0 none (nothing follows, until more is written), 1 the x->terminator, 2 CR LF. */
+static void write_line(Executor* x, Output* o, const void* data, size_t length, int ending) {
+    put_missing_newline(x, o);
     fwrite(data, 1, length, o->file);
     if (ending == 2)
         fputs("\r\n", o->file);
     else if (ending == 1)
-        fputc(terminator, o->file);
+        fputc(x->terminator, o->file);
     else
         o->missingNewline = 1;
-    finish_write(o);
+    finish_write(x, o);
 }
 
-static void print_pattern(Output* o) {
-    write_line(o, ps.data, ps.length, psEnding);
+static void print_pattern(Executor* x, Output* o) {
+    write_line(x, o, x->ps.data, x->ps.length, x->psEnding);
 }
 
-static void queue_append(int kind, const void* data, size_t length) {
+static void queue_append(Executor* x, int kind, const void* data, size_t length) {
     Append* a;
-    if (VEC_RESERVE(appends, appendCapacity, appendCount + 1) != 0)
+    if (VEC_RESERVE(x->appends, x->appendCapacity, x->appendCount + 1) != 0)
         return;
-    a = &appends[appendCount++];
+    a = &x->appends[x->appendCount++];
     a->kind = kind;
     a->data = malloc(length + 1);
     if (a->data == NULL) {
-        appendCount--;
+        x->appendCount--;
         return;
     }
     memcpy(a->data, data, length);
@@ -159,12 +161,12 @@ static void queue_append(int kind, const void* data, size_t length) {
     a->length = length;
 }
 
-static void dump_append(void) {
+static void dump_append(Executor* x) {
     size_t i;
-    for (i = 0; i < appendCount; i++) {
-        Append* a = &appends[i];
+    for (i = 0; i < x->appendCount; i++) {
+        Append* a = &x->appends[i];
         if (a->kind == 't') {
-            write_raw(out, a->data, a->length);
+            write_raw(x, x->out, a->data, a->length);
         } else {
             char native[VPATH_MAX];
             if (vpath_to_native((const char*)a->data, native, sizeof native) == 0) {
@@ -173,20 +175,20 @@ static void dump_append(void) {
                     unsigned char chunk[8192];
                     size_t n;
                     while ((n = fread(chunk, 1, sizeof chunk, f)) > 0)
-                        write_raw(out, chunk, n);
+                        write_raw(x, x->out, chunk, n);
                     fclose(f);
                 }
             }
         }
         free(a->data);
     }
-    appendCount = 0;
+    x->appendCount = 0;
 }
 
 /* ---- input --------------------------------------------------------------------------------- */
 
 /** Opens an input file; a failure is reported and sets the exit status. */
-static int open_input(const char* name, FILE** file) {
+static int open_input(Executor* x, const char* name, FILE** file) {
     char native[VPATH_MAX];
     const char* reason;
     DWORD attributes;
@@ -197,17 +199,17 @@ static int open_input(const char* name, FILE** file) {
     }
     if (vpath_to_native(name, native, sizeof native) == VPATH_ROOT) {
         fprintf(stderr, PROGRAM ": couldn't edit %s: not a regular file\n", name);
-        exitStatus = config->inPlace ? 4 : 2;
+        x->exitStatus = x->config->inPlace ? 4 : 2;
         return -1;
     }
     if (vpath_to_native(name, native, sizeof native) != 0) {
         reason = strerror(errno);
     } else if (fs_attributes(native, &attributes) == 0 && (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
-        if (config->inPlace)
+        if (x->config->inPlace)
             fprintf(stderr, PROGRAM ": couldn't edit %s: not a regular file\n", name);
         else
             fprintf(stderr, PROGRAM ": read error on %s: Is a directory\n", name);
-        exitStatus = config->inPlace ? 4 : 2;
+        x->exitStatus = x->config->inPlace ? 4 : 2;
         return -1;
     } else {
         *file = fopen(native, "rb");
@@ -218,138 +220,138 @@ static int open_input(const char* name, FILE** file) {
             reason = "No such file or directory";
     }
     fprintf(stderr, PROGRAM ": can't read %s: %s\n", name, reason);
-    exitStatus = 2;
+    x->exitStatus = 2;
     return -1;
 }
 
 /** The next line of the input files of the stream, into line. Returns 0 at the end. */
-static int fetch(Line* line) {
+static int fetch(Executor* x, Line* line) {
     for (;;) {
         TextLine text;
 
-        if (!readerOpen) {
-            if (nextInput >= inputCount)
+        if (!x->readerOpen) {
+            if (x->nextInput >= x->inputCount)
                 return 0;
-            readerIndex = nextInput;
-            if (open_input(inputFiles[nextInput++], &currentFile) != 0)
+            x->readerIndex = x->nextInput;
+            if (open_input(x, x->inputFiles[x->nextInput++], &x->currentFile) != 0)
                 continue;
-            text_reader_init(&reader, currentFile, terminator);
-            readerOpen = 1;
+            text_reader_init(&x->reader, x->currentFile, x->terminator);
+            x->readerOpen = 1;
         }
-        if (text_reader_next(&reader, &text) > 0) {
+        if (text_reader_next(&x->reader, &text) > 0) {
             line->text.length = 0;
             buf_add(&line->text, text.content, text.length);
             line->ending = text.ending;
-            line->file = readerIndex;
+            line->file = x->readerIndex;
             line->valid = 1;
             return 1;
         }
-        text_reader_free(&reader);
-        if (currentFile != stdin)
-            fclose(currentFile);
-        readerOpen = 0;
+        text_reader_free(&x->reader);
+        if (x->currentFile != stdin)
+            fclose(x->currentFile);
+        x->readerOpen = 0;
     }
 }
 
-static int has_next(void) {
-    if (look.valid)
+static int has_next(Executor* x) {
+    if (x->look.valid)
         return 1;
-    return fetch(&look);
+    return fetch(x, &x->look);
 }
 
-/** Reads the next line into the pattern space (after it, with a terminator between, when append). */
-static int read_pattern_space(int append) {
-    dump_append();
-    if (!look.valid && !fetch(&look))
+/** Reads the next line into the pattern space (after it, with a x->terminator between, when append). */
+static int read_pattern_space(Executor* x, int append) {
+    dump_append(x);
+    if (!x->look.valid && !fetch(x, &x->look))
         return 0;
-    look.valid = 0;
+    x->look.valid = 0;
 
     if (append)
-        buf_add_byte(&ps, terminator);
+        buf_add_byte(&x->ps, x->terminator);
     else
-        ps.length = 0;
-    buf_add(&ps, look.text.data, look.text.length);
-    psEnding = look.ending;
-    psFile = look.file;
-    lineNumber++;
-    replaced = 0;
+        x->ps.length = 0;
+    buf_add(&x->ps, x->look.text.data, x->look.text.length);
+    x->psEnding = x->look.ending;
+    x->psFile = x->look.file;
+    x->lineNumber++;
+    x->replaced = 0;
     return 1;
 }
 
 /* ---- addresses ----------------------------------------------------------------------------- */
 
-static int load_input(void) {
-    return regex_input_set(&regexInput, ps.data, ps.length);
+static int load_input(Executor* x) {
+    return regex_input_set(&x->regexInput, x->ps.data, x->ps.length);
 }
 
-static int regex_matches(Regex* re) {
+static int regex_matches(Executor* x, Regex* re) {
     size_t start, end;
 
     if (re == NULL)
-        re = lastRegex;
+        re = x->lastRegex;
     if (re == NULL) {
         fprintf(stderr, PROGRAM ": no previous regular expression\n");
         exit(1);
     }
-    lastRegex = re;
-    if (load_input() != 0)
+    x->lastRegex = re;
+    if (load_input(x) != 0)
         return 0;
-    return regex_search(re, &regexInput, 0, &start, &end);
+    return regex_search(re, &x->regexInput, 0, &start, &end);
 }
 
-static int is_last_line(void) {
-    return !has_next();
+static int is_last_line(Executor* x) {
+    return !has_next(x);
 }
 
-static int address_matches(const Address* a) {
+static int address_matches(Executor* x, const Address* a) {
     switch (a->kind) {
         case ADDR_LINE:
-            return lineNumber == a->number;
+            return x->lineNumber == a->number;
         case ADDR_LAST:
-            return is_last_line();
+            return is_last_line(x);
         case ADDR_REGEX:
-            return regex_matches(a->regex);
+            return regex_matches(x, a->regex);
         case ADDR_STEP:
             if (a->step <= 0)
-                return lineNumber == a->number;
-            return lineNumber >= a->number && (lineNumber - a->number) % a->step == 0;
+                return x->lineNumber == a->number;
+            return x->lineNumber >= a->number && (x->lineNumber - a->number) % a->step == 0;
         default:
             return 0;
     }
 }
 
-static int command_matches(Command* c) {
+static int command_matches(Executor* x, Command* c) {
     int matched;
 
     if (c->first.kind == ADDR_NONE)
         return !c->negate;
 
     if (c->second.kind == ADDR_NONE) {
-        matched = address_matches(&c->first);
+        matched = address_matches(x, &c->first);
     } else if (c->rangeActive) {
         matched = 1;
         switch (c->second.kind) {
             case ADDR_LINE:
             case ADDR_PLUS:
             case ADDR_MULTIPLE:
-                if (lineNumber >= c->rangeEnd) {
+                if (x->lineNumber >= c->rangeEnd) {
                     c->rangeActive = 0;
-                    matched = lineNumber == c->rangeEnd;
+                    matched = x->lineNumber == c->rangeEnd;
                 }
                 break;
             default:
-                if (address_matches(&c->second))
+                if (address_matches(x, &c->second))
                     c->rangeActive = 0;
                 break;
         }
     } else {
-        matched = address_matches(&c->first);
+        matched = address_matches(x, &c->first);
         if (c->first.kind == ADDR_ZERO)
             matched = 0;
         if (matched) {
             switch (c->second.kind) {
                 case ADDR_LINE:
-                    if (c->second.number > lineNumber) {
+                    if (c->second.number > x->lineNumber) {
                         c->rangeActive = 1;
                         c->rangeEnd = c->second.number;
                     }
@@ -357,17 +359,17 @@ static int command_matches(Command* c) {
                 case ADDR_PLUS:
                     if (c->second.number > 0) {
                         c->rangeActive = 1;
-                        c->rangeEnd = lineNumber + c->second.number;
+                        c->rangeEnd = x->lineNumber + c->second.number;
                     }
                     break;
                 case ADDR_MULTIPLE:
-                    if (c->second.number > 0 && lineNumber % c->second.number != 0) {
+                    if (c->second.number > 0 && x->lineNumber % c->second.number != 0) {
                         c->rangeActive = 1;
-                        c->rangeEnd = (lineNumber / c->second.number + 1) * c->second.number;
+                        c->rangeEnd = (x->lineNumber / c->second.number + 1) * c->second.number;
                     }
                     break;
                 case ADDR_LAST:
-                    c->rangeActive = !is_last_line();
+                    c->rangeActive = !is_last_line(x);
                     break;
                 default:
                     c->rangeActive = 1;     // a regular expression is looked for from the next line on
@@ -378,10 +380,10 @@ static int command_matches(Command* c) {
     return matched != c->negate;
 }
 
-static void reset_ranges(void) {
+static void reset_ranges(Executor* x) {
     size_t i;
-    for (i = 0; i < script->count; i++) {
-        Command* c = &script->commands[i];
+    for (i = 0; i < x->script->count; i++) {
+        Command* c = &x->script->commands[i];
         c->rangeActive = c->first.kind == ADDR_ZERO;
     }
 }
@@ -421,7 +423,7 @@ static void add_with_case(Buf* dst, const unsigned char* s, size_t length, CaseS
 }
 
 /** The right hand side of s for one match: its text, groups (spans, or the match when 0) and case changes. */
-static void append_replacement(Buf* result, const Substitution* sub, size_t start, size_t end, const size_t* spans) {
+static void append_replacement(Executor* x, Buf* result, const Substitution* sub, size_t start, size_t end, const size_t* spans) {
     CaseState state = { 0, 0 };
     size_t k;
 
@@ -437,8 +439,8 @@ static void append_replacement(Buf* result, const Substitution* sub, size_t star
                 to = spans != NULL ? spans[2 * part->number + 1] : (size_t)-1;
             }
             if (from != (size_t)-1 && to != (size_t)-1 && from <= to)
-                add_with_case(result, ps.data + regexInput.offset[from],
-                              regexInput.offset[to] - regexInput.offset[from], &state);
+                add_with_case(result, x->ps.data + x->regexInput.offset[from],
+                              x->regexInput.offset[to] - x->regexInput.offset[from], &state);
         } else if (part->number == 'E') {
             state.mode = 0;
             state.once = 0;
@@ -450,9 +452,9 @@ static void append_replacement(Buf* result, const Substitution* sub, size_t star
     }
 }
 
-/** s: returns 1 when something was replaced. */
-static int substitute(const Substitution* sub) {
-    Regex* re = sub->regex != NULL ? sub->regex : lastRegex;
+/** s: returns 1 when something was x->replaced. */
+static int substitute(Executor* x, const Substitution* sub) {
+    Regex* re = sub->regex != NULL ? sub->regex : x->lastRegex;
     Buf result;
     size_t* spans = NULL;
     size_t position = 0, copied = 0, previousEnd = (size_t)-1, start, end;
@@ -463,8 +465,8 @@ static int substitute(const Substitution* sub) {
         fprintf(stderr, PROGRAM ": no previous regular expression\n");
         exit(1);
     }
-    lastRegex = re;
-    if (load_input() != 0)
+    x->lastRegex = re;
+    if (load_input(x) != 0)
         return 0;
     if (sub->needGroups) {
         spans = malloc((regex_group_count(re) + 1) * 2 * sizeof *spans);
@@ -473,20 +475,20 @@ static int substitute(const Substitution* sub) {
     }
     memset(&result, 0, sizeof result);
 
-    while (position <= regexInput.length && regex_search(re, &regexInput, position, &start, &end)) {
+    while (position <= x->regexInput.length && regex_search(re, &x->regexInput, position, &start, &end)) {
         if (start == end && start == previousEnd) {
             // an empty match right after the previous one does not count
-            if (start >= regexInput.length)
+            if (start >= x->regexInput.length)
                 break;
             position = start + 1;
             continue;
         }
         count++;
         if (count >= sub->number) {
-            buf_add(&result, ps.data + regexInput.offset[copied], regexInput.offset[start] - regexInput.offset[copied]);
+            buf_add(&result, x->ps.data + x->regexInput.offset[copied], x->regexInput.offset[start] - x->regexInput.offset[copied]);
             if (spans != NULL)
-                regex_groups(re, &regexInput, start, end, spans);
-            append_replacement(&result, sub, start, end, spans);
+                regex_groups(re, &x->regexInput, start, end, spans);
+            append_replacement(x, &result, sub, start, end, spans);
             copied = end;
             didReplace = 1;
             if (!sub->global)
@@ -494,7 +496,7 @@ static int substitute(const Substitution* sub) {
         }
         previousEnd = end;
         if (start == end) {
-            if (end >= regexInput.length)
+            if (end >= x->regexInput.length)
                 break;
             position = end + 1;
         } else {
@@ -503,9 +505,9 @@ static int substitute(const Substitution* sub) {
     }
 
     if (didReplace) {
-        buf_add(&result, ps.data + regexInput.offset[copied], ps.length - regexInput.offset[copied]);
-        free(ps.data);
-        ps = result;
+        buf_add(&result, x->ps.data + x->regexInput.offset[copied], x->ps.length - x->regexInput.offset[copied]);
+        free(x->ps.data);
+        x->ps = result;
     } else {
         free(result.data);
     }
@@ -513,14 +515,14 @@ static int substitute(const Substitution* sub) {
     return didReplace;
 }
 
-static void translate(const Command* c) {
+static void translate(Executor* x, const Command* c) {
     Buf result;
     size_t i = 0, k;
 
     memset(&result, 0, sizeof result);
-    while (i < ps.length) {
+    while (i < x->ps.length) {
         size_t n;
-        uint32_t ch = utf8_decode(ps.data + i, ps.length - i, &n);
+        uint32_t ch = utf8_decode(x->ps.data + i, x->ps.length - i, &n);
         int mapped = 0;
 
         for (k = 0; k < c->yCount; k++) {
@@ -532,23 +534,23 @@ static void translate(const Command* c) {
             }
         }
         if (!mapped)
-            buf_add(&result, ps.data + i, n);
+            buf_add(&result, x->ps.data + i, n);
         i += n;
     }
-    free(ps.data);
-    ps = result;
+    free(x->ps.data);
+    x->ps = result;
 }
 
 /** l: the pattern space with the characters that do not show written as escapes, wrapped. */
-static void list_pattern(long width) {
+static void list_pattern(Executor* x, long width) {
     size_t i;
     long column = 0;
     char piece[8];
 
     if (width <= 1)
         width = 0;
-    for (i = 0; i < ps.length; i++) {
-        unsigned char c = ps.data[i];
+    for (i = 0; i < x->ps.length; i++) {
+        unsigned char c = x->ps.data[i];
         size_t length;
 
         switch (c) {
@@ -569,16 +571,16 @@ static void list_pattern(long width) {
         }
         length = strlen(piece);
         if (width > 0 && column + (long)length > width - 1) {
-            write_raw(out, "\\\n", 2);
+            write_raw(x, x->out, "\\\n", 2);
             column = 0;
         }
-        write_raw(out, piece, length);
+        write_raw(x, x->out, piece, length);
         column += (long)length;
     }
-    write_raw(out, "$\n", 2);
+    write_raw(x, x->out, "$\n", 2);
 }
 
-static struct Reader* reader_for(Command* c) {
+static struct Reader* reader_for(Executor* x, Command* c) {
     struct Reader* r = c->reader;
 
     if (r == NULL) {
@@ -590,7 +592,7 @@ static struct Reader* reader_for(Command* c) {
         if (vpath_to_native((const char*)c->text, native, sizeof native) == 0) {
             r->file = fopen(native, "rb");
             if (r->file != NULL) {
-                text_reader_init(&r->lines, r->file, terminator);
+                text_reader_init(&r->lines, r->file, x->terminator);
                 r->open = 1;
             }
         }
@@ -598,79 +600,79 @@ static struct Reader* reader_for(Command* c) {
     return r;
 }
 
-static size_t find_terminator(void) {
+static size_t find_terminator(Executor* x) {
     size_t i;
-    for (i = 0; i < ps.length; i++)
-        if (ps.data[i] == terminator)
+    for (i = 0; i < x->ps.length; i++)
+        if (x->ps.data[i] == x->terminator)
             return i;
     return (size_t)-1;
 }
 
 /** g G h H x: the hold space. The ending goes with the text: a last line without one gets the one of what it is mixed with. */
-static void hold_command(int name) {
+static void hold_command(Executor* x, int name) {
     switch (name) {
         case 'g':
-            ps.length = 0;
-            buf_add(&ps, hs.data, hs.length);
-            psEnding = hsEnding;
+            x->ps.length = 0;
+            buf_add(&x->ps, x->hs.data, x->hs.length);
+            x->psEnding = x->hsEnding;
             break;
         case 'G':
-            buf_add_byte(&ps, terminator);
-            buf_add(&ps, hs.data, hs.length);
-            if (hsEnding == 0)
-                psEnding = 0;
-            else if (psEnding == 0)
-                psEnding = hsEnding;
+            buf_add_byte(&x->ps, x->terminator);
+            buf_add(&x->ps, x->hs.data, x->hs.length);
+            if (x->hsEnding == 0)
+                x->psEnding = 0;
+            else if (x->psEnding == 0)
+                x->psEnding = x->hsEnding;
             break;
         case 'h':
-            hs.length = 0;
-            buf_add(&hs, ps.data, ps.length);
-            hsEnding = psEnding;
+            x->hs.length = 0;
+            buf_add(&x->hs, x->ps.data, x->ps.length);
+            x->hsEnding = x->psEnding;
             break;
         case 'H':
-            buf_add_byte(&hs, terminator);
-            buf_add(&hs, ps.data, ps.length);
-            if (psEnding == 0)
-                hsEnding = 0;
-            else if (hsEnding == 0)
-                hsEnding = psEnding;
+            buf_add_byte(&x->hs, x->terminator);
+            buf_add(&x->hs, x->ps.data, x->ps.length);
+            if (x->psEnding == 0)
+                x->hsEnding = 0;
+            else if (x->hsEnding == 0)
+                x->hsEnding = x->psEnding;
             break;
         default: {      // x
-            Buf t = ps;
-            int e = psEnding;
-            ps = hs;
-            hs = t;
-            psEnding = hsEnding;
-            hsEnding = e;
+            Buf t = x->ps;
+            int e = x->psEnding;
+            x->ps = x->hs;
+            x->hs = t;
+            x->psEnding = x->hsEnding;
+            x->hsEnding = e;
             break;
         }
     }
 }
 
 /** P and W: the pattern space up to its first line feed. */
-static void print_first_line(Output* o) {
-    size_t at = find_terminator();
+static void print_first_line(Executor* x, Output* o) {
+    size_t at = find_terminator(x);
     if (at == (size_t)-1)
-        write_line(o, ps.data, ps.length, psEnding);
+        write_line(x, o, x->ps.data, x->ps.length, x->psEnding);
     else
-        write_line(o, ps.data, at, psEnding == 2 ? 2 : 1);
+        write_line(x, o, x->ps.data, at, x->psEnding == 2 ? 2 : 1);
 }
 
 /** D: deletes up to the first line feed and starts over with what is left, or acts as d. */
-static CycleResult delete_first_line(void) {
-    size_t at = find_terminator();
+static CycleResult delete_first_line(Executor* x) {
+    size_t at = find_terminator(x);
     if (at == (size_t)-1) {
-        ps.length = 0;
+        x->ps.length = 0;
         return CYCLE_DELETE;
     }
-    memmove(ps.data, ps.data + at + 1, ps.length - at - 1);
-    ps.length -= at + 1;
+    memmove(x->ps.data, x->ps.data + at + 1, x->ps.length - at - 1);
+    x->ps.length -= at + 1;
     return CYCLE_RESTART;
 }
 
 /** R: queues the next line of the file. */
-static void queue_next_line(Command* c) {
-    struct Reader* r = reader_for(c);
+static void queue_next_line(Executor* x, Command* c) {
+    struct Reader* r = reader_for(x, c);
     TextLine line;
     Buf text;
 
@@ -679,28 +681,28 @@ static void queue_next_line(Command* c) {
     memset(&text, 0, sizeof text);
     buf_add(&text, line.content, line.length);
     buf_add_byte(&text, '\n');
-    queue_append('t', text.data, text.length);
+    queue_append(x, 't', text.data, text.length);
     free(text.data);
 }
 
 /** s: substitutes and does what the flags ask for. */
-static void substitute_command(const Command* c) {
-    if (!substitute(c->sub))
+static void substitute_command(Executor* x, const Command* c) {
+    if (!substitute(x, c->sub))
         return;
-    replaced = 1;
+    x->replaced = 1;
     if (c->sub->print)
-        print_pattern(out);
+        print_pattern(x, x->out);
     if (c->sub->out != NULL)
-        print_pattern(c->sub->out);
+        print_pattern(x, c->sub->out);
 }
 
-static CycleResult execute_program(void) {
+static CycleResult execute_program(Executor* x) {
     size_t pc = 0;
 
-    while (pc < script->count) {
-        Command* c = &script->commands[pc];
+    while (pc < x->script->count) {
+        Command* c = &x->script->commands[pc];
 
-        if (!command_matches(c)) {
+        if (!command_matches(x, c)) {
             pc = c->name == '{' ? c->target + 1 : pc + 1;
             continue;
         }
@@ -710,99 +712,99 @@ static CycleResult execute_program(void) {
                 break;
             case '=': {
                 char number[32];
-                int n = sprintf(number, "%ld\n", lineNumber);
-                write_raw(out, number, (size_t)n);
+                int n = sprintf(number, "%ld\n", x->lineNumber);
+                write_raw(x, x->out, number, (size_t)n);
                 break;
             }
             case 'a':
-                queue_append('t', c->text, c->length);
+                queue_append(x, 't', c->text, c->length);
                 break;
             case 'i':
-                write_raw(out, c->text, c->length);
+                write_raw(x, x->out, c->text, c->length);
                 break;
             case 'c':
                 if (c->second.kind == ADDR_NONE || c->negate || !c->rangeActive)
-                    write_raw(out, c->text, c->length);
-                ps.length = 0;
+                    write_raw(x, x->out, c->text, c->length);
+                x->ps.length = 0;
                 return CYCLE_DELETE;
             case 'd':
-                ps.length = 0;
+                x->ps.length = 0;
                 return CYCLE_DELETE;
             case 'D':
-                return delete_first_line();
+                return delete_first_line(x);
             case 'F': {
-                const char* name = allNames[streamBase + psFile];
-                write_raw(out, name, strlen(name));
-                write_raw(out, "\n", 1);
+                const char* name = x->allNames[x->streamBase + x->psFile];
+                write_raw(x, x->out, name, strlen(name));
+                write_raw(x, x->out, "\n", 1);
                 break;
             }
             case 'g': case 'G': case 'h': case 'H': case 'x':
-                hold_command(c->name);
+                hold_command(x, c->name);
                 break;
             case 'l':
-                list_pattern(c->number >= 0 ? c->number : config->lineWrap);
+                list_pattern(x, c->number >= 0 ? c->number : x->config->lineWrap);
                 break;
             case 'n':
-                if (!has_next())
+                if (!has_next(x))
                     return CYCLE_END;
-                if (!config->quiet)
-                    print_pattern(out);
-                read_pattern_space(0);
+                if (!x->config->quiet)
+                    print_pattern(x, x->out);
+                read_pattern_space(x, 0);
                 break;
             case 'N':
-                if (!has_next())
+                if (!has_next(x))
                     return CYCLE_END;
-                read_pattern_space(1);
+                read_pattern_space(x, 1);
                 break;
             case 'p':
-                print_pattern(out);
+                print_pattern(x, x->out);
                 break;
             case 'P':
-                print_first_line(out);
+                print_first_line(x, x->out);
                 break;
             case 'q':
-                quitStatus = c->number >= 0 ? (int)c->number : 0;
+                x->quitStatus = c->number >= 0 ? (int)c->number : 0;
                 return CYCLE_QUIT;
             case 'Q':
-                quitStatus = c->number >= 0 ? (int)c->number : 0;
+                x->quitStatus = c->number >= 0 ? (int)c->number : 0;
                 return CYCLE_QUIT_SILENT;
             case 'r':
-                queue_append('r', c->text, c->length);
+                queue_append(x, 'r', c->text, c->length);
                 break;
             case 'R':
-                queue_next_line(c);
+                queue_next_line(x, c);
                 break;
             case 's':
-                substitute_command(c);
+                substitute_command(x, c);
                 break;
             case 't':
-                if (replaced) {
-                    replaced = 0;
+                if (x->replaced) {
+                    x->replaced = 0;
                     pc = c->target;
                     continue;
                 }
                 break;
             case 'T':
-                if (!replaced) {
+                if (!x->replaced) {
                     pc = c->target;
                     continue;
                 }
-                replaced = 0;
+                x->replaced = 0;
                 break;
             case 'b':
                 pc = c->target;
                 continue;
             case 'w':
-                print_pattern(c->out);
+                print_pattern(x, c->out);
                 break;
             case 'W':
-                print_first_line(c->out);
+                print_first_line(x, c->out);
                 break;
             case 'y':
-                translate(c);
+                translate(x, c);
                 break;
             case 'z':
-                ps.length = 0;
+                x->ps.length = 0;
                 break;
             default:
                 break;
@@ -814,49 +816,49 @@ static CycleResult execute_program(void) {
 
 /* ---- the streams --------------------------------------------------------------------------- */
 
-static void run_stream(const char* const* files, size_t count, size_t firstIndex) {
+static void run_stream(Executor* x, const char* const* files, size_t count, size_t firstIndex) {
     int needRead = 1;
 
-    inputFiles = files;
-    inputCount = count;
-    nextInput = 0;
-    readerOpen = 0;
-    look.valid = 0;
-    streamBase = firstIndex;
+    x->inputFiles = files;
+    x->inputCount = count;
+    x->nextInput = 0;
+    x->readerOpen = 0;
+    x->look.valid = 0;
+    x->streamBase = firstIndex;
 
     for (;;) {
         CycleResult result;
 
-        if (needRead && !read_pattern_space(0))
+        if (needRead && !read_pattern_space(x, 0))
             break;
         needRead = 1;
 
-        result = execute_program();
-        if (result == CYCLE_QUIT && psEnding == 0)
-            psEnding = 1;               // like GNU sed, q ends the last line even when it had no ending
+        result = execute_program(x);
+        if (result == CYCLE_QUIT && x->psEnding == 0)
+            x->psEnding = 1;               // like GNU sed, q ends the last line even when it had no ending
         if (result == CYCLE_END || result == CYCLE_QUIT) {
-            if (!config->quiet)
-                print_pattern(out);
+            if (!x->config->quiet)
+                print_pattern(x, x->out);
         }
         if (result == CYCLE_QUIT_SILENT) {
-            quitting = 1;
+            x->quitting = 1;
             break;
         }
-        dump_append();
+        dump_append(x);
         if (result == CYCLE_RESTART)
             needRead = 0;
         if (result == CYCLE_QUIT) {
-            quitting = 1;
+            x->quitting = 1;
             break;
         }
     }
-    dump_append();
+    dump_append(x);
 
-    if (readerOpen) {
-        text_reader_free(&reader);
-        if (currentFile != stdin)
-            fclose(currentFile);
-        readerOpen = 0;
+    if (x->readerOpen) {
+        text_reader_free(&x->reader);
+        if (x->currentFile != stdin)
+            fclose(x->currentFile);
+        x->readerOpen = 0;
     }
 }
 
@@ -869,23 +871,23 @@ typedef struct {
 } InPlace;
 
 /** Where the output of an -i goes: a temporary file next to the file. Returns 0, or -1 after a message. */
-static int in_place_begin(const char* name, InPlace* ip) {
+static int in_place_begin(Executor* x, const char* name, InPlace* ip) {
     DWORD attributes;
     char directory[VPATH_MAX], *slash;
 
     if (strcmp(name, "-") == 0 || vpath_to_native(name, ip->native, sizeof ip->native) != 0) {
         fprintf(stderr, PROGRAM ": couldn't edit %s: not a regular file\n", name);
-        exitStatus = 4;
+        x->exitStatus = 4;
         return -1;
     }
     if (fs_attributes(ip->native, &attributes) != 0) {
         fprintf(stderr, PROGRAM ": can't read %s: No such file or directory\n", name);
-        exitStatus = 2;
+        x->exitStatus = 2;
         return -1;
     }
     if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
         fprintf(stderr, PROGRAM ": couldn't edit %s: not a regular file\n", name);
-        exitStatus = 4;
+        x->exitStatus = 4;
         return -1;
     }
 
@@ -899,7 +901,7 @@ static int in_place_begin(const char* name, InPlace* ip) {
         strcpy(directory, ".");
     if (GetTempFileNameA(directory, "sed", 0, ip->temporary) == 0) {
         fprintf(stderr, PROGRAM ": couldn't open temporary file in %s\n", name);
-        exitStatus = 4;
+        x->exitStatus = 4;
         return -1;
     }
     memset(&ip->output, 0, sizeof ip->output);
@@ -908,7 +910,7 @@ static int in_place_begin(const char* name, InPlace* ip) {
     if (ip->output.file == NULL) {
         fprintf(stderr, PROGRAM ": couldn't open temporary file %s\n", ip->temporary);
         DeleteFileA(ip->temporary);
-        exitStatus = 4;
+        x->exitStatus = 4;
         return -1;
     }
     return 0;
@@ -948,64 +950,70 @@ static void backup_name(const char* name, const char* suffix, char* out_, size_t
         snprintf(out_, size, "%.*s%s", (int)directoryLength, name, result);
 }
 
-static void in_place_end(const char* name, InPlace* ip) {
+static void in_place_end(Executor* x, const char* name, InPlace* ip) {
     fclose(ip->output.file);
-    if (config->suffix != NULL && config->suffix[0] != '\0') {
+    if (x->config->suffix != NULL && x->config->suffix[0] != '\0') {
         char backup[VPATH_MAX], native[VPATH_MAX];
-        backup_name(name, config->suffix, backup, sizeof backup);
+        backup_name(name, x->config->suffix, backup, sizeof backup);
         if (vpath_to_native(backup, native, sizeof native) == 0)
             MoveFileExA(ip->native, native, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED);
     }
     if (!MoveFileExA(ip->temporary, ip->native, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
         fprintf(stderr, PROGRAM ": cannot rename %s: %s\n", ip->temporary, fs_strerror(GetLastError()));
         DeleteFileA(ip->temporary);
-        exitStatus = 4;
+        x->exitStatus = 4;
     }
 }
 
 int sed_run(Script* s, const SedConfig* c, const char* const* files, size_t fileCount) {
+    Executor executor;
+    Executor* x = &executor;
     size_t i;
 
-    script = s;
-    config = c;
-    terminator = c->terminator;
-    outStdout.file = stdout;
-    out = &outStdout;
-    allNames = files;
-    reset_ranges();
+    memset(x, 0, sizeof *x);
+    x->hsEnding = 1;
+    x->quitStatus = -1;
+    x->script = s;
+    x->config = c;
+    x->terminator = c->terminator;
+    x->stdoutOutput.name = "/dev/stdout";
+    x->stdoutOutput.file = stdout;
+    x->out = &x->stdoutOutput;
+    x->allNames = files;
+    reset_ranges(x);
 
     if (!c->separate) {
-        run_stream(files, fileCount, 0);
+        run_stream(x, files, fileCount, 0);
     } else {
-        for (i = 0; i < fileCount && !quitting; i++) {
+        for (i = 0; i < fileCount && !x->quitting; i++) {
             InPlace ip;
             int editing = 0;
 
             if (c->inPlace) {
-                if (in_place_begin(files[i], &ip) != 0)
+                if (in_place_begin(x, files[i], &ip) != 0)
                     continue;
-                out = &ip.output;
+                x->out = &ip.output;
                 editing = 1;
             }
-            lineNumber = 0;
-            reset_ranges();
-            run_stream(files + i, 1, i);
+            x->lineNumber = 0;
+            reset_ranges(x);
+            run_stream(x, files + i, 1, i);
             if (editing) {
-                in_place_end(files[i], &ip);
-                out = &outStdout;
+                in_place_end(x, files[i], &ip);
+                x->out = &x->stdoutOutput;
             }
         }
     }
 
     {
         Output* o;
-        for (o = outputs; o != NULL; o = o->next)
+        for (o = x->script->outputs; o != NULL; o = o->next)
             if (o->file != stdout && o->file != stderr)
                 fclose(o->file);
     }
-    if (fflush(stdout) != 0 && exitStatus == 0) {
+    if (fflush(stdout) != 0 && x->exitStatus == 0) {
         fprintf(stderr, PROGRAM ": couldn't flush stdout\n");
-        exitStatus = 4;
+        x->exitStatus = 4;
     }
-    return quitStatus >= 0 ? quitStatus : exitStatus;
+    return x->quitStatus >= 0 ? x->quitStatus : x->exitStatus;
 }

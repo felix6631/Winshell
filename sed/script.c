@@ -528,7 +528,7 @@ static int parse_substitute_flags(Parser* p, Substitution* sub, int* icase) {
                 return -1;
             if (file.length == 0)
                 return fail(p, "missing filename in r/R/w/W commands");
-            sub->out = sed_output_open((const char*)file.text);
+            sub->out = sed_output_open(p->script, (const char*)file.text);
             if (sub->out == NULL)
                 return fail(p, "couldn't open file %s", (const char*)file.text);
             break;
@@ -679,7 +679,7 @@ static int parse_file_command(Parser* p, Command* cmd) {
     if (cmd->length == 0)
         return fail(p, "missing filename in r/R/w/W commands");
     if (cmd->name == 'w' || cmd->name == 'W') {
-        cmd->out = sed_output_open((const char*)cmd->text);
+        cmd->out = sed_output_open(p->script, (const char*)cmd->text);
         if (cmd->out == NULL)
             return fail(p, "couldn't open file %s", (const char*)cmd->text);
     }
