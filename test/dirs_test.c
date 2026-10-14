@@ -385,6 +385,42 @@ static void test_touch(void) {
     CHECK(strstr(r.err, "touch: cannot touch 'nodir\\x.txt': No such file or directory") != NULL);
     run_result_free(&r);
 
+    // the dates of date -d: other forms of a date, a zone, relative parts, seconds since 1970
+    run_tool(d, "touch", "-d \"15 Jun 2001 12:30:45 UTC\" f1.txt", NULL, &r);
+    CHECK_INT(r.exitCode, 0);
+    run_result_free(&r);
+    expect_time(d, "f1.txt", 2, 2001, 6, 15, 12, 30, 45);
+
+    run_tool(d, "touch", "-d \"2001-06-15 12:30:45 UTC +2 days\" f2.txt", NULL, &r);
+    run_result_free(&r);
+    expect_time(d, "f2.txt", 2, 2001, 6, 17, 12, 30, 45);
+
+    run_tool(d, "touch", "-d 2001-06-15T12:30:45+02:00 f3.txt", NULL, &r);
+    run_result_free(&r);
+    expect_time(d, "f3.txt", 2, 2001, 6, 15, 10, 30, 45);
+
+    run_tool(d, "touch", "-d @1000000000 f4.txt", NULL, &r);
+    run_result_free(&r);
+    expect_time(d, "f4.txt", 2, 2001, 9, 9, 1, 46, 40);
+
+    run_tool(d, "touch", "-d \"2 hours ago\" f5.txt", NULL, &r);
+    CHECK_INT(r.exitCode, 0);
+    run_result_free(&r);
+    {
+        SYSTEMTIME t, now;
+        FILETIME a, b;
+        ULARGE_INTEGER x, y;
+        GetSystemTime(&now);
+        SystemTimeToFileTime(&now, &a);
+        CHECK(time_of(d, "f5.txt", 2, &t));
+        SystemTimeToFileTime(&t, &b);
+        x.LowPart = a.dwLowDateTime; x.HighPart = a.dwHighDateTime;
+        y.LowPart = b.dwLowDateTime; y.HighPart = b.dwHighDateTime;
+        // about two hours (7200 s) before now, within a minute
+        CHECK(x.QuadPart > y.QuadPart && (x.QuadPart - y.QuadPart) / 10000000ULL > 7140 &&
+              (x.QuadPart - y.QuadPart) / 10000000ULL < 7260);
+    }
+
     run_tool(d, "touch", "-d garbage x.txt", NULL, &r);
     CHECK_INT(r.exitCode, 1);
     CHECK(strstr(r.err, "touch: invalid date format 'garbage'") != NULL);

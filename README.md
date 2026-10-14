@@ -43,7 +43,7 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `tee` | 완료 (`-a`, 파일마다 오류를 보고하고 계속, 입력이 오는 대로 전달) |
 | `nl` | 완료 (`-b -h -f`의 `a t n`, `-n -w -s -v -i -l -p -d`; `p` 정규식 스타일은 미지원) |
 | `paste` | 완료 (`-d -s -z`, `- -` 로 표준 입력을 번갈아 읽음) |
-| `touch` | 완료 (`-a -c -d -m -r -t`) |
+| `touch` | 완료 (`-a -c -d -m -r -t`; `-d` 는 `date -d` 와 같은 날짜 해석기(`common/datetime.c`)를 씀: `@초`, ISO 날짜와 시각, 월 이름, `yesterday`, `3 days ago`, 시간대) |
 | `tr` | 완료 (`-c -C -d -s -t`, `[:alpha:]` 등의 문자 클래스, 범위, 이스케이프) |
 | `uniq` | 완료 (`-c -d -D -u -i -f -s -w`) |
 | `wc` | 완료 (`-l -w -m -c -L`) |

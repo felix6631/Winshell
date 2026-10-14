@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#include "datetime.h"
 #include "vpath.h"
 #include "fsutil.h"
 #include "args.h"
@@ -16,9 +17,9 @@ static void print_usage(void) {
          "\n"
          "  -a                    change only the access time\n"
          "  -c, --no-create       do not create any files\n"
-         "  -d, --date=STRING     use STRING instead of the current time:\n"
-         "                          YYYY-MM-DD[ hh:mm[:ss]]  (a T may stand for the space,\n"
-         "                          a trailing Z means UTC) or @SECONDS since 1970\n"
+         "  -d, --date=STRING     use STRING instead of the current time; it is read as\n"
+         "                          date -d reads it: 2026-10-14 13:45, @SECONDS, yesterday,\n"
+         "                          \"3 days ago\", \"14 Oct 2026\", 2026-10-14T13:45:10Z, ...\n"
          "  -m                    change only the modification time\n"
          "  -r, --reference=FILE  use the times of FILE instead of the current time\n"
          "  -t STAMP              use [[CC]YY]MMDDhhmm[.ss] instead of the current time\n"
@@ -55,54 +56,18 @@ static int fields_to_filetime(int year, int month, int day, int hour, int minute
     return LocalFileTimeToFileTime(&local, out) ? 0 : -1;
 }
 
+/** -d: the same dates that date -d reads, as local time unless the text names a zone. */
 static int parse_date(const char* text, FILETIME* out) {
-    char buffer[64];
-    size_t length;
-    int y, mo, d, h = 0, mi = 0, s = 0, utc = 0, count;
+    Instant now = datetime_now(), at;
 
     while (*text == ' ')
         text++;
-
-    if (text[0] == '@') {
-        char* end;
-        unsigned long long seconds = _strtoui64(text + 1, &end, 10);
-        unsigned long long ticks;
-        if (end == text + 1 || *end != '\0')
-            return -1;
-        ticks = (seconds + 11644473600ULL) * 10000000ULL;     // 1601 to 1970
-        out->dwLowDateTime = (DWORD)(ticks & 0xFFFFFFFFULL);
-        out->dwHighDateTime = (DWORD)(ticks >> 32);
-        return 0;
-    }
-
-    length = strlen(text);
-    if (length == 0 || length >= sizeof buffer)
+    if (*text == '\0')
         return -1;
-    memcpy(buffer, text, length + 1);
-    while (length > 0 && buffer[length - 1] == ' ')
-        buffer[--length] = '\0';
-    if (length > 0 && (buffer[length - 1] == 'Z' || buffer[length - 1] == 'z')) {
-        utc = 1;
-        buffer[--length] = '\0';
-    }
-
-    {
-        // the separator between date and time is a space or a T; one character, then the time
-        char* sep = strpbrk(buffer, " T");
-        if (sep != NULL)
-            *sep = ' ';
-    }
-
-    count = sscanf(buffer, "%d-%d-%d %d:%d:%d", &y, &mo, &d, &h, &mi, &s);
-    if (count == 3 || count == 5 || count == 6) {
-        // no trailing garbage: the characters used must be all of them
-        char check[64];
-        if (count == 3)
-            snprintf(check, sizeof check, "%d-%d-%d", y, mo, d);
-        (void)check;
-        return fields_to_filetime(y, mo, d, h, mi, s, utc, out);
-    }
-    return -1;
+    if (datetime_parse(text, &now, 0, &at) != 0)
+        return -1;
+    *out = datetime_to_filetime(at);
+    return 0;
 }
 
 static int parse_stamp(const char* text, FILETIME* out) {

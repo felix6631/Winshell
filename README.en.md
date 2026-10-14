@@ -43,7 +43,7 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `tee` | Done (`-a`; reports a file that fails and goes on; passes data on as it arrives) |
 | `nl` | Done (`a t n` for `-b -h -f`, `-n -w -s -v -i -l -p -d`; the `p` regular-expression style is not supported) |
 | `paste` | Done (`-d -s -z`; `- -` takes the lines of standard input in turn) |
-| `touch` | Done (`-a -c -d -m -r -t`) |
+| `touch` | Done (`-a -c -d -m -r -t`; `-d` uses the same reader of dates as `date -d` (`common/datetime.c`): `@SECONDS`, ISO dates and times, month names, `yesterday`, `3 days ago`, zones) |
 | `tr` | Done (`-c -C -d -s -t`, classes `[:alpha:]` etc.) |
 | `uniq` | Done (`-c -d -D -u -i -f -s -w`) |
 | `wc` | Done (`-l -w -m -c -L`) |
