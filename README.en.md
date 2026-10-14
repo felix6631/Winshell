@@ -34,6 +34,8 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `mv` | Done (`-f -i -n -t -v`, to another drive it copies and then removes) |
 | `env` | Done (`-i`, `-u`, `-0`, `-C`, `NAME=VALUE`, running a command; found in the directory of `env.exe` or by a virtual path) |
 | `printenv` | Done (`-0`, names, status 1 for a missing one) |
+| `kill` | Done (`-s -n -SIGNAL -l -L`; Windows has no signals: 0 only checks, STOP/TSTP/CONT suspend and resume, KILL ends at once (status 137), CHLD/URG/WINCH do nothing, any other closes the windows with WM_CLOSE or ends a process without windows (status 128+number); no process groups) |
+| `ps` | Done (selection `-e -A -a -x -p --ppid -u -C -N`, BSD style `aux`; formats `-f u -o NAME=HEADING`, `--sort`, `--no-headers`; by default the processes of this console; columns pid ppid user comm args time etime start tty nlwp rss vsz pcpu pmem c ni; unknown values show `-`/`?`; status 1 when nothing was selected) |
 | `pwd` | Done (`-L`, `-P`, prints the virtual path) |
 | `rm` | Done (`-f -i -r -R -d -v`, `/` and the roots of drives and shares are never removed, not even with `--no-preserve-root`) |
 | `rmdir` | Done (`-p -v --ignore-fail-on-non-empty`) |
@@ -126,7 +128,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `date`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `which`, `xargs`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `date`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `which`, `xargs`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -157,6 +159,7 @@ The test programs are divided by feature (`test\`).
 | `regex_test` | unit tests of `common/regex.c`: basic and extended syntax, longest match, sets and classes, word boundaries, back references, UTF-8, error messages |
 | `clock_test` | `sleep`, `date`: waiting, formats, how `-d` reads, ISO weeks, exit status |
 | `which_test` | `which`: the `bin` of the project, `PATH`, `PATHEXT`, directories, names with a path, `-a`, exit status |
+| `proc_test` | `kill`, `ps`: selection, formats, sorting, signals (exit status 128+number, suspend/resume) and errors against real processes (sleep) |
 | `realpath_test` | `realpath`: virtual paths, what has to exist, relative paths, junctions |
 | `names_test` | `basename`, `dirname`: separators (also `\`), suffixes, NUL endings, the root |
 | `xargs_test` | `xargs`: batches, how items are read, files, exit status, parallel runs |
@@ -206,12 +209,14 @@ Winshell/
 ├─ sed/            sed command (script.c parses the script, exec.c runs it)
 ├─ sleep/          sleep command
 ├─ head/           head command
+├─ kill/           kill command
 ├─ ls/             ls command
 ├─ mkdir/          mkdir command
 ├─ mv/             mv command
 ├─ printenv/       printenv command
 ├─ nl/             nl command
 ├─ paste/          paste command
+├─ ps/             ps command
 ├─ pwd/            pwd command
 ├─ rm/             rm command
 ├─ rmdir/          rmdir command
@@ -262,7 +267,7 @@ Winshell/
 
 `[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, date, dd, df, dir,
 dircolors, dirname, du, expand, expr, factor, false, fmt, fold, groups, hostid, hostname, id, install,
-join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup, nproc, numfmt, od,
+join, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup, nproc, numfmt, od,
 pathchk, pinky, pr, printf, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
 sha384sum, sha512sum, shred, shuf, sleep, split, stat, stdbuf, sum, sync, test, true,
 truncate, tsort, tty, uname, unexpand, unlink, uptime, users, vdir, who, whoami, yes

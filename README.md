@@ -30,10 +30,12 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `grep` | 완료 (`-E -F -G -e -f -i -v -w -x -c -l -L -m -n -H -h -o -q -s -b -r -A -B -C -NUM -a -I -z -Z --include --exclude --exclude-dir`; 기본/확장 정규식(역참조 포함), 가장 왼쪽의 가장 긴 일치, UTF-8 문자 단위; `-P` 와 색은 미지원) |
 | `head` | 완료 (`-n -c -q -v -NUM`, `-n -K` 는 끝의 K줄만 빼고) |
 | `ls` | 완료 (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` 는 드라이브 목록) |
+| `kill` | 완료 (`-s -n -SIGNAL -l -L`; Windows 에는 시그널이 없어 0 은 확인만, STOP/TSTP/CONT 는 중지/재개, KILL 은 즉시 종료(상태 137), CHLD/URG/WINCH 는 무시, 나머지는 창에 WM_CLOSE 를 보내고 창이 없으면 종료(상태 128+번호); 프로세스 그룹은 지원하지 않음) |
 | `mkdir` | 완료 (`-p -v -m`; `-m` 은 받기만 함) |
 | `mv` | 완료 (`-f -i -n -t -v`, 다른 드라이브로는 복사 후 삭제) |
 | `env` | 완료 (`-i`, `-u`, `-0`, `-C`, `NAME=VALUE`, 명령 실행; 명령은 `env.exe` 의 디렉터리나 가상 경로에서 찾음) |
 | `printenv` | 완료 (`-0`, 이름 지정, 종료 상태 1) |
+| `ps` | 완료 (선택 `-e -A -a -x -p --ppid -u -C -N`, BSD 형식 `aux`; 형식 `-f u -o NAME=HEADING`, `--sort`, `--no-headers`; 기본은 같은 콘솔의 프로세스, 열은 pid ppid user comm args time etime start tty nlwp rss vsz pcpu pmem c ni; 알 수 없는 값은 `-`/`?`; 선택된 것이 없으면 상태 1) |
 | `pwd` | 완료 (`-L`, `-P`, 가상 경로로 출력) |
 | `rm` | 완료 (`-f -i -r -R -d -v`, `/`, 드라이브, 공유의 루트는 `--no-preserve-root` 로도 삭제 불가) |
 | `rmdir` | 완료 (`-p -v --ignore-fail-on-non-empty`) |
@@ -126,7 +128,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `date`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `which`, `xargs`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `date`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `which`, `xargs`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -157,6 +159,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `regex_test` | `common/regex.c` 단위 테스트: 기본/확장 문법, 가장 긴 일치, 집합과 클래스, 단어 경계, 역참조, UTF-8, 오류 메시지 |
 | `clock_test` | `sleep`, `date`: 대기 시간, 형식, `-d` 해석, ISO 주, 종료 상태 |
 | `which_test` | `which`: 프로젝트 `bin`, `PATH`, `PATHEXT`, 디렉터리, 경로가 있는 이름, `-a`, 종료 상태 |
+| `proc_test` | `kill`, `ps`: 실제 프로세스(sleep)에 대한 선택, 형식, 정렬, 시그널(종료 상태 128+번호, 중지/재개), 오류 |
 | `realpath_test` | `realpath`: 가상 경로, 존재 규칙, 상대 경로, 정션 |
 | `names_test` | `basename`, `dirname`: 구분자(`\` 포함), 접미사, NUL 끝, 루트 |
 | `xargs_test` | `xargs`: 묶음, 항목 해석, 파일, 종료 상태, 병렬 실행 |
@@ -206,12 +209,14 @@ Winshell/
 ├─ sed/            sed 명령 (script.c 스크립트 해석, exec.c 실행)
 ├─ sleep/          sleep 명령
 ├─ head/           head 명령
+├─ kill/           kill 명령
 ├─ ls/             ls 명령
 ├─ mkdir/          mkdir 명령
 ├─ mv/             mv 명령
 ├─ printenv/       printenv 명령
 ├─ nl/             nl 명령
 ├─ paste/          paste 명령
+├─ ps/             ps 명령
 ├─ pwd/            pwd 명령
 ├─ rm/             rm 명령
 ├─ rmdir/          rmdir 명령
@@ -263,7 +268,7 @@ Winshell/
 
 `[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, date, dd, df, dir,
 dircolors, dirname, du, expand, expr, factor, false, fmt, fold, groups, hostid, hostname, id, install,
-join, kill, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup, nproc, numfmt, od,
+join, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup, nproc, numfmt, od,
 pathchk, pinky, pr, printf, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
 sha384sum, sha512sum, shred, shuf, sleep, split, stat, stdbuf, sum, sync, test, true,
 truncate, tsort, tty, uname, unexpand, unlink, uptime, users, vdir, who, whoami, yes
