@@ -281,6 +281,7 @@ int main(int argc, char* argv[]) {
     } else {
         status = interactive_loop();
     }
+    command_run_exit_trap(&status);
     fflush(stdout);
     return status;
 }

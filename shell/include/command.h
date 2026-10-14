@@ -48,6 +48,17 @@ int command_return(int status);
 int command_local(const char* name, const char* value);
 int command_unset_function(const char* name);
 
+/**
+ * trap [-lp] [ACTION] SIGNAL...: the builtin (argv[0] is "trap"). The signals are EXIT (0), INT (2, Ctrl+C) and
+ * ERR (a command failed); ACTION is run as commands, "" ignores it, - resets it. Returns the status.
+ * command_run_exit_trap runs the EXIT trap when the shell ends (an `exit N` inside it sets *status).
+ * A subshell or a substitution starts without the traps: enter returns what to give back to leave.
+ */
+int command_trap(char* const* argv);
+void command_run_exit_trap(int* status);
+void* command_traps_enter_subshell(void);
+void command_traps_leave_subshell(void* saved);
+
 /** Ctrl+C: the loops that are running stop (status 130) at the end of the round. Called from the console handler. */
 void command_interrupt(void);
 

@@ -12,7 +12,7 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 
 | 명령 | 상태 |
 | --- | --- |
-| `shell` | 입력 루프, 명령 실행(종료 대기), 파이프/리다이렉션, `; && \|\|`, 변수 확장(`$? $0 $1..$9 $# $@ $*`), 명령 치환(`$(...)`, 백틱), 주석(`#`), 제어문(`if`/`elif`/`else`, `while`, `until`, `for`, `case`, `break`, `continue`, `:`), 함수(`name() { ...; }`, `return`, `local`), 묶음(`{ ...; }`, `( ... )`), 산술 확장(`$((...))`), 매개변수 확장(`${NAME:-값}` 등), `read`, 반복문의 리다이렉션과 파이프, 글롭, 스크립트 실행(`shell FILE [ARG...]`, `shell -c`, `source`/`.`), `cd` `export` `unset` `exit` `source` |
+| `shell` | 입력 루프, 명령 실행(종료 대기), 파이프/리다이렉션, `; && \|\|`, 변수 확장(`$? $0 $1..$9 $# $@ $*`), 명령 치환(`$(...)`, 백틱), 주석(`#`), 제어문(`if`/`elif`/`else`, `while`, `until`, `for`, `case`, `break`, `continue`, `:`), 함수(`name() { ...; }`, `return`, `local`), 묶음(`{ ...; }`, `( ... )`), `trap`(`EXIT` `INT` `ERR`), 산술 확장(`$((...))`), 매개변수 확장(`${NAME:-값}` 등), `read`, 반복문의 리다이렉션과 파이프, 글롭, 스크립트 실행(`shell FILE [ARG...]`, `shell -c`, `source`/`.`), `cd` `export` `unset` `exit` `source` |
 | `arch` | 완료 |
 | `basename` | 완료 (`-a -s -z`; 구분자는 `/` 와 `\`, 접미사는 이름 전체가 아닐 때만 제거) |
 | `date` | 완료 (`-d -u -r -I -R --rfc-3339`, `+FORMAT` 의 `%a %A %b %B %c %C %d %D %e %F %g %G %H %I %j %k %l %m %M %N %p %P %q %r %R %s %S %T %u %U %V %w %W %x %X %y %Y %z %:z %Z` 와 플래그 `- _ 0 ^ #` 및 너비; `-d` 는 `@초`, ISO 날짜와 시각, 월 이름, `now yesterday tomorrow`, `+2 days`, `3 weeks ago`, `next month`, 요일을 읽음; 1970 이전과 3000년 이후도 계산; 시계 설정 `-s` 는 미지원) |
@@ -55,6 +55,7 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `tr` | 완료 (`-c -C -d -s -t`, `[:alpha:]` 등의 문자 클래스, 범위, 이스케이프) |
 | `uniq` | 완료 (`-c -d -D -u -i -f -s -w`) |
 | `wc` | 완료 (`-l -w -m -c -L`) |
+| `printf` | 완료 (GNU printf: `%d %i %o %u %x %X %e %f %g %a %c %s %b %%`, 플래그/너비/정밀도/`*`, 이스케이프 `\n \xHH \NNN \uHHHH \c`, 형식 반복, `'a` 문자 상수; 값은 `long double` 이 아닌 `double` 로 계산) |
 
 구현 예정 목록은 [아래](#구현-예정)를 참고하세요.
 
@@ -145,6 +146,11 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
     그대로 남고, 호출은 `&&`/`||` 목록, 리다이렉션(`f > file`), 명령 치환(`$(f x)`), 반복문 안에서 쓸 수 있습니다. 중첩 깊이는 200 까지입니다.
   - `{ LIST; }` 는 현재 쉘에서 목록을 묶어 하나의 명령으로 만들고(리다이렉션을 달 수 있고, 오른쪽에 파이프로 받을 수 있습니다), `( LIST )` 는 서브셸처럼
     현재 디렉터리와 변수가 끝나면 원래대로 돌아오고 안의 `exit` 는 서브셸만 끝냅니다. 예약어 `{` 와 `}` 는 명령의 첫 단어일 때만 그렇습니다.
+  - `trap [ACTION] SIGNAL...`: `EXIT`(또는 0), `INT`(2, Ctrl+C), `ERR` 를 다룹니다. ACTION 은 명령 문자열이고 `''` 이면 무시, `-` 이면 되돌립니다.
+    `trap` 이나 `trap -p` 는 지금 걸린 것을 `trap -- 'ACTION' NAME` 으로 보여 줍니다. `EXIT` 는 쉘이 끝날 때(스크립트 끝, `exit`) 한 번 실행되고
+    트랩 안의 `exit N` 이 쉘의 상태가 됩니다. `INT` 는 Ctrl+C 가 실행 중이던 명령을 멈춘 뒤 트랩을 실행하고 스크립트는 계속됩니다(트랩이 없으면
+    반복문이 멈춥니다). `ERR` 는 단순 명령이 실패한 뒤에 실행되며 조건(`if`, `while`), `&&`/`||` 의 왼쪽, 함수 안에서는 실행되지 않습니다.
+    서브셸과 `$(...)` 는 트랩 없이 시작합니다(무시한 것만 이어받습니다). `HUP`, `TERM` 같은 그 밖의 신호는 Windows 에 없어서 "signal not supported" 입니다.
   - 입력은 최상위 명령 하나(다음 줄바꿈까지)씩 읽어 통째로 해석한 뒤 실행합니다. 그래서 문법 오류가 있는 줄은 아무것도 실행하지 않고,
     스크립트 파일에서는 오류 앞의 명령들만 실행된 뒤 상태 2로 끝납니다. 터미널에서는 끝나지 않은 `if`/`while`/`for`, 닫히지 않은 따옴표,
     `&&`/`||`/`$(` 로 끝난 줄은 `> ` 프롬프트로 다음 줄을 이어서 받습니다. 반복문 안에서 Ctrl+C 는 그 바퀴가 끝나면 반복을 멈춥니다(상태 130).
@@ -173,7 +179,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `false`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `uniq`, `wc`, `which`, `xargs`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `false`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `uniq`, `wc`, `which`, `xargs`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -226,6 +232,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `limits_test` | **한계**: 50만 줄 정렬, 20MB 한 줄, 버퍼 경계(65536±1), 200만 빈 줄, 깊은 경로, 많은 파일 (`WS_STRESS=1` 이면 10배) |
 | `sharing_test` | **공유 위반**: 다른 프로세스가 연 파일/디렉터리에 대한 `rm`/`mv`/`cp`, 다른 볼륨으로의 `mv` |
 | `async_test` | **비동기**: 조각으로 들어오는 입력, 입력이 닫히길 기다리는 프로그램, `tail -f` |
+| `printf_test` | `printf`: 이스케이프, 변환과 플래그, 형식 반복, 문자 상수, 숫자 오류의 상태 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -285,6 +292,7 @@ Winshell/
 ├─ false/        false 명령
 ├─ test_cmd/     test_cmd 명령
 ├─ true/         true 명령
+├─ printf/       printf 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)
@@ -320,7 +328,7 @@ Winshell/
 
 ## 구현 예정
 
-**쉘 기능**: 백그라운드 실행(`&`), 중괄호 확장, `${NAME/패턴/값}`, `$$`, 배열, 파이프 안의 함수와 제어문, `select`, `trap`
+**쉘 기능**: 백그라운드 실행(`&`), 중괄호 확장, `${NAME/패턴/값}`, `$$`, 배열, 파이프 안의 함수와 제어문, `select`, `trap` 의 다른 신호(`HUP` `TERM` 등)
 
 **coreutils**
 
@@ -330,7 +338,7 @@ Winshell/
 `[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, date, dd, df, dir,
 dircolors, dirname, du, expand, expr, factor, false, fmt, fold, groups, hostid, hostname, id, install,
 join, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup, nproc, numfmt, od,
-pathchk, pinky, pr, printf, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
+pathchk, pinky, pr, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
 sha384sum, sha512sum, shred, shuf, sleep, split, stat, stdbuf, sum, sync, test, true,
 truncate, tsort, tty, uname, unexpand, unlink, uptime, users, vdir, who, whoami, yes
 

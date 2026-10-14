@@ -318,6 +318,45 @@ static void test_functions(void) {
     expect("s5.sh", "(echo a; (echo b; (echo c)))\n", "", "a\nb\nc\n", 0);
 }
 
+static void test_trap(void) {
+    printf("trap\n");
+    // EXIT: at the end of the script, and with exit; the status of the shell is kept
+    expect("t1.sh", "trap 'echo bye' EXIT\necho hi\n", "", "hi\nbye\n", 0);
+    expect("t2.sh", "trap 'echo bye $?' EXIT\nexit 3\n", "", "bye 3\n", 3);
+    expect("t3.sh", "trap 'echo bye; exit 9' EXIT\nexit 3\n", "", "bye\n", 9);
+    expect("t4.sh", "trap 'echo one' EXIT\ntrap 'echo two' EXIT\n", "", "two\n", 0);
+    expect("t5.sh", "trap 'echo gone' EXIT\ntrap - EXIT\necho x\n", "", "x\n", 0);
+    expect("t6.sh", "trap 'echo gone' 0\n", "", "gone\n", 0);
+    // listing
+    expect("t7.sh", "trap 'echo it'\"'\"'s' EXIT\ntrap\ntrap -p EXIT\ntrap - EXIT\ntrap\n", "",
+           "trap -- 'echo it'\\''s' EXIT\ntrap -- 'echo it'\\''s' EXIT\n", 0);
+    // ERR: after a failing command, not where the status is tested
+    expect("t8.sh", "trap 'echo err $?' ERR\nfalse\ntrue\nexpr 1 = 2\n", "", "err 1\n0\nerr 1\n", 1);
+    expect("t9.sh", "trap 'echo err' ERR\nfalse || true\nif false; then :; fi\nwhile false; do :; done\nfalse && true\necho end\n",
+           "", "end\n", 0);
+    // a function does not inherit it, its call that fails does
+    expect("t10.sh", "trap 'echo err' ERR\nf() { false; true; }\nf\ng() { return 3; }\ng\n", "", "err\n", 3);
+    // a subshell and a substitution start without the traps
+    expect("t11.sh", "trap 'echo outer' EXIT\n(echo in; exit 0)\necho \"$(echo sub)\"\n", "", "in\nsub\nouter\n", 0);
+    expect("t12.sh", "trap 'echo outer' EXIT\n(trap 'echo inner' ERR; false)\necho \"[$(trap)]\"\n", "", "inner\n[]\nouter\n", 0);
+    // INT can be ignored or set; the other signals are refused
+    expect("t13.sh", "trap '' INT\ntrap\ntrap - INT\ntrap 'echo h' 2\ntrap -p\n", "",
+           "trap -- '' INT\ntrap -- 'echo h' INT\n", 0);
+    {
+        RunResult r;
+
+        write_text(workDir, "t14.sh", "trap 'echo x' TERM\necho $?\ntrap 'echo x' BOGUS\necho $?\n");
+        run_shell("t14.sh", "", &r);
+        lf_only(r.out);
+        CHECK_STR(r.out, "1\n1\n");
+        CHECK(strstr(r.err, "TERM: signal not supported") != NULL);
+        CHECK(strstr(r.err, "BOGUS: invalid signal specification") != NULL);
+        run_result_free(&r);
+    }
+    // the trap sees the variables of the script, and $? outside is as it was
+    expect("t15.sh", "n=5\ntrap 'echo n=$n' EXIT\nn=6\n", "", "n=6\n", 0);
+}
+
 int main(void) {
     tools_init("shell_control_test");
     test_if();
@@ -326,6 +365,7 @@ int main(void) {
     test_input();
     test_case();
     test_functions();
+    test_trap();
     test_syntax();
     return test_summary("shell_control_test");
 }

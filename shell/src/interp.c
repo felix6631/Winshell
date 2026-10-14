@@ -310,6 +310,7 @@ int interp_capture(const char* command, char** output, size_t* outputLength, int
     int pipeFd, savedOut, exitSub = 0, status, before;
     char directory[VPATH_MAX];
     VarSnapshot* variables;
+    void* traps;
 
     *output = NULL;
     memset(&capture, 0, sizeof capture);
@@ -337,8 +338,10 @@ int interp_capture(const char* command, char** output, size_t* outputLength, int
 
     cwd_get(directory, sizeof directory);
     variables = var_save();
+    traps = command_traps_enter_subshell();
     before = winshell_lastStatus();
     status = interp_run_line(command, &exitSub, before);
+    command_traps_leave_subshell(traps);
     winshell_setLastStatus(before);                 // $? of the line around the substitution is not changed
 
     fflush(stdout);

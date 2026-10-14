@@ -999,6 +999,198 @@ static int interrupted_now(void) {
     return InterlockedCompareExchange(&interruptRequested, 0, 0) != 0;
 }
 
+/* ---- traps ------------------------------------------------------------------------------- */
+
+enum { TRAP_EXIT, TRAP_INT, TRAP_ERR, TRAP_COUNT };
+
+// NULL: the default action; "": ignored; otherwise the commands to run
+static char* trapAction[TRAP_COUNT];
+static int trapRunning[TRAP_COUNT];
+static int errSuppressed;               // inside a condition, a function or a trap: no ERR
+
+static const char* const trapNames[TRAP_COUNT] = { "EXIT", "INT", "ERR" };
+
+/** Runs the commands of a trap. Returns the status to go on with; *exitShell is set when they ended the shell. */
+static int run_trap(int which, int* exitShell, int status) {
+    char* text;
+    int savedLevels = pendingLevels, savedContinue = pendingContinue, result;
+    int savedSuppressed = errSuppressed;
+
+    if (trapAction[which] == NULL || trapAction[which][0] == '\0' || trapRunning[which])
+        return status;
+    text = _strdup(trapAction[which]);
+    if (text == NULL)
+        return status;
+    trapRunning[which] = 1;
+    errSuppressed = 1;
+    pendingLevels = 0;
+    winshell_setLastStatus(status);
+    result = command_run_text(text, exitShell, status);
+    free(text);
+    errSuppressed = savedSuppressed;
+    trapRunning[which] = 0;
+    pendingLevels = savedLevels;
+    pendingContinue = savedContinue;
+    if (!*exitShell) {
+        winshell_setLastStatus(status);     // $? is as it was before the trap
+        return status;
+    }
+    return result;
+}
+
+/** With a trap on INT, a Ctrl+C is not the end of the running commands: the trap runs and they go on. */
+static void service_interrupt(const Runner* r, int* status) {
+    if (trapAction[TRAP_INT] == NULL || !interrupted_now())
+        return;
+    InterlockedExchange(&interruptRequested, 0);
+    *status = run_trap(TRAP_INT, r->exitShell, *status);
+}
+
+/** Whether a Ctrl+C ends the loop that asks: it does not when there is a trap on INT. */
+static int interrupt_ends_loop(const Runner* r, int status) {
+    service_interrupt(r, &status);
+    return interrupted_now();
+}
+
+void command_run_exit_trap(int* status) {
+    int exitShell = 0;
+
+    // an `exit N` inside the trap gives the status of the shell
+    *status = run_trap(TRAP_EXIT, &exitShell, *status);
+}
+
+void* command_traps_enter_subshell(void) {
+    char** saved = calloc(TRAP_COUNT, sizeof *saved);
+    int i;
+
+    if (saved == NULL)
+        return NULL;
+    for (i = 0; i < TRAP_COUNT; i++) {
+        saved[i] = trapAction[i];
+        // an ignored signal stays ignored; the other traps are reset in a subshell
+        trapAction[i] = (saved[i] != NULL && saved[i][0] == '\0') ? _strdup("") : NULL;
+    }
+    return saved;
+}
+
+void command_traps_leave_subshell(void* handle) {
+    char** saved = handle;
+    int i;
+
+    if (saved == NULL)
+        return;
+    for (i = 0; i < TRAP_COUNT; i++) {
+        free(trapAction[i]);
+        trapAction[i] = saved[i];
+    }
+    free(saved);
+}
+
+/** The trap that a signal name or number stands for; prints the reason and returns 1 when there is none. */
+static int trap_slot(const char* name, int* slot) {
+    static const char* const unsupported[] = { "HUP", "QUIT", "ILL", "ABRT", "FPE", "SEGV", "PIPE", "ALRM", "TERM",
+                                               "USR1", "USR2", "CHLD", "CONT", "TSTP", "TTIN", "TTOU", "BUS",
+                                               "DEBUG", "RETURN", "KILL", "STOP" };
+    const char* n = name;
+    char* end;
+    long number;
+    size_t i;
+
+    if (strncmp(n, "SIG", 3) == 0)
+        n += 3;
+    if (strcmp(n, "EXIT") == 0) { *slot = TRAP_EXIT; return 0; }
+    if (strcmp(n, "INT") == 0)  { *slot = TRAP_INT;  return 0; }
+    if (strcmp(n, "ERR") == 0)  { *slot = TRAP_ERR;  return 0; }
+    number = strtol(name, &end, 10);
+    if (*name != '\0' && *end == '\0') {
+        if (number == 0) { *slot = TRAP_EXIT; return 0; }
+        if (number == 2) { *slot = TRAP_INT;  return 0; }
+        if (number > 0 && number < 65) {
+            fprintf(stderr, "trap: %s: signal not supported\n", name);
+            return 1;
+        }
+    }
+    for (i = 0; i < sizeof unsupported / sizeof unsupported[0]; i++) {
+        if (strcmp(n, unsupported[i]) == 0) {
+            fprintf(stderr, "trap: %s: signal not supported\n", name);
+            return 1;
+        }
+    }
+    fprintf(stderr, "trap: %s: invalid signal specification\n", name);
+    return 1;
+}
+
+static void trap_print(int slot) {
+    const char* p;
+
+    if (trapAction[slot] == NULL)
+        return;
+    fputs("trap -- '", stdout);
+    for (p = trapAction[slot]; *p != '\0'; p++) {
+        if (*p == '\'')
+            fputs("'\\''", stdout);
+        else
+            putchar(*p);
+    }
+    printf("' %s\n", trapNames[slot]);
+}
+
+static int trap_command(char* const* argv);
+
+int command_trap(char* const* argv) {
+    int status = trap_command(argv);
+
+    fflush(stdout);                     // before what the commands after it write
+    return status;
+}
+
+static int trap_command(char* const* argv) {
+    int i = 1, status = 0, slot;
+    const char* action;
+
+    if (argv[i] != NULL && strcmp(argv[i], "--") == 0)
+        i++;
+    if (argv[i] != NULL && strcmp(argv[i], "-l") == 0) {
+        puts("EXIT INT ERR");
+        return 0;
+    }
+    if (argv[i] != NULL && strcmp(argv[i], "-p") == 0) {
+        i++;
+        if (argv[i] != NULL) {
+            for (; argv[i] != NULL; i++)
+                if (trap_slot(argv[i], &slot) == 0)
+                    trap_print(slot);
+                else
+                    status = 1;
+            return status;
+        }
+    }
+    if (argv[i] == NULL) {
+        for (slot = 0; slot < TRAP_COUNT; slot++)
+            trap_print(slot);
+        return 0;
+    }
+    if (argv[i + 1] == NULL) {
+        // one operand: it is a signal, and its trap is reset
+        if (trap_slot(argv[i], &slot) != 0)
+            return 1;
+        free(trapAction[slot]);
+        trapAction[slot] = NULL;
+        return 0;
+    }
+
+    action = argv[i++];
+    for (; argv[i] != NULL; i++) {
+        if (trap_slot(argv[i], &slot) != 0) {
+            status = 1;
+            continue;
+        }
+        free(trapAction[slot]);
+        trapAction[slot] = strcmp(action, "-") == 0 ? NULL : _strdup(action);
+    }
+    return status;
+}
+
 /**
  * After the body of a loop: whether to leave the loop (1) or go on with the next round (0), and what a
  * break or continue inside did to the levels that remain.
@@ -1141,7 +1333,9 @@ static int run_function(Runner* r, const Function* function, char* const* argv, 
     frame = interp_parameters_push((const char* const*)argv + 1, count);
     callDepth++;
     activeLoopDepth += 0;
+    errSuppressed++;
     result = run_node(r, function->body, status);
+    errSuppressed--;
     if (pendingReturn) {
         result = returnStatus;
         pendingReturn = 0;
@@ -1266,14 +1460,17 @@ static int run_case(Runner* r, const Node* node, int status) {
 static int run_subshell(Runner* r, const Node* node, int status) {
     char directory[VPATH_MAX];
     VarSnapshot* variables;
+    void* traps;
     int exitInside = 0, result;
     Runner inner;
 
     cwd_get(directory, sizeof directory);
     variables = var_save();
+    traps = command_traps_enter_subshell();
     inner.exitShell = &exitInside;
     inner.loopDepth = 0;
     result = run_list(&inner, &node->second, status);
+    command_traps_leave_subshell(traps);
     if (variables != NULL) {
         char absolute[VPATH_MAX];
 
@@ -1366,7 +1563,11 @@ static int run_node(Runner* r, const Node* node, int status) {
         return interp_run_simple(node->text, r->exitShell, status);
 
     case NODE_IF: {
-        int condition = run_list(r, &node->first, status);
+        int condition;
+
+        errSuppressed++;
+        condition = run_list(r, &node->first, status);
+        errSuppressed--;
 
         if (*r->exitShell || pendingLevels > 0)
             return condition;
@@ -1384,11 +1585,13 @@ static int run_node(Runner* r, const Node* node, int status) {
         while (!*r->exitShell) {
             int condition;
 
-            if (interrupted_now()) {
+            if (interrupt_ends_loop(r, result)) {
                 result = 130;
                 break;
             }
+            errSuppressed++;
             condition = run_list(r, &node->first, result);
+            errSuppressed--;
             if (*r->exitShell || pendingLevels > 0) {
                 if (after_round())
                     break;
@@ -1445,7 +1648,7 @@ static int run_node(Runner* r, const Node* node, int status) {
 
         activeLoopDepth++;
         for (i = 0; i < count && values != NULL && !*r->exitShell; i++) {
-            if (interrupted_now()) {
+            if (interrupt_ends_loop(r, result)) {
                 result = 130;
                 break;
             }
@@ -1477,6 +1680,12 @@ static int run_list(Runner* r, const List* list, int status) {
         winshell_setLastStatus(status);
         status = run_node(r, list->nodes[i], status);
         winshell_setLastStatus(status);
+        service_interrupt(r, &status);
+        // ERR: a command failed, unless its status is being tested (a condition, the left of && or ||)
+        if (status != 0 && trapAction[TRAP_ERR] != NULL && errSuppressed == 0 && !*r->exitShell &&
+            pendingLevels == 0 && (list->nodes[i]->type == NODE_SIMPLE || list->nodes[i]->type == NODE_PIPE) &&
+            (i + 1 >= list->count || (list->ops[i + 1] != LIST_AND && list->ops[i + 1] != LIST_OR)))
+            run_trap(TRAP_ERR, r->exitShell, status);
     }
     return status;
 }

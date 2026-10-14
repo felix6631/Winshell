@@ -12,7 +12,7 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 
 | Command | Status |
 | --- | --- |
-| `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion (`$? $0 $1..$9 $# $@ $*`), command substitution (`$(...)`, backticks), comments (`#`), control structures (`if`/`elif`/`else`, `while`, `until`, `for`, `case`, `break`, `continue`, `:`), functions (`name() { ...; }`, `return`, `local`), groups (`{ ...; }`, `( ... )`), arithmetic expansion (`$((...))`), parameter expansion (`${NAME:-value}` and more), `read`, redirections and pipes of loops, wildcards, running scripts (`shell FILE [ARG...]`, `shell -c`, `source`/`.`), `cd` `export` `unset` `exit` `source` |
+| `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion (`$? $0 $1..$9 $# $@ $*`), command substitution (`$(...)`, backticks), comments (`#`), control structures (`if`/`elif`/`else`, `while`, `until`, `for`, `case`, `break`, `continue`, `:`), functions (`name() { ...; }`, `return`, `local`), groups (`{ ...; }`, `( ... )`), `trap` (`EXIT` `INT` `ERR`), arithmetic expansion (`$((...))`), parameter expansion (`${NAME:-value}` and more), `read`, redirections and pipes of loops, wildcards, running scripts (`shell FILE [ARG...]`, `shell -c`, `source`/`.`), `cd` `export` `unset` `exit` `source` |
 | `arch` | Done |
 | `basename` | Done (`-a -s -z`; both `/` and `\` separate; the suffix is removed unless it is the whole name) |
 | `date` | Done (`-d -u -r -I -R --rfc-3339`, the format letters `%a %A %b %B %c %C %d %D %e %F %g %G %H %I %j %k %l %m %M %N %p %P %q %r %R %s %S %T %u %U %V %w %W %x %X %y %Y %z %:z %Z` with the flags `- _ 0 ^ #` and a width; `-d` reads `@SECONDS`, ISO dates and times, month names, `now yesterday tomorrow`, `+2 days`, `3 weeks ago`, `next month`, weekdays; years before 1970 and after 3000 work; `-s` (setting the clock) is not supported) |
@@ -55,6 +55,7 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `tr` | Done (`-c -C -d -s -t`, classes `[:alpha:]` etc.) |
 | `uniq` | Done (`-c -d -D -u -i -f -s -w`) |
 | `wc` | Done (`-l -w -m -c -L`) |
+| `printf` | Done (GNU printf: `%d %i %o %u %x %X %e %f %g %a %c %s %b %%`, flags/width/precision/`*`, escapes `\n \xHH \NNN \uHHHH \c`, the format is reused, `'a` character constants; numbers are `double`, not `long double`) |
 
 See [Planned](#planned) for what is still to come.
 
@@ -153,6 +154,12 @@ See [Planned](#planned) for what is still to come.
   - `{ LIST; }` groups a list into one command in the current shell (it may have redirections and be on the right of a pipe); `( LIST )` is a
     subshell: the directory and the variables are as they were when it ends, and an `exit` inside ends only the subshell. `{` and `}` are
     reserved words only as the first word of a command.
+  - `trap [ACTION] SIGNAL...` handles `EXIT` (or 0), `INT` (2, Ctrl+C) and `ERR`. ACTION is a string of commands, `''` ignores the signal,
+    `-` puts the default back. `trap` or `trap -p` shows what is set as `trap -- 'ACTION' NAME`. `EXIT` runs once when the shell ends (end of
+    the script, `exit`), and an `exit N` inside it gives the status of the shell. `INT` stops the command that was running with Ctrl+C, runs
+    the trap and the script goes on (without a trap a loop stops). `ERR` runs after a simple command failed, but not in a condition
+    (`if`, `while`), on the left of `&&`/`||` and inside functions. A subshell and `$(...)` start without traps (what was ignored stays
+    ignored). The other signals (`HUP`, `TERM`, ...) do not exist on Windows: "signal not supported".
   - The input is read one command of the top level at a time (up to the next newline) and parsed whole before it runs, so a line with a
     syntax error runs nothing; in a script file the commands before the error have run when it ends with status 2. At a terminal an
     unfinished `if`/`while`/`for`, an open quote, or a line that ends in `&&`, `||` or `$(` goes on in the next line (prompt `> `). Ctrl+C
@@ -182,7 +189,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `false`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `uniq`, `wc`, `which`, `xargs`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `false`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `uniq`, `wc`, `which`, `xargs`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -235,6 +242,7 @@ The test programs are divided by feature (`test\`).
 | `limits_test` | **limits**: sorting 500,000 lines, one line of 20 MB, sizes around the buffers (65536 +- 1), 2,000,000 empty lines, deep paths, many files (`WS_STRESS=1`: ten times larger) |
 | `sharing_test` | **sharing violations**: `rm`/`mv`/`cp` of files and directories another process holds open, moves between volumes |
 | `async_test` | **asynchronous**: input that comes in pieces, programs that wait for the end of their input, `tail -f` |
+| `printf_test` | `printf`: escapes, conversions and flags, reuse of the format, character constants, status after numeric errors |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -294,6 +302,7 @@ Winshell/
 ├─ false/        false command
 ├─ test_cmd/     test_cmd command
 ├─ true/         true command
+├─ printf/       printf command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
@@ -330,7 +339,7 @@ the build structure in line with the directories.
 
 ## Planned
 
-**Shell features**: background jobs (`&`), brace expansion, `${NAME/pattern/value}`, `$$`, arrays, functions and control structures inside pipelines, `select`, `trap`
+**Shell features**: background jobs (`&`), brace expansion, `${NAME/pattern/value}`, `$$`, arrays, functions and control structures inside pipelines, `select`, other signals for `trap` (`HUP`, `TERM`, ...)
 
 **coreutils**
 
@@ -340,7 +349,7 @@ the build structure in line with the directories.
 `[`, b2sum, base32, base64, basename, chgrp, chmod, chown, cksum, comm, csplit, date, dd, df, dir,
 dircolors, dirname, du, expand, expr, factor, false, fmt, fold, groups, hostid, hostname, id, install,
 join, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup, nproc, numfmt, od,
-pathchk, pinky, pr, printf, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
+pathchk, pinky, pr, ptx, readlink, realpath, seq, sha1sum, sha224sum, sha256sum,
 sha384sum, sha512sum, shred, shuf, sleep, split, stat, stdbuf, sum, sync, test, true,
 truncate, tsort, tty, uname, unexpand, unlink, uptime, users, vdir, who, whoami, yes
 
