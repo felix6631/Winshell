@@ -63,10 +63,14 @@ typedef struct {
     int    hasOptions;
 } Key;
 
-static Key* keys;
-static size_t keyCount;
-static int tabSeparator = -1;           // -1: transition from non-blank to blank
-static int unique, stable;
+/** What the order of the lines depends on: the keys and the options that apply to all of them. */
+typedef struct {
+    Key*   keys;
+    size_t keyCount;
+    int    tabSeparator;                // -1: transition from non-blank to blank
+    int    unique, stable;
+    int    reverse;                     // the last resort comparison of the whole line goes the other way
+} Order;
 
 typedef struct {
     TextLine line;
@@ -79,7 +83,7 @@ static int is_blank(int c) {
 
 /* ---- keys ------------------------------------------------------------------ */
 
-static const unsigned char* begin_of_key(const TextLine* line, const Key* key) {
+static const unsigned char* begin_of_key(const TextLine* line, const Key* key, int tabSeparator) {
     const unsigned char* p = line->content;
     const unsigned char* limit = line->content + line->length;
     size_t n;
@@ -111,7 +115,7 @@ static const unsigned char* begin_of_key(const TextLine* line, const Key* key) {
     return p;
 }
 
-static const unsigned char* end_of_key(const TextLine* line, const Key* key) {
+static const unsigned char* end_of_key(const TextLine* line, const Key* key, int tabSeparator) {
     const unsigned char* p = line->content;
     const unsigned char* limit = line->content + line->length;
     size_t fields, n;
@@ -303,14 +307,14 @@ static int compare_general(const unsigned char* a, const unsigned char* aEnd,
     return va < vb ? -1 : (va > vb ? 1 : 0);
 }
 
-static int compare_by_keys(const TextLine* a, const TextLine* b) {
+static int compare_by_keys(const Order* order, const TextLine* a, const TextLine* b) {
     size_t k;
-    for (k = 0; k < keyCount; k++) {
-        const Key* key = &keys[k];
-        const unsigned char* a0 = begin_of_key(a, key);
-        const unsigned char* a1 = end_of_key(a, key);
-        const unsigned char* b0 = begin_of_key(b, key);
-        const unsigned char* b1 = end_of_key(b, key);
+    for (k = 0; k < order->keyCount; k++) {
+        const Key* key = &order->keys[k];
+        const unsigned char* a0 = begin_of_key(a, key, order->tabSeparator);
+        const unsigned char* a1 = end_of_key(a, key, order->tabSeparator);
+        const unsigned char* b0 = begin_of_key(b, key, order->tabSeparator);
+        const unsigned char* b1 = end_of_key(b, key, order->tabSeparator);
         int result;
 
         if (a1 < a0)
@@ -331,14 +335,12 @@ static int compare_by_keys(const TextLine* a, const TextLine* b) {
     return 0;
 }
 
-static int global_reverse;
-
 /** The whole order: the keys, then the whole line as the last resort. */
-static int compare_entries(const Entry* x, const Entry* y) {
-    int result = compare_by_keys(&x->line, &y->line);
+static int compare_entries(const Order* order, const Entry* x, const Entry* y) {
+    int result = compare_by_keys(order, &x->line, &y->line);
     if (result != 0)
         return result;
-    if (unique || stable)
+    if (order->unique || order->stable)
         return 0;
 
     {
@@ -347,26 +349,26 @@ static int compare_entries(const Entry* x, const Entry* y) {
         if (c == 0 && la != lb)
             c = la < lb ? -1 : 1;
         if (c != 0)
-            return global_reverse ? (c < 0 ? 1 : -1) : (c < 0 ? -1 : 1);
+            return order->reverse ? (c < 0 ? 1 : -1) : (c < 0 ? -1 : 1);
     }
     return 0;
 }
 
 /** Stable merge sort. */
-static void merge_sort(Entry* items, Entry* scratch, size_t count) {
+static void merge_sort(const Order* order, Entry* items, Entry* scratch, size_t count) {
     size_t mid, i, j, k;
 
     if (count < 2)
         return;
     mid = count / 2;
-    merge_sort(items, scratch, mid);
-    merge_sort(items + mid, scratch, count - mid);
+    merge_sort(order, items, scratch, mid);
+    merge_sort(order, items + mid, scratch, count - mid);
 
     i = 0;
     j = mid;
     k = 0;
     while (i < mid && j < count) {
-        if (compare_entries(&items[j], &items[i]) < 0)
+        if (compare_entries(order, &items[j], &items[i]) < 0)
             scratch[k++] = items[j++];
         else
             scratch[k++] = items[i++];
@@ -450,12 +452,12 @@ static int parse_key(const char* text, Key* key) {
     return ok ? 0 : -1;
 }
 
-static void add_key(const Key* key) {
-    if (VEC_GROW_BY_COUNT(keys, keyCount) != 0) {
+static void add_key(Order* order, const Key* key) {
+    if (VEC_GROW_BY_COUNT(order->keys, order->keyCount) != 0) {
         fprintf(stderr, PROGRAM ": memory exhausted\n");
         exit(2);
     }
-    keys[keyCount++] = *key;
+    order->keys[order->keyCount++] = *key;
 }
 
 /* ---- main ------------------------------------------------------------------------- */
@@ -493,7 +495,8 @@ static const ArgsOption options[] = {
 static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 2, 0, 0 };
 
 typedef struct {
-    Key         global;
+    Key         global;                 // the options that keys without options of their own take
+    Order       order;
     const char* outputFile;
     int         check, checkQuiet;
 } Options;
@@ -509,8 +512,8 @@ static int on_option(int id, const char* value, void* context) {
         case OPT_IGNORE:   o->global.ignore = 1; break;
         case OPT_NUMERIC:  o->global.numeric = 1; break;
         case OPT_REVERSE:  o->global.reverse = 1; break;
-        case OPT_STABLE:   stable = 1; break;
-        case OPT_UNIQUE:   unique = 1; break;
+        case OPT_STABLE:   o->order.stable = 1; break;
+        case OPT_UNIQUE:   o->order.unique = 1; break;
         case OPT_CHECK:    o->check = 1; break;
         case OPT_CHECK_QUIET: o->check = 1; o->checkQuiet = 1; break;
         case OPT_MERGE:    break;       // the input is sorted as a whole, which gives the same result
@@ -522,14 +525,14 @@ static int on_option(int id, const char* value, void* context) {
                 fprintf(stderr, PROGRAM ": invalid number at field start: invalid count at start of '%s'\n", value);
                 return -1;
             }
-            add_key(&key);
+            add_key(&o->order, &key);
             break;
         }
         case OPT_SEPARATOR:
             if (strcmp(value, "\\0") == 0) {
-                tabSeparator = 0;
+                o->order.tabSeparator = 0;
             } else if (value[0] != '\0' && value[1] == '\0') {
-                tabSeparator = (unsigned char)value[0];
+                o->order.tabSeparator = (unsigned char)value[0];
             } else {
                 fprintf(stderr, PROGRAM ": multi-character tab '%s'\n", value);
                 return -1;
@@ -546,20 +549,20 @@ static int on_option(int id, const char* value, void* context) {
 /**
  * Keys without options of their own use the global ones; with no key the whole line is one.
  */
-static void complete_keys(const Key* global) {
+static void complete_keys(Order* order, const Key* global) {
     size_t k;
 
-    if (keyCount == 0) {
+    if (order->keyCount == 0) {
         Key whole = *global;
         whole.startField = whole.startChar = 0;
         whole.hasEnd = 0;
-        add_key(&whole);
+        add_key(order, &whole);
         return;
     }
 
-    for (k = 0; k < keyCount; k++) {
-        if (!keys[k].hasOptions) {
-            Key own = keys[k];
+    for (k = 0; k < order->keyCount; k++) {
+        if (!order->keys[k].hasOptions) {
+            Key own = order->keys[k];
             own.blankStart = own.blankEnd = global->blankStart;
             own.dict = global->dict;
             own.fold = global->fold;
@@ -567,7 +570,7 @@ static void complete_keys(const Key* global) {
             own.ignore = global->ignore;
             own.numeric = global->numeric;
             own.reverse = global->reverse;
-            keys[k] = own;
+            order->keys[k] = own;
         }
     }
 }
@@ -611,12 +614,12 @@ static int load_lines(const char** operands, int operandCount, Entry** entries, 
 }
 
 /** sort -c: 0 when the lines are in order, otherwise 1 (and the first line out of order is named). */
-static int check_order(const Entry* entries, size_t count, const char* name, int quiet) {
+static int check_order(const Order* order, const Entry* entries, size_t count, const char* name, int quiet) {
     size_t k;
 
     for (k = 1; k < count; k++) {
-        int order = compare_entries(&entries[k - 1], &entries[k]);
-        if (order > 0 || (unique && order == 0)) {
+        int result = compare_entries(order, &entries[k - 1], &entries[k]);
+        if (result > 0 || (order->unique && result == 0)) {
             if (!quiet) {
                 fprintf(stderr, PROGRAM ": %s:%lu: disorder: ", name, (unsigned long)(k + 1));
                 fwrite(entries[k].line.content, 1, entries[k].line.length, stderr);
@@ -629,7 +632,7 @@ static int check_order(const Entry* entries, size_t count, const char* name, int
 }
 
 /** Writes the sorted lines to the output file, or to standard output; -u leaves out repeated ones. */
-static int write_lines(const Entry* entries, size_t count, const char* outputFile) {
+static int write_lines(const Order* order, const Entry* entries, size_t count, const char* outputFile) {
     FILE* out = stdout;
     size_t k;
 
@@ -642,7 +645,7 @@ static int write_lines(const Entry* entries, size_t count, const char* outputFil
     }
 
     for (k = 0; k < count; k++) {
-        if (unique && k > 0 && compare_by_keys(&entries[k - 1].line, &entries[k].line) == 0)
+        if (order->unique && k > 0 && compare_by_keys(order, &entries[k - 1].line, &entries[k].line) == 0)
             continue;
         if (text_write_line(&entries[k].line, out) != 0) {
             fprintf(stderr, PROGRAM ": write error\n");
@@ -665,12 +668,13 @@ int main(int argc, char* argv[]) {
     int operandCount, status, result;
 
     memset(&o, 0, sizeof o);
+    o.order.tabSeparator = -1;
     result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
     if (result != ARGS_OK)
         return ARGS_STATUS(spec, result);
 
-    complete_keys(&o.global);
-    global_reverse = o.global.reverse;
+    complete_keys(&o.order, &o.global);
+    o.order.reverse = o.global.reverse;
 
     text_binary_streams();
     if (operandCount == 0)
@@ -683,7 +687,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (o.check)
-        return status != 0 ? 2 : check_order(entries, entryCount, operands[0], o.checkQuiet);
+        return status != 0 ? 2 : check_order(&o.order, entries, entryCount, operands[0], o.checkQuiet);
 
     if (entryCount > 1) {
         Entry* scratch = malloc(entryCount * sizeof *scratch);
@@ -691,10 +695,10 @@ int main(int argc, char* argv[]) {
             fprintf(stderr, PROGRAM ": memory exhausted\n");
             return 2;
         }
-        merge_sort(entries, scratch, entryCount);
+        merge_sort(&o.order, entries, scratch, entryCount);
         free(scratch);
     }
 
-    result = write_lines(entries, entryCount, o.outputFile);
+    result = write_lines(&o.order, entries, entryCount, o.outputFile);
     return result != 0 ? result : status;
 }

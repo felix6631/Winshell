@@ -47,9 +47,12 @@ typedef struct {
     int sortNone;       // -U
 } Options;
 
-static Options opts;
-static int firstBlock = 1;
-static int exitStatus = 0;
+/** What a listing carries from one directory to the next. */
+typedef struct {
+    const Options* opts;
+    int            firstBlock;      // nothing was written yet: no blank line before the next block
+    int            exitStatus;
+} Listing;
 
 typedef struct {
     char*              name;        // as shown
@@ -150,37 +153,38 @@ static int compare_names(const char* a, const char* b) {
     return result != 0 ? result : strcmp(a, b);
 }
 
-static int compare_entries(const void* left, const void* right) {
+static int compare_entries(void* context, const void* left, const void* right) {
+    const Options* opts = context;
     const Entry* a = left;
     const Entry* b = right;
     int result = 0;
 
-    if (opts.sortSize) {
+    if (opts->sortSize) {
         if (a->size != b->size)
             result = a->size > b->size ? -1 : 1;
-    } else if (opts.sortTime) {
+    } else if (opts->sortTime) {
         unsigned long long ta = file_time_value(a->mtime), tb = file_time_value(b->mtime);
         if (ta != tb)
             result = ta > tb ? -1 : 1;
     }
     if (result == 0)
         result = compare_names(a->name, b->name);
-    return opts.reverse ? -result : result;
+    return opts->reverse ? -result : result;
 }
 
-static void sort_entries(EntryList* list) {
-    if (!opts.sortNone && list->count > 1)
-        qsort(list->items, list->count, sizeof *list->items, compare_entries);
+static void sort_entries(const Options* opts, EntryList* list) {
+    if (!opts->sortNone && list->count > 1)
+        qsort_s(list->items, list->count, sizeof *list->items, compare_entries, (void*)opts);
 }
 
 /* ---- output ------------------------------------------------------------------ */
 
-static char indicator(const Entry* e) {
+static char indicator(const Options* opts, const Entry* e) {
     if (is_link(e))
-        return opts.classify ? '@' : '\0';
+        return opts->classify ? '@' : '\0';
     if (is_directory(e))
-        return (opts.classify || opts.slashDirs) ? '/' : '\0';
-    if (opts.classify && is_program(e))
+        return (opts->classify || opts->slashDirs) ? '/' : '\0';
+    if (opts->classify && is_program(e))
         return '*';
     return '\0';
 }
@@ -202,8 +206,8 @@ static void format_mode(const Entry* e, char mode[11]) {
     mode[10] = '\0';
 }
 
-static void format_size(unsigned long long size, char* out, size_t outSize) {
-    if (!opts.human || size < 1024) {
+static void format_size(const Options* opts, unsigned long long size, char* out, size_t outSize) {
+    if (!opts->human || size < 1024) {
         snprintf(out, outSize, "%llu", size);
         return;
     } else {
@@ -312,14 +316,14 @@ static void owner_and_group(const char* path, char* owner, size_t ownerSize, cha
     LocalFree(descriptor);
 }
 
-static void print_name(const Entry* e) {
-    char mark = indicator(e);
+static void print_name(const Options* opts, const Entry* e) {
+    char mark = indicator(opts, e);
     fputs(e->name, stdout);
     if (mark != '\0')
         putchar(mark);
 }
 
-static void print_long(const EntryList* list, int withTotal) {
+static void print_long(const Options* opts, const EntryList* list, int withTotal) {
     size_t i;
     int ownerWidth = 1, groupWidth = 1, sizeWidth = 1;
     unsigned long long blocks = 0;
@@ -343,7 +347,7 @@ static void print_long(const EntryList* list, int withTotal) {
         length = (int)strlen(groups[i]);
         if (length > groupWidth)
             groupWidth = length;
-        format_size(is_directory(e) ? 0 : e->size, sizeText, sizeof sizeText);
+        format_size(opts, is_directory(e) ? 0 : e->size, sizeText, sizeof sizeText);
         length = (int)strlen(sizeText);
         if (length > sizeWidth)
             sizeWidth = length;
@@ -352,8 +356,8 @@ static void print_long(const EntryList* list, int withTotal) {
     }
 
     if (withTotal) {
-        if (opts.human) {
-            format_size(blocks * 1024, sizeText, sizeof sizeText);
+        if (opts->human) {
+            format_size(opts, blocks * 1024, sizeText, sizeof sizeText);
             printf("total %s\n", sizeText);
         } else {
             printf("total %llu\n", blocks);
@@ -365,11 +369,11 @@ static void print_long(const EntryList* list, int withTotal) {
         char mode[11], timeText[32];
 
         format_mode(e, mode);
-        format_size(is_directory(e) ? 0 : e->size, sizeText, sizeof sizeText);
+        format_size(opts, is_directory(e) ? 0 : e->size, sizeText, sizeof sizeText);
         format_time(e->mtime, timeText, sizeof timeText);
         printf("%s 1 %-*s %-*s %*s %s ", mode, ownerWidth, owners[i], groupWidth, groups[i],
                sizeWidth, sizeText, timeText);
-        print_name(e);
+        print_name(opts, e);
         putchar('\n');
     }
 
@@ -389,12 +393,12 @@ static int stdout_is_console(void) {
     return GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode) != 0;
 }
 
-static size_t shown_length(const Entry* e) {
-    return strlen(e->name) + (indicator(e) != '\0' ? 1 : 0);
+static size_t shown_length(const Options* opts, const Entry* e) {
+    return strlen(e->name) + (indicator(opts, e) != '\0' ? 1 : 0);
 }
 
 /** Lists the entries by columns, filled top to bottom, as ls does on a terminal. */
-static void print_columns(const EntryList* list, int width) {
+static void print_columns(const Options* opts, const EntryList* list, int width) {
     size_t n = list->count, columns, rows, row, col, i;
     size_t* widths;
 
@@ -412,7 +416,7 @@ static void print_columns(const EntryList* list, int width) {
             continue;
         memset(widths, 0, columns * sizeof *widths);
         for (i = 0; i < n; i++) {
-            size_t length = shown_length(&list->items[i]);
+            size_t length = shown_length(opts, &list->items[i]);
             size_t c = i / rows;
             if (length > widths[c])
                 widths[c] = length;
@@ -430,8 +434,8 @@ static void print_columns(const EntryList* list, int width) {
             size_t length;
             if (index >= n)
                 break;
-            print_name(&list->items[index]);
-            length = shown_length(&list->items[index]);
+            print_name(opts, &list->items[index]);
+            length = shown_length(opts, &list->items[index]);
             if (col + 1 < columns && (col + 1) * rows + row < n)
                 printf("%*s", (int)(widths[col] - length + 2), "");
         }
@@ -440,18 +444,18 @@ static void print_columns(const EntryList* list, int width) {
     free(widths);
 }
 
-static void print_list(const EntryList* list, int withTotal) {
+static void print_list(const Options* opts, const EntryList* list, int withTotal) {
     size_t i;
 
-    if (opts.longFormat) {
-        print_long(list, withTotal);
-    } else if (opts.oneColumn || (!opts.forceColumns && !stdout_is_console())) {
+    if (opts->longFormat) {
+        print_long(opts, list, withTotal);
+    } else if (opts->oneColumn || (!opts->forceColumns && !stdout_is_console())) {
         for (i = 0; i < list->count; i++) {
-            print_name(&list->items[i]);
+            print_name(opts, &list->items[i]);
             putchar('\n');
         }
     } else {
-        print_columns(list, console_width());
+        print_columns(opts, list, console_width());
     }
 }
 
@@ -461,8 +465,8 @@ static int is_hidden(const char* name, DWORD attrs) {
     return name[0] == '.' || (attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) != 0;
 }
 
-static int hidden_shown(void) {
-    return opts.all || opts.almostAll;
+static int hidden_shown(const Options* opts) {
+    return opts->all || opts->almostAll;
 }
 
 static FILETIME zero_time(void) {
@@ -472,11 +476,11 @@ static FILETIME zero_time(void) {
 }
 
 /** The entries of the virtual root are the drives. */
-static void collect_root(EntryList* list) {
+static void collect_root(const Options* opts, EntryList* list) {
     char letters[27];
     size_t count = vpath_drives(letters), i;
 
-    if (opts.all) {
+    if (opts->all) {
         list_add(list, ".", NULL, FILE_ATTRIBUTE_DIRECTORY, 0, zero_time());
         list_add(list, "..", NULL, FILE_ATTRIBUTE_DIRECTORY, 0, zero_time());
     }
@@ -523,7 +527,7 @@ static void add_dot_entries(EntryList* list, const char* native) {
 }
 
 /** Reads the directory at the Windows path. Returns 0, or -1 with errno set. */
-static int collect_directory(const char* native, EntryList* list) {
+static int collect_directory(const Options* opts, const char* native, EntryList* list) {
     char pattern[MAX_PATH * 2];
     WIN32_FIND_DATAA data;
     HANDLE find;
@@ -538,7 +542,7 @@ static int collect_directory(const char* native, EntryList* list) {
         return -1;
     }
 
-    if (opts.all)
+    if (opts->all)
         add_dot_entries(list, native);
 
     do {
@@ -547,7 +551,7 @@ static int collect_directory(const char* native, EntryList* list) {
 
         if (strcmp(data.cFileName, ".") == 0 || strcmp(data.cFileName, "..") == 0)
             continue;       // the real ones are added above, with -a
-        if (!hidden_shown() && is_hidden(data.cFileName, data.dwFileAttributes))
+        if (!hidden_shown(opts) && is_hidden(data.cFileName, data.dwFileAttributes))
             continue;
 
         snprintf(full, sizeof full, "%s%s%s", native, needSeparator ? "\\" : "", data.cFileName);
@@ -571,34 +575,35 @@ static void join_display(const char* directory, const char* name, char* out, siz
  * Lists one directory. display is the name to show in headers and to build
  * the names of subdirectories from; native is NULL for the virtual root.
  */
-static void list_directory(const char* display, const char* native, int header) {
+static void list_directory(Listing* listing, const char* display, const char* native, int header) {
+    const Options* opts = listing->opts;
     EntryList list = { NULL, 0, 0 };
     size_t i;
 
     if (native == NULL) {
-        collect_root(&list);
-    } else if (collect_directory(native, &list) != 0) {
-        if (!firstBlock) {
+        collect_root(opts, &list);
+    } else if (collect_directory(opts, native, &list) != 0) {
+        if (!listing->firstBlock) {
             putchar('\n');
         }
         if (header)
             printf("%s:\n", display);
-        firstBlock = 0;
+        listing->firstBlock = 0;
         fprintf(stderr, PROGRAM ": cannot open directory '%s': %s\n", display, strerror(errno));
-        exitStatus = exitStatus > 1 ? exitStatus : 1;
+        listing->exitStatus = listing->exitStatus > 1 ? listing->exitStatus : 1;
         return;
     }
 
-    sort_entries(&list);
+    sort_entries(opts, &list);
 
-    if (!firstBlock)
+    if (!listing->firstBlock)
         putchar('\n');
-    firstBlock = 0;
+    listing->firstBlock = 0;
     if (header)
         printf("%s:\n", display);
-    print_list(&list, 1);
+    print_list(opts, &list, 1);
 
-    if (opts.recursive) {
+    if (opts->recursive) {
         for (i = 0; i < list.count; i++) {
             const Entry* e = &list.items[i];
             char childDisplay[MAX_PATH * 2];
@@ -607,7 +612,7 @@ static void list_directory(const char* display, const char* native, int header) 
                 strcmp(e->name, ".") == 0 || strcmp(e->name, "..") == 0)
                 continue;
             join_display(display, e->name, childDisplay, sizeof childDisplay);
-            list_directory(childDisplay, e->native, 1);
+            list_directory(listing, childDisplay, e->native, 1);
         }
     }
 
@@ -641,23 +646,24 @@ static const ArgsOption optionList[] = {
 static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, optionList, 2, 0, 0 };
 
 static int on_option(int id, const char* value, void* context) {
+    Options* opts = context;
+
     (void)value;
-    (void)context;
     switch (id) {
-        case 'a': opts.all = 1; break;
-        case 'A': opts.almostAll = 1; break;
-        case 'C': opts.forceColumns = 1; opts.oneColumn = 0; opts.longFormat = 0; break;
-        case 'd': opts.directory = 1; break;
-        case 'F': opts.classify = 1; break;
-        case 'h': opts.human = 1; break;
-        case 'l': opts.longFormat = 1; break;
-        case 'p': opts.slashDirs = 1; break;
-        case 'r': opts.reverse = 1; break;
-        case 'R': opts.recursive = 1; break;
-        case 'S': opts.sortSize = 1; opts.sortTime = 0; break;
-        case 't': opts.sortTime = 1; opts.sortSize = 0; break;
-        case 'U': opts.sortNone = 1; break;
-        case '1': opts.oneColumn = 1; opts.forceColumns = 0; break;
+        case 'a': opts->all = 1; break;
+        case 'A': opts->almostAll = 1; break;
+        case 'C': opts->forceColumns = 1; opts->oneColumn = 0; opts->longFormat = 0; break;
+        case 'd': opts->directory = 1; break;
+        case 'F': opts->classify = 1; break;
+        case 'h': opts->human = 1; break;
+        case 'l': opts->longFormat = 1; break;
+        case 'p': opts->slashDirs = 1; break;
+        case 'r': opts->reverse = 1; break;
+        case 'R': opts->recursive = 1; break;
+        case 'S': opts->sortSize = 1; opts->sortTime = 0; break;
+        case 't': opts->sortTime = 1; opts->sortSize = 0; break;
+        case 'U': opts->sortNone = 1; break;
+        case '1': opts->oneColumn = 1; opts->forceColumns = 0; break;
         default: break;
     }
     return 0;
@@ -668,8 +674,16 @@ int main(int argc, char* argv[]) {
     int operandCount, i, result;
     EntryList files = { NULL, 0, 0 };
     EntryList directories = { NULL, 0, 0 };   // names are the arguments, native the Windows paths ("" for the root)
+    Options options;
+    const Options* opts = &options;
+    Listing listing;
 
-    result = args_parse(&spec, argc, argv, on_option, NULL, &operands, &operandCount);
+    memset(&options, 0, sizeof options);
+    listing.opts = opts;
+    listing.firstBlock = 1;
+    listing.exitStatus = 0;
+
+    result = args_parse(&spec, argc, argv, on_option, &options, &operands, &operandCount);
     if (result != ARGS_OK)
         return ARGS_STATUS(spec, result);
 
@@ -685,7 +699,7 @@ int main(int argc, char* argv[]) {
         WIN32_FILE_ATTRIBUTE_DATA data;
 
         if (kind == VPATH_ROOT) {
-            if (opts.directory)
+            if (opts->directory)
                 list_add(&files, path, NULL, FILE_ATTRIBUTE_DIRECTORY, 0, zero_time());
             else
                 list_add(&directories, path, "", FILE_ATTRIBUTE_DIRECTORY, 0, zero_time());
@@ -694,11 +708,11 @@ int main(int argc, char* argv[]) {
 
         if (kind != 0 || !GetFileAttributesExA(native, GetFileExInfoStandard, &data)) {
             fprintf(stderr, PROGRAM ": cannot access '%s': No such file or directory\n", path);
-            exitStatus = 2;
+            listing.exitStatus = 2;
             continue;
         }
 
-        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !opts.directory) {
+        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !opts->directory) {
             list_add(&directories, path, native, data.dwFileAttributes, 0, data.ftLastWriteTime);
         } else {
             unsigned long long size = ((unsigned long long)data.nFileSizeHigh << 32) | data.nFileSizeLow;
@@ -708,21 +722,21 @@ int main(int argc, char* argv[]) {
 
     // the files given on the command line come first, then the directories
     if (files.count > 0) {
-        sort_entries(&files);
-        print_list(&files, 0);
-        firstBlock = 0;
+        sort_entries(opts, &files);
+        print_list(opts, &files, 0);
+        listing.firstBlock = 0;
     }
 
-    sort_entries(&directories);
+    sort_entries(opts, &directories);
     for (i = 0; i < (int)directories.count; i++) {
         const Entry* d = &directories.items[i];
-        int header = operandCount > 1 || opts.recursive;
-        list_directory(d->name, d->native[0] == '\0' ? NULL : d->native, header);
+        int header = operandCount > 1 || opts->recursive;
+        list_directory(&listing, d->name, d->native[0] == '\0' ? NULL : d->native, header);
     }
 
     list_free(&files);
     list_free(&directories);
     free(operands);
     fflush(stdout);
-    return exitStatus;
+    return listing.exitStatus;
 }
