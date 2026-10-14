@@ -826,6 +826,19 @@ compare date -u -d @1 -I '+%s'
 compare date --bogus
 fi
 
+if want which; then
+section which
+# The paths differ (/usr/bin/sort and /c/Users/.../sort.exe): the exit status is what is compared.
+for n in sort ls cat cmd notepad sh bash grep sed find nosuchprogram_xyz x.y ./nosuch "" ; do
+    add_case status C - which "$n"
+done
+add_case status C - which sort ls nosuch_xyz
+add_case status C - which nosuch_xyz sort
+add_case status C - which -a sort
+add_case status C - which -a nosuch_xyz
+add_case status C - which
+fi
+
 if want sleep; then
 section sleep
 for n in 0 0.001 0s 0m 0.0001h 0.00001d 1e-3 .001 0.001s0 "0 0" "0.001 0.001s" abc 1x -1 "" 1.2.3 0x1 inf2 "0 abc" 1ss; do

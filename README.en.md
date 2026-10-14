@@ -25,6 +25,7 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `realpath` | Done (`-e -m -s -q -z --relative-to --relative-base`; by default only the last component may be missing, junctions and symbolic links are followed, results are virtual paths `/c/...`) |
 | `sed` | Done (`-n -e -f -E -r -i[SUFFIX] -s -z -l -u --sandbox`; commands `s y p P d D n N g G h H x l = a i c r R w W q Q b t T z F : { }`, addresses `N $ /re/ first~step addr,+N addr,~N 0,/re/ !`, flags of `s` `g p N I w`, `\1`..`\9 & \U \L \u \l \E`; CR LF endings and a last line without an ending are kept, UTF-8 characters; the `e` command and the `M` flag are not supported) |
 | `find` | Done (`-H -L -P`, operators `( ) ! -a -o ,`, options `-maxdepth -mindepth -depth -follow`, tests `-name -iname -path -ipath -regex -iregex -regextype -type -xtype -size -empty -newer -mtime -atime -ctime -mmin -amin -cmin -readable -writable -executable`, actions `-print -print0 -printf -delete -prune -quit -exec -execdir -ok` (with `;` and `+`); `-perm -user -group -links -inum -ls -fprint` are not supported) |
+| `which` | Done (`-a -s`; the directory of the programs of the project first, then the directories of `PATH` with the extensions of `PATHEXT`; a name with a path is checked as it is; virtual paths as output; exit status 0/1/2, 255 with no name) |
 | `xargs` | Done (`-0 -a -d -E -e -I -i -L -l -n -P -p -r -s -t -x --show-limits`; quotes and backslashes, lines continued by a trailing blank, a command line limit of 30000 characters, parallel runs with `-P`; exit status 0/123/124/126/127/1) |
 | `grep` | Done (`-E -F -G -e -f -i -v -w -x -c -l -L -m -n -H -h -o -q -s -b -r -A -B -C -NUM -a -I -z -Z --include --exclude --exclude-dir`; basic and extended expressions (with back references), leftmost-longest matches, UTF-8 characters; `-P` and colours are not supported) |
 | `head` | Done (`-n -c -q -v -NUM`, `-n -K` leaves out the last K lines) |
@@ -125,7 +126,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `date`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `xargs`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `date`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `which`, `xargs`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -155,6 +156,7 @@ The test programs are divided by feature (`test\`).
 | `env_test` | `env`, `printenv`: changing the environment, `-i`/`-u`, running a command and its status, `-C` |
 | `regex_test` | unit tests of `common/regex.c`: basic and extended syntax, longest match, sets and classes, word boundaries, back references, UTF-8, error messages |
 | `clock_test` | `sleep`, `date`: waiting, formats, how `-d` reads, ISO weeks, exit status |
+| `which_test` | `which`: the `bin` of the project, `PATH`, `PATHEXT`, directories, names with a path, `-a`, exit status |
 | `realpath_test` | `realpath`: virtual paths, what has to exist, relative paths, junctions |
 | `names_test` | `basename`, `dirname`: separators (also `\`), suffixes, NUL endings, the root |
 | `xargs_test` | `xargs`: batches, how items are read, files, exit status, parallel runs |
@@ -221,6 +223,7 @@ Winshell/
 ├─ tr/             tr command
 ├─ uniq/           uniq command
 ├─ wc/             wc command
+├─ which/          which command
 ├─ xargs/          xargs command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)

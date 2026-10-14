@@ -25,6 +25,7 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `realpath` | 완료 (`-e -m -s -q -z --relative-to --relative-base`; 마지막 구성요소만 없어도 되는 기본 규칙, 정션과 심볼릭 링크를 따라감, 가상 경로 `/c/...` 로 출력) |
 | `sed` | 완료 (`-n -e -f -E -r -i[SUFFIX] -s -z -l -u --sandbox`; 명령 `s y p P d D n N g G h H x l = a i c r R w W q Q b t T z F : { }`, 주소 `N $ /re/ first~step addr,+N addr,~N 0,/re/ !`, `s` 플래그 `g p N I w`, `\1`..`\9 & \U \L \u \l \E`; 줄 끝 CRLF 유지, 끝 줄바꿈 없는 마지막 줄 유지, UTF-8 문자 단위; `e` 명령과 `M` 플래그는 미지원) |
 | `find` | 완료 (`-H -L -P`, 연산자 `( ) ! -a -o ,`, 옵션 `-maxdepth -mindepth -depth -follow`, 검사 `-name -iname -path -ipath -regex -iregex -regextype -type -xtype -size -empty -newer -mtime -atime -ctime -mmin -amin -cmin -readable -writable -executable`, 동작 `-print -print0 -printf -delete -prune -quit -exec -execdir -ok`(`;` 와 `+`); `-perm -user -group -links -inum -ls -fprint` 는 미지원) |
+| `which` | 완료 (`-a -s`; 프로젝트의 `bin` 을 먼저, 그다음 `PATH` 의 디렉터리를 `PATHEXT` 확장자와 함께 찾음; 경로가 있는 이름은 그대로 확인; 가상 경로로 출력; 종료 상태 0/1/2, 이름 없이 호출하면 255) |
 | `xargs` | 완료 (`-0 -a -d -E -e -I -i -L -l -n -P -p -r -s -t -x --show-limits`; 따옴표와 역슬래시 해석, 줄 끝 공백으로 이어지는 줄, 명령줄 길이 제한 30000자, `-P` 병렬 실행; 종료 상태 0/123/124/126/127/1) |
 | `grep` | 완료 (`-E -F -G -e -f -i -v -w -x -c -l -L -m -n -H -h -o -q -s -b -r -A -B -C -NUM -a -I -z -Z --include --exclude --exclude-dir`; 기본/확장 정규식(역참조 포함), 가장 왼쪽의 가장 긴 일치, UTF-8 문자 단위; `-P` 와 색은 미지원) |
 | `head` | 완료 (`-n -c -q -v -NUM`, `-n -K` 는 끝의 K줄만 빼고) |
@@ -125,7 +126,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `date`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `xargs`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `date`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `which`, `xargs`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -155,6 +156,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `env_test` | `env`, `printenv`: 환경 변경, `-i`/`-u`, 명령 실행과 종료 상태, `-C` |
 | `regex_test` | `common/regex.c` 단위 테스트: 기본/확장 문법, 가장 긴 일치, 집합과 클래스, 단어 경계, 역참조, UTF-8, 오류 메시지 |
 | `clock_test` | `sleep`, `date`: 대기 시간, 형식, `-d` 해석, ISO 주, 종료 상태 |
+| `which_test` | `which`: 프로젝트 `bin`, `PATH`, `PATHEXT`, 디렉터리, 경로가 있는 이름, `-a`, 종료 상태 |
 | `realpath_test` | `realpath`: 가상 경로, 존재 규칙, 상대 경로, 정션 |
 | `names_test` | `basename`, `dirname`: 구분자(`\` 포함), 접미사, NUL 끝, 루트 |
 | `xargs_test` | `xargs`: 묶음, 항목 해석, 파일, 종료 상태, 병렬 실행 |
@@ -221,6 +223,7 @@ Winshell/
 ├─ tr/             tr 명령
 ├─ uniq/           uniq 명령
 ├─ wc/             wc 명령
+├─ which/          which 명령
 ├─ xargs/          xargs 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
