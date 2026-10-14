@@ -190,91 +190,76 @@ static int compare_text(const unsigned char* a, const unsigned char* aEnd,
     }
 }
 
-/** Compares by string numerical value: optional blanks, a sign, digits with a decimal point. */
+/** A number as sort -n reads it: blanks, a sign, digits, a fraction; what follows is ignored. */
+typedef struct {
+    int                  sign;              // 1 or -1; zero is always 1
+    const unsigned char* integer;           // without leading zeros
+    size_t               integerLength;
+    const unsigned char* fraction;          // without trailing zeros
+    size_t               fractionLength;
+} Number;
+
+static void read_number(const unsigned char* p, const unsigned char* end, Number* n) {
+    n->sign = 1;
+    n->fractionLength = 0;
+
+    while (p < end && is_blank(*p))
+        p++;
+    if (p < end && *p == '-') {
+        n->sign = -1;
+        p++;
+    }
+    while (p < end && *p == '0')
+        p++;
+
+    n->integer = p;
+    while (p < end && *p >= '0' && *p <= '9')
+        p++;
+    n->integerLength = (size_t)(p - n->integer);
+
+    n->fraction = p;
+    if (p < end && *p == '.') {
+        n->fraction = ++p;
+        while (p < end && *p >= '0' && *p <= '9')
+            p++;
+        n->fractionLength = (size_t)(p - n->fraction);
+        while (n->fractionLength > 0 && n->fraction[n->fractionLength - 1] == '0')
+            n->fractionLength--;
+    }
+    if (n->integerLength == 0 && n->fractionLength == 0)
+        n->sign = 1;
+}
+
+static int compare_magnitudes(const Number* x, const Number* y) {
+    size_t common;
+    int c;
+
+    if (x->integerLength != y->integerLength)
+        return x->integerLength < y->integerLength ? -1 : 1;
+    c = x->integerLength > 0 ? memcmp(x->integer, y->integer, x->integerLength) : 0;
+    if (c != 0)
+        return c < 0 ? -1 : 1;
+
+    common = x->fractionLength < y->fractionLength ? x->fractionLength : y->fractionLength;
+    c = common > 0 ? memcmp(x->fraction, y->fraction, common) : 0;
+    if (c != 0)
+        return c < 0 ? -1 : 1;
+    if (x->fractionLength != y->fractionLength)
+        return x->fractionLength < y->fractionLength ? -1 : 1;
+    return 0;
+}
+
 static int compare_numeric(const unsigned char* a, const unsigned char* aEnd,
                            const unsigned char* b, const unsigned char* bEnd) {
-    int signA = 1, signB = 1;
-    const unsigned char *ia, *ib, *fa, *fb;
-    size_t ila, ilb, fla, flb, i;
+    Number x, y;
+    int result;
 
-    while (a < aEnd && is_blank(*a))
-        a++;
-    while (b < bEnd && is_blank(*b))
-        b++;
-    if (a < aEnd && *a == '-') {
-        signA = -1;
-        a++;
-    }
-    if (b < bEnd && *b == '-') {
-        signB = -1;
-        b++;
-    }
-
-    // integer part without leading zeros, then the fraction without trailing zeros
-    while (a < aEnd && *a == '0')
-        a++;
-    while (b < bEnd && *b == '0')
-        b++;
-    ia = a;
-    while (a < aEnd && *a >= '0' && *a <= '9')
-        a++;
-    ila = (size_t)(a - ia);
-    ib = b;
-    while (b < bEnd && *b >= '0' && *b <= '9')
-        b++;
-    ilb = (size_t)(b - ib);
-
-    fa = a;
-    fla = 0;
-    if (a < aEnd && *a == '.') {
-        fa = a + 1;
-        a = fa;
-        while (a < aEnd && *a >= '0' && *a <= '9')
-            a++;
-        fla = (size_t)(a - fa);
-        while (fla > 0 && fa[fla - 1] == '0')
-            fla--;
-    }
-    fb = b;
-    flb = 0;
-    if (b < bEnd && *b == '.') {
-        fb = b + 1;
-        b = fb;
-        while (b < bEnd && *b >= '0' && *b <= '9')
-            b++;
-        flb = (size_t)(b - fb);
-        while (flb > 0 && fb[flb - 1] == '0')
-            flb--;
-    }
-
-    // zero has no sign
-    if (ila == 0 && fla == 0)
-        signA = 1;
-    if (ilb == 0 && flb == 0)
-        signB = 1;
-    if (signA != signB)
-        return signA < signB ? -1 : 1;
-
-    {
-        int result = 0;
-        if (ila != ilb) {
-            result = ila < ilb ? -1 : 1;
-        } else {
-            int c = ila > 0 ? memcmp(ia, ib, ila) : 0;
-            if (c != 0) {
-                result = c < 0 ? -1 : 1;
-            } else {
-                size_t common = fla < flb ? fla : flb;
-                c = common > 0 ? memcmp(fa, fb, common) : 0;
-                if (c != 0)
-                    result = c < 0 ? -1 : 1;
-                else if (fla != flb)
-                    result = fla < flb ? -1 : 1;
-            }
-        }
-        (void)i;
-        return signA < 0 ? -result : result;
-    }
+    read_number(a, aEnd, &x);
+    read_number(b, bEnd, &y);
+    if (x.sign != y.sign)
+        return x.sign < y.sign ? -1 : 1;
+    result = compare_magnitudes(&x, &y);
+    return x.sign < 0 ? -result : result;
 }
 
 /** General numeric: the leading number as strtod reads it; text that is no number comes first. */

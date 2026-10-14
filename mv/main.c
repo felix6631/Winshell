@@ -35,18 +35,17 @@ static int differ_only_in_case(const char* a, const char* b) {
     return _stricmp(fullA, fullB) == 0 && strcmp(fullA, fullB) != 0;
 }
 
-static int move_one(const FsOptions* o, const char* srcDisplay, const char* srcNative,
-                    const char* dstDisplay, const char* dstNative) {
-    DWORD srcAttributes, dstAttributes;
-    int srcIsDirectory, dstExists;
-    DWORD error;
-
-    if (fs_attributes(srcNative, &srcAttributes) != 0) {
-        fprintf(stderr, PROGRAM ": cannot stat '%s': %s\n", srcDisplay, fs_strerror(GetLastError()));
-        return 1;
-    }
-    srcIsDirectory = (srcAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-    dstExists = fs_attributes(dstNative, &dstAttributes) == 0;
+/**
+ * What is at the destination is in the way or not: the same file, a directory into itself, a directory
+ * over a file or the reverse are refused; otherwise an existing destination is made free for the move
+ * (asking when -i, keeping it with -n). Returns 0 to go on, 1 for an error (reported), 2 to do nothing.
+ */
+static int prepare_destination(const FsOptions* o, const char* srcDisplay, const char* srcNative,
+                               DWORD srcAttributes, const char* dstDisplay, const char* dstNative) {
+    DWORD dstAttributes;
+    int srcIsDirectory = (srcAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    int dstExists = fs_attributes(dstNative, &dstAttributes) == 0;
+    int dstIsDirectory;
 
     if (dstExists && fs_same_file(srcNative, dstNative) && !differ_only_in_case(srcNative, dstNative)) {
         fprintf(stderr, PROGRAM ": '%s' and '%s' are the same file\n", srcDisplay, dstDisplay);
@@ -58,37 +57,80 @@ static int move_one(const FsOptions* o, const char* srcDisplay, const char* srcN
         return 1;
     }
 
-    if (dstExists && !differ_only_in_case(srcNative, dstNative)) {
-        int dstIsDirectory = (dstAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    if (!dstExists || differ_only_in_case(srcNative, dstNative))
+        return 0;
 
-        if (srcIsDirectory && !dstIsDirectory) {
-            fprintf(stderr, PROGRAM ": cannot overwrite non-directory '%s' with directory '%s'\n",
-                    dstDisplay, srcDisplay);
-            return 1;
-        }
-        if (!srcIsDirectory && dstIsDirectory) {
-            fprintf(stderr, PROGRAM ": cannot overwrite directory '%s' with non-directory\n", dstDisplay);
-            return 1;
-        }
-        if (o->noClobber)
-            return 0;
-        if (o->interactive && !fs_confirm(PROGRAM ": overwrite '%s'? ", dstDisplay))
-            return 0;
-
-        if (dstIsDirectory) {
-            // an existing directory is replaced only when it is empty
-            if (!RemoveDirectoryA(dstNative)) {
-                fprintf(stderr, PROGRAM ": cannot move '%s' to '%s': %s\n", srcDisplay, dstDisplay,
-                        fs_strerror(GetLastError()));
-                return 1;
-            }
-        } else if (dstAttributes & FILE_ATTRIBUTE_READONLY) {
-            if (!o->force && !o->interactive && fs_stdin_is_console() &&
-                !fs_confirm(PROGRAM ": replace '%s', overriding the read-only attribute? ", dstDisplay))
-                return 0;
-            SetFileAttributesA(dstNative, FILE_ATTRIBUTE_NORMAL);
-        }
+    dstIsDirectory = (dstAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    if (srcIsDirectory && !dstIsDirectory) {
+        fprintf(stderr, PROGRAM ": cannot overwrite non-directory '%s' with directory '%s'\n", dstDisplay, srcDisplay);
+        return 1;
     }
+    if (!srcIsDirectory && dstIsDirectory) {
+        fprintf(stderr, PROGRAM ": cannot overwrite directory '%s' with non-directory\n", dstDisplay);
+        return 1;
+    }
+    if (o->noClobber)
+        return 2;
+    if (o->interactive && !fs_confirm(PROGRAM ": overwrite '%s'? ", dstDisplay))
+        return 2;
+
+    if (dstIsDirectory) {
+        // an existing directory is replaced only when it is empty
+        if (!RemoveDirectoryA(dstNative)) {
+            fprintf(stderr, PROGRAM ": cannot move '%s' to '%s': %s\n", srcDisplay, dstDisplay,
+                    fs_strerror(GetLastError()));
+            return 1;
+        }
+    } else if (dstAttributes & FILE_ATTRIBUTE_READONLY) {
+        if (!o->force && !o->interactive && fs_stdin_is_console() &&
+            !fs_confirm(PROGRAM ": replace '%s', overriding the read-only attribute? ", dstDisplay))
+            return 2;
+        SetFileAttributesA(dstNative, FILE_ATTRIBUTE_NORMAL);
+    }
+    return 0;
+}
+
+/** A move to another drive: copy, then remove what was copied. */
+static int move_across_volumes(const FsOptions* o, const char* srcDisplay, const char* srcNative,
+                               const char* dstDisplay, const char* dstNative) {
+    FsOptions copy = *o;
+    FsOptions remove = *o;
+
+    copy.recursive = 1;
+    copy.preserve = 1;
+    copy.force = 1;
+    copy.interactive = 0;
+    copy.noClobber = 0;
+    copy.verbose = 0;
+    remove.recursive = 1;
+    remove.force = 1;
+    remove.interactive = 0;
+    remove.verbose = 0;
+
+    if (fs_copy(&copy, srcDisplay, srcNative, dstDisplay, dstNative) != 0) {
+        fprintf(stderr, PROGRAM ": cannot move '%s' to '%s': copy failed, the source is left in place\n",
+                srcDisplay, dstDisplay);
+        return 1;
+    }
+    if (fs_remove(&remove, srcDisplay, srcNative) != 0)
+        return 1;
+    if (o->verbose)
+        printf("renamed '%s' -> '%s'\n", srcDisplay, dstDisplay);
+    return 0;
+}
+
+static int move_one(const FsOptions* o, const char* srcDisplay, const char* srcNative,
+                    const char* dstDisplay, const char* dstNative) {
+    DWORD srcAttributes, error;
+    int prepared;
+
+    if (fs_attributes(srcNative, &srcAttributes) != 0) {
+        fprintf(stderr, PROGRAM ": cannot stat '%s': %s\n", srcDisplay, fs_strerror(GetLastError()));
+        return 1;
+    }
+    prepared = prepare_destination(o, srcDisplay, srcNative, srcAttributes, dstDisplay, dstNative);
+    if (prepared != 0)
+        return prepared == 2 ? 0 : 1;
 
     if (getenv("WINSHELL_TEST_CROSS_DEVICE") != NULL) {
         // The tests set this to run the code of a move between volumes on a single one:
@@ -102,33 +144,8 @@ static int move_one(const FsOptions* o, const char* srcDisplay, const char* srcN
         error = GetLastError();
     }
 
-    if (error == ERROR_NOT_SAME_DEVICE) {
-        // another drive: copy, then remove what was copied
-        FsOptions copy = *o;
-        FsOptions remove = *o;
-
-        copy.recursive = 1;
-        copy.preserve = 1;
-        copy.force = 1;
-        copy.interactive = 0;
-        copy.noClobber = 0;
-        copy.verbose = 0;
-        remove.recursive = 1;
-        remove.force = 1;
-        remove.interactive = 0;
-        remove.verbose = 0;
-
-        if (fs_copy(&copy, srcDisplay, srcNative, dstDisplay, dstNative) != 0) {
-            fprintf(stderr, PROGRAM ": cannot move '%s' to '%s': copy failed, the source is left in place\n",
-                    srcDisplay, dstDisplay);
-            return 1;
-        }
-        if (fs_remove(&remove, srcDisplay, srcNative) != 0)
-            return 1;
-        if (o->verbose)
-            printf("renamed '%s' -> '%s'\n", srcDisplay, dstDisplay);
-        return 0;
-    }
+    if (error == ERROR_NOT_SAME_DEVICE)
+        return move_across_volumes(o, srcDisplay, srcNative, dstDisplay, dstNative);
 
     fprintf(stderr, PROGRAM ": cannot move '%s' to '%s': %s\n", srcDisplay, dstDisplay, fs_strerror(error));
     return 1;

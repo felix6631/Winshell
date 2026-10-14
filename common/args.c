@@ -32,6 +32,98 @@ static const ArgsOption* find_long(const ArgsSpec* spec, const char* name, size_
     return *ambiguous ? NULL : found;
 }
 
+/**
+ * A long option, with the argument at *a: --name, --name=value, a prefix of a name, or --name value.
+ * Returns ARGS_OK, ARGS_EXIT (--help, --version) or ARGS_FAILED; *a moves on past a value taken from the next word.
+ */
+static int parse_long(const ArgsSpec* spec, int argc, char* argv[], int* a, ArgsHandler handler, void* context) {
+    const char* arg = argv[*a];
+    const char* equals = strchr(arg + 2, '=');
+    size_t nameLength = equals != NULL ? (size_t)(equals - (arg + 2)) : strlen(arg + 2);
+    const char* value = equals != NULL ? equals + 1 : NULL;
+    const ArgsOption* option;
+    int ambiguous;
+
+    if (strcmp(arg, "--help") == 0) {
+        spec->usage();
+        return ARGS_EXIT;
+    }
+    if (strcmp(arg, "--version") == 0) {
+        printf("%s (Winshell) %s\n", spec->program, spec->version);
+        return ARGS_EXIT;
+    }
+
+    option = find_long(spec, arg + 2, nameLength, &ambiguous);
+    if (option == NULL) {
+        if (ambiguous)
+            fprintf(stderr, "%s: option '%.*s' is ambiguous\n", spec->program, (int)(nameLength + 2), arg);
+        else
+            fprintf(stderr, "%s: unrecognized option '%.*s'\n", spec->program, (int)(nameLength + 2), arg);
+        try_help(spec);
+        return ARGS_FAILED;
+    }
+
+    if (option->argument == ARGS_NONE && value != NULL) {
+        fprintf(stderr, "%s: option '--%s' doesn't allow an argument\n", spec->program, option->longName);
+        try_help(spec);
+        return ARGS_FAILED;
+    }
+    if (option->argument == ARGS_REQUIRED && value == NULL) {
+        if (*a + 1 >= argc) {
+            fprintf(stderr, "%s: option '--%s' requires an argument\n", spec->program, option->longName);
+            try_help(spec);
+            return ARGS_FAILED;
+        }
+        value = argv[++*a];
+    }
+    return handler(option->id, value, context) != 0 ? ARGS_FAILED : ARGS_OK;
+}
+
+/** Grouped short options; the first one with a value takes the rest of the word or the next word. */
+static int parse_short(const ArgsSpec* spec, int argc, char* argv[], int* a, ArgsHandler handler, void* context) {
+    const char* p;
+
+    for (p = argv[*a] + 1; *p != '\0'; p++) {
+        const ArgsOption* option = find_short(spec, *p);
+        const char* value = NULL;
+
+        if (option == NULL) {
+            fprintf(stderr, "%s: invalid option -- '%c'\n", spec->program, *p);
+            try_help(spec);
+            return ARGS_FAILED;
+        }
+        if (option->argument == ARGS_REQUIRED) {
+            if (p[1] != '\0') {
+                value = p + 1;
+            } else if (*a + 1 < argc) {
+                value = argv[++*a];
+            } else {
+                fprintf(stderr, "%s: option requires an argument -- '%c'\n", spec->program, *p);
+                try_help(spec);
+                return ARGS_FAILED;
+            }
+        }
+        if (option->argument == ARGS_OPTIONAL && p[1] != '\0')
+            value = p + 1;      // only attached to the option: -i.bak
+        if (handler(option->id, value, context) != 0)
+            return ARGS_FAILED;
+        if (value != NULL)
+            break;
+    }
+    return ARGS_OK;
+}
+
+/** -5: a number as an option. */
+static int is_number_option(const ArgsSpec* spec, const char* arg) {
+    const char* p;
+
+    if (!spec->numberOption || arg[1] < '0' || arg[1] > '9')
+        return 0;
+    for (p = arg + 1; *p >= '0' && *p <= '9'; p++)
+        ;
+    return *p == '\0';
+}
+
 int args_parse(const ArgsSpec* spec, int argc, char* argv[], ArgsHandler handler, void* context,
                const char*** operandsOut, int* operandCountOut) {
     const char** operands;
@@ -45,6 +137,7 @@ int args_parse(const ArgsSpec* spec, int argc, char* argv[], ArgsHandler handler
 
     for (a = 1; a < argc; a++) {
         const char* arg = argv[a];
+        int result;
 
         if (optionsEnded || arg[0] != '-' || arg[1] == '\0') {
             if (spec->stopAtOperand)
@@ -58,92 +151,15 @@ int args_parse(const ArgsSpec* spec, int argc, char* argv[], ArgsHandler handler
             continue;
         }
 
-        if (arg[1] == '-') {
-            const char* equals = strchr(arg + 2, '=');
-            size_t nameLength = equals != NULL ? (size_t)(equals - (arg + 2)) : strlen(arg + 2);
-            const char* value = equals != NULL ? equals + 1 : NULL;
-            const ArgsOption* option;
-            int ambiguous;
-
-            if (strcmp(arg, "--help") == 0) {
-                spec->usage();
-                return ARGS_EXIT;
-            }
-            if (strcmp(arg, "--version") == 0) {
-                printf("%s (Winshell) %s\n", spec->program, spec->version);
-                return ARGS_EXIT;
-            }
-
-            option = find_long(spec, arg + 2, nameLength, &ambiguous);
-            if (option == NULL) {
-                if (ambiguous)
-                    fprintf(stderr, "%s: option '%.*s' is ambiguous\n", spec->program, (int)(nameLength + 2), arg);
-                else
-                    fprintf(stderr, "%s: unrecognized option '%.*s'\n", spec->program, (int)(nameLength + 2), arg);
-                try_help(spec);
-                return ARGS_FAILED;
-            }
-
-            if (option->argument == ARGS_NONE && value != NULL) {
-                fprintf(stderr, "%s: option '--%s' doesn't allow an argument\n", spec->program, option->longName);
-                try_help(spec);
-                return ARGS_FAILED;
-            }
-            if (option->argument == ARGS_REQUIRED && value == NULL) {
-                if (a + 1 >= argc) {
-                    fprintf(stderr, "%s: option '--%s' requires an argument\n", spec->program, option->longName);
-                    try_help(spec);
-                    return ARGS_FAILED;
-                }
-                value = argv[++a];
-            }
-            if (handler(option->id, value, context) != 0)
-                return ARGS_FAILED;
-            continue;
-        }
-
-        // -5: a number as an option
-        if (spec->numberOption && arg[1] >= '0' && arg[1] <= '9') {
-            const char* p;
-            for (p = arg + 1; *p >= '0' && *p <= '9'; p++)
-                ;
-            if (*p == '\0') {
-                if (handler(ARGS_NUMBER, arg + 1, context) != 0)
-                    return ARGS_FAILED;
-                continue;
-            }
-        }
-
-        // short options, grouped; the first one with a value takes the rest of the word or the next word
-        {
-            const char* p;
-            for (p = arg + 1; *p != '\0'; p++) {
-                const ArgsOption* option = find_short(spec, *p);
-                const char* value = NULL;
-
-                if (option == NULL) {
-                    fprintf(stderr, "%s: invalid option -- '%c'\n", spec->program, *p);
-                    try_help(spec);
-                    return ARGS_FAILED;
-                }
-                if (option->argument == ARGS_REQUIRED) {
-                    if (p[1] != '\0') {
-                        value = p + 1;
-                    } else if (a + 1 < argc) {
-                        value = argv[++a];
-                    } else {
-                        fprintf(stderr, "%s: option requires an argument -- '%c'\n", spec->program, *p);
-                        try_help(spec);
-                        return ARGS_FAILED;
-                    }
-                }
-                if (option->argument == ARGS_OPTIONAL && p[1] != '\0')
-                    value = p + 1;      // only attached to the option: -i.bak
-                if (handler(option->id, value, context) != 0)
-                    return ARGS_FAILED;
-                if (value != NULL)
-                    break;
-            }
+        if (arg[1] == '-')
+            result = parse_long(spec, argc, argv, &a, handler, context);
+        else if (is_number_option(spec, arg))
+            result = handler(ARGS_NUMBER, arg + 1, context) != 0 ? ARGS_FAILED : ARGS_OK;
+        else
+            result = parse_short(spec, argc, argv, &a, handler, context);
+        if (result != ARGS_OK) {
+            free(operands);
+            return result;
         }
     }
 

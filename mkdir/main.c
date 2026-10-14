@@ -68,9 +68,24 @@ static int directory_exists(const char* native) {
     return fs_attributes(native, &attributes) == 0 && (attributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+/** Where the components of a path begin: after the root of a drive, or of a share (server and share). */
+static size_t root_length(const char* path, size_t length) {
+    size_t start = 0;
+
+    if (length >= 3 && path[1] == ':' && is_separator(path[2])) {
+        start = 3;
+    } else if (path[0] == '\\' && path[1] == '\\') {
+        size_t slashes = 0;
+        for (start = 2; path[start] != '\0' && slashes < 2; start++)
+            if (is_separator(path[start]))
+                slashes++;
+    }
+    return start;
+}
+
 static int make_directory(const char* display, const char* native, int parents, int verbose) {
     char path[VPATH_MAX];
-    size_t length = strlen(native), start = 0, i, components = 0, remaining;
+    size_t length = strlen(native), start, i, components = 0, remaining;
 
     if (length >= sizeof path) {
         fprintf(stderr, PROGRAM ": cannot create directory '%s': File name too long\n", display);
@@ -92,14 +107,7 @@ static int make_directory(const char* display, const char* native, int parents, 
     while (length > 3 && is_separator(path[length - 1]))
         path[--length] = '\0';
 
-    if (length >= 3 && path[1] == ':' && is_separator(path[2])) {
-        start = 3;                                  // after the root of a drive
-    } else if (path[0] == '\\' && path[1] == '\\') {
-        size_t slashes = 0;
-        for (start = 2; path[start] != '\0' && slashes < 2; start++)
-            if (is_separator(path[start]))
-                slashes++;                          // the root is the share: server and share
-    }
+    start = root_length(path, length);
 
     for (i = start; i < length; i++)
         if (is_separator(path[i]) && i > start && !is_separator(path[i - 1]))

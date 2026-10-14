@@ -211,8 +211,8 @@ static Node* parse_primary(Parser* p);
 
 static Node* parse_comma(Parser* p);
 
-/** The tests: sets n and returns 1; 0 when the word is not one of them; -1 after a message. */
-static int parse_test(Parser* p, const char* word, Node* n) {
+/** -true -false, the names and paths, regular expressions and the type. */
+static int parse_name_test(Parser* p, const char* word, Node* n) {
     const char* a;
 
 #define NEED(name)                                      \
@@ -265,7 +265,27 @@ static int parse_test(Parser* p, const char* word, Node* n) {
                 return -1;
             }
         }
-    } else if (IS("-size")) {
+    } else {
+        return 0;
+    }
+#undef NEED
+#undef IS
+    return 1;
+}
+
+/** The tests of the size, the times and the state of a file. */
+static int parse_metadata_test(Parser* p, const char* word, Node* n) {
+    const char* a;
+
+#define NEED(name)                                      \
+    do {                                                \
+        a = argument(p, name);                          \
+        if (a == NULL)                                  \
+            return -1;                                  \
+    } while (0)
+#define IS(name) (strcmp(word, name) == 0)
+
+    if (IS("-size")) {
         size_t length;
         char unit = 'b';
         char text[64];
@@ -314,6 +334,15 @@ static int parse_test(Parser* p, const char* word, Node* n) {
 #undef NEED
 #undef IS
     return 1;
+}
+
+/** The tests: sets n and returns 1; 0 when the word is not one of them; -1 after a message. */
+static int parse_test(Parser* p, const char* word, Node* n) {
+    int result = parse_name_test(p, word, n);
+
+    if (result == 0)
+        result = parse_metadata_test(p, word, n);
+    return result;
 }
 
 /** The actions and the global options: sets n and returns 1; 0 when the word is not one of them; -1 after a message. */

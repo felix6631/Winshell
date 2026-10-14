@@ -291,93 +291,92 @@ static int matching_names(const char* directory, const char* segment, size_t len
  * Expands the pattern from position p. prefix holds what was written so far,
  * path and separator included.
  */
+static void walk(Context* context, const char* prefix, const char* p);
+
+/** Goes on with the rest of the pattern below the directory candidate (which is taken over). */
+static void descend(Context* context, char* candidate, char separator, const char* rest) {
+    char sep[2];
+    char* next;
+
+    sep[0] = separator;
+    sep[1] = '\0';
+    next = join(candidate, strlen(candidate), sep, 1, "", 0);
+    free(candidate);
+    if (next == NULL) {
+        context->failed = 1;
+        return;
+    }
+    walk(context, next, rest);
+    free(next);
+}
+
+/** A segment without wildcards: the one name, which has to exist when it is the last. */
+static void walk_literal(Context* context, const char* prefix, const char* p, size_t length, char separator) {
+    char* literal = unescape(p, length);
+    char* candidate;
+
+    if (literal == NULL) {
+        context->failed = 1;
+        return;
+    }
+    candidate = join(prefix, strlen(prefix), literal, strlen(literal), "", 0);
+    free(literal);
+    if (candidate == NULL) {
+        context->failed = 1;
+        return;
+    }
+
+    if (separator == '\0') {
+        if (path_exists(candidate) && list_push(&context->results, candidate) == 0)
+            return;
+        free(candidate);
+        return;
+    }
+    descend(context, candidate, separator, p + length + 1);
+}
+
+/** A segment with wildcards: every name of the directory that matches, in order. */
+static void walk_wildcard(Context* context, const char* prefix, const char* p, size_t length, char separator) {
+    StringList names = { NULL, 0, 0 };
+    int last = separator == '\0';
+    size_t prefixLength = strlen(prefix), i;
+
+    if (matching_names(prefix, p, length, !last, &names) != 0) {
+        list_free(&names);
+        context->failed = 1;
+        return;
+    }
+    qsort(names.items, names.count, sizeof *names.items, compare_names);
+
+    for (i = 0; i < names.count && !context->failed; i++) {
+        char* candidate = join(prefix, prefixLength, names.items[i], strlen(names.items[i]), "", 0);
+
+        if (candidate == NULL) {
+            context->failed = 1;
+            break;
+        }
+        if (last) {
+            if (list_push(&context->results, candidate) != 0) {
+                free(candidate);
+                context->failed = 1;
+            }
+        } else {
+            descend(context, candidate, separator, p + length + 1);
+        }
+    }
+    list_free(&names);
+}
+
 static void walk(Context* context, const char* prefix, const char* p) {
     size_t length = segment_length(p);
     char separator = p[length];         // the character after the segment, or '\0' at the end
-    int last = (separator == '\0');
-    size_t prefixLength = strlen(prefix);
 
     if (context->failed)
         return;
-
-    if (!segment_has_wildcard(p, length)) {
-        char* literal = unescape(p, length);
-        char* candidate;
-        if (literal == NULL) {
-            context->failed = 1;
-            return;
-        }
-        candidate = join(prefix, prefixLength, literal, strlen(literal), "", 0);
-        free(literal);
-        if (candidate == NULL) {
-            context->failed = 1;
-            return;
-        }
-
-        if (last) {
-            if (path_exists(candidate) && list_push(&context->results, candidate) == 0)
-                return;
-            free(candidate);
-            return;
-        }
-
-        {
-            char sep[2];
-            char* next;
-            sep[0] = separator;
-            sep[1] = '\0';
-            next = join(candidate, strlen(candidate), sep, 1, "", 0);
-            free(candidate);
-            if (next == NULL) {
-                context->failed = 1;
-                return;
-            }
-            walk(context, next, p + length + 1);
-            free(next);
-        }
-        return;
-    }
-
-    {
-        StringList names = { NULL, 0, 0 };
-        size_t i;
-
-        if (matching_names(prefix, p, length, !last, &names) != 0) {
-            list_free(&names);
-            context->failed = 1;
-            return;
-        }
-        qsort(names.items, names.count, sizeof *names.items, compare_names);
-
-        for (i = 0; i < names.count && !context->failed; i++) {
-            char sep[2];
-            char* candidate = join(prefix, prefixLength, names.items[i], strlen(names.items[i]), "", 0);
-
-            if (candidate == NULL) {
-                context->failed = 1;
-                break;
-            }
-            if (last) {
-                if (list_push(&context->results, candidate) != 0) {
-                    free(candidate);
-                    context->failed = 1;
-                }
-            } else {
-                char* next;
-                sep[0] = separator;
-                sep[1] = '\0';
-                next = join(candidate, strlen(candidate), sep, 1, "", 0);
-                free(candidate);
-                if (next == NULL) {
-                    context->failed = 1;
-                    break;
-                }
-                walk(context, next, p + length + 1);
-                free(next);
-            }
-        }
-        list_free(&names);
-    }
+    if (segment_has_wildcard(p, length))
+        walk_wildcard(context, prefix, p, length, separator);
+    else
+        walk_literal(context, prefix, p, length, separator);
 }
 
 /**

@@ -696,6 +696,135 @@ static void substitute_command(Executor* x, const Command* c) {
         print_pattern(x, c->sub->out);
 }
 
+/** The commands that only do something to the pattern space, the hold space or the output. */
+static void run_plain_command(Executor* x, Command* c) {
+    switch (c->name) {
+        case '=': {
+            char number[32];
+            int n = sprintf(number, "%ld\n", x->lineNumber);
+            write_raw(x, x->out, number, (size_t)n);
+            break;
+        }
+        case 'a':
+            queue_append(x, 't', c->text, c->length);
+            break;
+        case 'i':
+            write_raw(x, x->out, c->text, c->length);
+            break;
+        case 'F': {
+            const char* name = x->allNames[x->streamBase + x->psFile];
+            write_raw(x, x->out, name, strlen(name));
+            write_raw(x, x->out, "\n", 1);
+            break;
+        }
+        case 'g': case 'G': case 'h': case 'H': case 'x':
+            hold_command(x, c->name);
+            break;
+        case 'l':
+            list_pattern(x, c->number >= 0 ? c->number : x->config->lineWrap);
+            break;
+        case 'p':
+            print_pattern(x, x->out);
+            break;
+        case 'P':
+            print_first_line(x, x->out);
+            break;
+        case 'r':
+            queue_append(x, 'r', c->text, c->length);
+            break;
+        case 'R':
+            queue_next_line(x, c);
+            break;
+        case 's':
+            substitute_command(x, c);
+            break;
+        case 'w':
+            print_pattern(x, c->out);
+            break;
+        case 'W':
+            print_first_line(x, c->out);
+            break;
+        case 'y':
+            translate(x, c);
+            break;
+        case 'z':
+            x->ps.length = 0;
+            break;
+        default:        // { } : v and the commands that change the flow
+            break;
+    }
+}
+
+typedef enum { FLOW_NEXT, FLOW_JUMP, FLOW_LEAVE } Flow;
+
+/**
+ * The commands that decide what happens next: end the cycle (c d D n N q Q) or jump (b t T).
+ * FLOW_NEXT goes on with the next command, FLOW_JUMP sets *pc, FLOW_LEAVE ends the program with *result.
+ */
+static Flow run_flow_command(Executor* x, Command* c, size_t* pc, CycleResult* result) {
+    switch (c->name) {
+        case 'c':
+            if (c->second.kind == ADDR_NONE || c->negate || !c->rangeActive)
+                write_raw(x, x->out, c->text, c->length);
+            x->ps.length = 0;
+            *result = CYCLE_DELETE;
+            return FLOW_LEAVE;
+        case 'd':
+            x->ps.length = 0;
+            *result = CYCLE_DELETE;
+            return FLOW_LEAVE;
+        case 'D':
+            *result = delete_first_line(x);
+            return FLOW_LEAVE;
+        case 'n':
+            if (!has_next(x)) {
+                *result = CYCLE_END;
+                return FLOW_LEAVE;
+            }
+            if (!x->config->quiet)
+                print_pattern(x, x->out);
+            read_pattern_space(x, 0);
+            return FLOW_NEXT;
+        case 'N':
+            if (!has_next(x)) {
+                *result = CYCLE_END;
+                return FLOW_LEAVE;
+            }
+            read_pattern_space(x, 1);
+            return FLOW_NEXT;
+        case 'q':
+            x->quitStatus = c->number >= 0 ? (int)c->number : 0;
+            *result = CYCLE_QUIT;
+            return FLOW_LEAVE;
+        case 'Q':
+            x->quitStatus = c->number >= 0 ? (int)c->number : 0;
+            *result = CYCLE_QUIT_SILENT;
+            return FLOW_LEAVE;
+        case 't':
+            if (!x->replaced)
+                return FLOW_NEXT;
+            x->replaced = 0;
+            *pc = c->target;
+            return FLOW_JUMP;
+        case 'T':
+            if (!x->replaced) {
+                *pc = c->target;
+                return FLOW_JUMP;
+            }
+            x->replaced = 0;
+            return FLOW_NEXT;
+        case 'b':
+            *pc = c->target;
+            return FLOW_JUMP;
+        default:
+            return FLOW_NEXT;
+    }
+}
+
+static int is_flow_command(int name) {
+    return strchr("cdDnNqQtTb", name) != NULL;
+}
+
 static CycleResult execute_program(Executor* x) {
     size_t pc = 0;
 
@@ -707,107 +836,16 @@ static CycleResult execute_program(Executor* x) {
             continue;
         }
 
-        switch (c->name) {
-            case '{': case '}': case ':': case 'v':
-                break;
-            case '=': {
-                char number[32];
-                int n = sprintf(number, "%ld\n", x->lineNumber);
-                write_raw(x, x->out, number, (size_t)n);
-                break;
-            }
-            case 'a':
-                queue_append(x, 't', c->text, c->length);
-                break;
-            case 'i':
-                write_raw(x, x->out, c->text, c->length);
-                break;
-            case 'c':
-                if (c->second.kind == ADDR_NONE || c->negate || !c->rangeActive)
-                    write_raw(x, x->out, c->text, c->length);
-                x->ps.length = 0;
-                return CYCLE_DELETE;
-            case 'd':
-                x->ps.length = 0;
-                return CYCLE_DELETE;
-            case 'D':
-                return delete_first_line(x);
-            case 'F': {
-                const char* name = x->allNames[x->streamBase + x->psFile];
-                write_raw(x, x->out, name, strlen(name));
-                write_raw(x, x->out, "\n", 1);
-                break;
-            }
-            case 'g': case 'G': case 'h': case 'H': case 'x':
-                hold_command(x, c->name);
-                break;
-            case 'l':
-                list_pattern(x, c->number >= 0 ? c->number : x->config->lineWrap);
-                break;
-            case 'n':
-                if (!has_next(x))
-                    return CYCLE_END;
-                if (!x->config->quiet)
-                    print_pattern(x, x->out);
-                read_pattern_space(x, 0);
-                break;
-            case 'N':
-                if (!has_next(x))
-                    return CYCLE_END;
-                read_pattern_space(x, 1);
-                break;
-            case 'p':
-                print_pattern(x, x->out);
-                break;
-            case 'P':
-                print_first_line(x, x->out);
-                break;
-            case 'q':
-                x->quitStatus = c->number >= 0 ? (int)c->number : 0;
-                return CYCLE_QUIT;
-            case 'Q':
-                x->quitStatus = c->number >= 0 ? (int)c->number : 0;
-                return CYCLE_QUIT_SILENT;
-            case 'r':
-                queue_append(x, 'r', c->text, c->length);
-                break;
-            case 'R':
-                queue_next_line(x, c);
-                break;
-            case 's':
-                substitute_command(x, c);
-                break;
-            case 't':
-                if (x->replaced) {
-                    x->replaced = 0;
-                    pc = c->target;
-                    continue;
-                }
-                break;
-            case 'T':
-                if (!x->replaced) {
-                    pc = c->target;
-                    continue;
-                }
-                x->replaced = 0;
-                break;
-            case 'b':
-                pc = c->target;
+        if (is_flow_command(c->name)) {
+            CycleResult result = CYCLE_END;
+            Flow flow = run_flow_command(x, c, &pc, &result);
+
+            if (flow == FLOW_LEAVE)
+                return result;
+            if (flow == FLOW_JUMP)
                 continue;
-            case 'w':
-                print_pattern(x, c->out);
-                break;
-            case 'W':
-                print_first_line(x, c->out);
-                break;
-            case 'y':
-                translate(x, c);
-                break;
-            case 'z':
-                x->ps.length = 0;
-                break;
-            default:
-                break;
+        } else {
+            run_plain_command(x, c);
         }
         pc++;
     }

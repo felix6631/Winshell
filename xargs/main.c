@@ -232,95 +232,105 @@ static char* make_item(const unsigned char* bytes, size_t length) {
     return item;
 }
 
+/** The item up to the delimiter (-0, -d): no quotes, no blanks. Returns 1, or 0 at the end of the input. */
+static int next_delimited_item(const Xargs* x, Input* in, char** out) {
+    size_t start = in->pos;
+
+    if (in->pos >= in->length)
+        return 0;
+    while (in->pos < in->length && in->data[in->pos] != (unsigned char)x->config.delimiter)
+        in->pos++;
+    *out = make_item(in->data + start, in->pos - start);
+    if (in->pos < in->length)
+        in->pos++;
+    return 1;
+}
+
+static int unmatched_quote(int quote) {
+    fprintf(stderr, PROGRAM ": unmatched %s quote; by default quotes are special to xargs unless you use the -0 option\n",
+            quote == '"' ? "double" : "single");
+    return -1;
+}
+
+/**
+ * An item with blanks, quotes and backslashes as xargs reads them, up to its end. The text of the item is
+ * in *text (used bytes). Returns 0, or -1 after a message (a quote that is not closed).
+ */
+static int read_word(const Xargs* x, Input* in, unsigned char** text, size_t* used, int* endsLine) {
+    size_t capacity = 0;
+    int quote = 0;
+
+    *text = NULL;
+    *used = 0;
+    for (;;) {
+        int c;
+
+        if (in->pos >= in->length) {
+            if (quote) {
+                free(*text);
+                return unmatched_quote(quote);
+            }
+            return 0;
+        }
+        c = in->data[in->pos++];
+
+        if (quote) {
+            if (c == '\n') {
+                free(*text);
+                return unmatched_quote(quote);
+            }
+            if (c == quote) {
+                quote = 0;
+                continue;
+            }
+        } else if (c == '"' || c == '\'') {
+            quote = c;
+            continue;
+        } else if (c == '\\' && in->pos < in->length && in->data[in->pos] != '\n') {
+            c = in->data[in->pos++];
+        } else if (c == '\n') {
+            return 0;                           // the end of the item and of the line
+        } else if (is_blank(c) && !x->config.replace) {
+            // the item ends; the line goes on unless only blanks and a line feed follow
+            size_t k = in->pos;
+            while (k < in->length && is_blank(in->data[k]))
+                k++;
+            if (k < in->length && in->data[k] == '\n')
+                in->pos = k + 1;                // trailing blanks: the line continues on the next one
+            *endsLine = 0;
+            return 0;
+        }
+        if (VEC_RESERVE(*text, capacity, *used + 2) != 0) {
+            fprintf(stderr, PROGRAM ": memory exhausted\n");
+            exit(1);
+        }
+        (*text)[(*used)++] = (unsigned char)c;
+    }
+}
+
 /**
  * The next item. *endsLine is set when it is the last of its input line (for -L). Returns 1, 0 at the end
  * of the input, or -1 after a message (a quote that is not closed).
  */
 static int next_item(Xargs* x, Input* in, char** out, int* endsLine) {
-    {
-        size_t capacity = 0, used = 0;
-        unsigned char* text = NULL;
-        int quote = 0, started = 0;
+    unsigned char* text;
+    size_t used;
 
-        *endsLine = 1;
+    *endsLine = 1;
+    if (x->config.delimiter >= 0)
+        return next_delimited_item(x, in, out);
 
-        if (x->config.delimiter >= 0) {
-            size_t start = in->pos;
-            if (in->pos >= in->length)
-                return 0;
-            while (in->pos < in->length && in->data[in->pos] != (unsigned char)x->config.delimiter)
-                in->pos++;
-            *out = make_item(in->data + start, in->pos - start);
-            if (in->pos < in->length)
-                in->pos++;
-            return 1;
-        }
+    // blanks and line feeds before the item
+    while (in->pos < in->length && (is_blank(in->data[in->pos]) || in->data[in->pos] == '\n'))
+        in->pos++;
+    if (in->pos >= in->length)
+        return 0;
 
-        // blanks (and, outside -I, line feeds) before the item
-        for (;;) {
-            if (in->pos >= in->length)
-                return 0;
-            if (is_blank(in->data[in->pos]) || in->data[in->pos] == '\n') {
-                in->pos++;
-                continue;
-            }
-            break;
-        }
-
-        for (;;) {
-            int c;
-            if (in->pos >= in->length) {
-                if (quote) {
-                    fprintf(stderr, PROGRAM ": unmatched %s quote; by default quotes are special to xargs unless you use the -0 option\n",
-                            quote == '"' ? "double" : "single");
-                    free(text);
-                    return -1;
-                }
-                break;
-            }
-            c = in->data[in->pos++];
-
-            if (quote) {
-                if (c == '\n') {
-                    fprintf(stderr, PROGRAM ": unmatched %s quote; by default quotes are special to xargs unless you use the -0 option\n",
-                            quote == '"' ? "double" : "single");
-                    free(text);
-                    return -1;
-                }
-                if (c == quote) {
-                    quote = 0;
-                    continue;
-                }
-            } else if (c == '"' || c == '\'') {
-                quote = c;
-                started = 1;
-                continue;
-            } else if (c == '\\' && in->pos < in->length && in->data[in->pos] != '\n') {
-                c = in->data[in->pos++];
-            } else if (c == '\n') {
-                break;                          // the end of the item and of the line
-            } else if (is_blank(c) && !x->config.replace) {
-                // the item ends; the line goes on unless only blanks and a line feed follow
-                size_t k = in->pos;
-                while (k < in->length && is_blank(in->data[k]))
-                    k++;
-                if (k < in->length && in->data[k] == '\n')
-                    in->pos = k + 1;            // trailing blanks: the line continues on the next one
-                *endsLine = 0;
-                break;
-            }
-            if (VEC_RESERVE(text, capacity, used + 2) != 0) {
-                fprintf(stderr, PROGRAM ": memory exhausted\n");
-                exit(1);
-            }
-            text[used++] = (unsigned char)c;
-        }
-        (void)started;
-
-        *out = make_item(text != NULL ? text : (const unsigned char*)"", used);
-        free(text);
-        return 1;
-    }
+    if (read_word(x, in, &text, &used, endsLine) != 0)
+        return -1;
+    *out = make_item(text != NULL ? text : (const unsigned char*)"", used);
+    free(text);
+    return 1;
 }
 
 /* ---- running the command ------------------------------------------------------------------- */

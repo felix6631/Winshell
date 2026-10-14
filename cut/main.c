@@ -146,6 +146,72 @@ static int is_continuation(unsigned char c) {
     return (c & 0xC0) == 0x80;
 }
 
+static void write_ending(const TextLine* line) {
+    fputs(line->ending == 2 ? "\r\n" : "\n", stdout);
+}
+
+/** -f: the selected fields of a line, with the output delimiter between them. */
+static void cut_fields(const Selection* selection, const TextLine* line, int delimiter, int onlyDelimited,
+                       const char* outputDelimiter, size_t delimiterLength) {
+    size_t i, fieldStart = 0, field = 1;
+    int first = 1;
+
+    if (memchr(line->content, delimiter, line->length) == NULL) {
+        if (!onlyDelimited)
+            text_write_line(line, stdout);
+        return;
+    }
+
+    for (i = 0; i <= line->length; i++) {
+        if (i == line->length || line->content[i] == (unsigned char)delimiter) {
+            if (selected(selection, field)) {
+                if (!first)
+                    fwrite(outputDelimiter, 1, delimiterLength, stdout);
+                fwrite(line->content + fieldStart, 1, i - fieldStart, stdout);
+                first = 0;
+            }
+            field++;
+            fieldStart = i + 1;
+        }
+    }
+    write_ending(line);
+}
+
+/** -b and -c: the selected bytes or characters, in the order of the line. */
+static void cut_characters(const Selection* selection, const TextLine* line, int mode,
+                           const char* outputDelimiter, size_t delimiterLength) {
+    size_t i, number = 0;
+    int first = 1, previousSelected = 0;
+    long previousRange = -1;
+
+    for (i = 0; i < line->length; i++) {
+        size_t start = i, end = i + 1;
+
+        if (mode == 'c') {
+            while (end < line->length && is_continuation(line->content[end]))
+                end++;
+            i = end - 1;
+        }
+        number++;
+
+        if (selected(selection, number)) {
+            // with an output delimiter, one is written between the ranges of the list
+            long range = selection->complement ? 0 : range_of(selection, number);
+            int newRange = selection->complement ? !previousSelected : range != previousRange;
+
+            if (!first && newRange && delimiterLength > 0)
+                fwrite(outputDelimiter, 1, delimiterLength, stdout);
+            fwrite(line->content + start, 1, end - start, stdout);
+            first = 0;
+            previousSelected = 1;
+            previousRange = range;
+        } else {
+            previousSelected = 0;
+        }
+    }
+    write_ending(line);
+}
+
 static int cut_stream(const Selection* selection, FILE* in, int mode, int delimiter, int onlyDelimited,
                       const char* outputDelimiter, size_t delimiterLength) {
     size_t length = 0, offset = 0;
@@ -158,69 +224,10 @@ static int cut_stream(const Selection* selection, FILE* in, int mode, int delimi
     }
 
     while (text_next_line(text, length, &offset, &line)) {
-        size_t i;
-
-        if (mode == 'f') {
-            int hasDelimiter = memchr(line.content, delimiter, line.length) != NULL;
-            size_t fieldStart = 0, field = 1;
-            int first = 1;
-
-            if (!hasDelimiter) {
-                if (!onlyDelimited)
-                    text_write_line(&line, stdout);
-                continue;
-            }
-
-            for (i = 0; i <= line.length; i++) {
-                if (i == line.length || line.content[i] == (unsigned char)delimiter) {
-                    if (selected(selection, field)) {
-                        if (!first)
-                            fwrite(outputDelimiter, 1, delimiterLength, stdout);
-                        fwrite(line.content + fieldStart, 1, i - fieldStart, stdout);
-                        first = 0;
-                    }
-                    field++;
-                    fieldStart = i + 1;
-                }
-            }
-            // the line ending
-            fputs(line.ending == 2 ? "\r\n" : "\n", stdout);
-            continue;
-        }
-
-        {
-            // bytes or characters: write the selected ones, in the order of the line
-            size_t number = 0;
-            int first = 1, previousSelected = 0;
-            long previousRange = -1;
-
-            for (i = 0; i < line.length; i++) {
-                size_t start = i, end = i + 1;
-
-                if (mode == 'c') {
-                    while (end < line.length && is_continuation(line.content[end]))
-                        end++;
-                    i = end - 1;
-                }
-                number++;
-
-                if (selected(selection, number)) {
-                    // with an output delimiter, one is written between the ranges of the list
-                    long range = selection->complement ? 0 : range_of(selection, number);
-                    int newRange = selection->complement ? !previousSelected : range != previousRange;
-
-                    if (!first && newRange && delimiterLength > 0)
-                        fwrite(outputDelimiter, 1, delimiterLength, stdout);
-                    fwrite(line.content + start, 1, end - start, stdout);
-                    first = 0;
-                    previousSelected = 1;
-                    previousRange = range;
-                } else {
-                    previousSelected = 0;
-                }
-            }
-            fputs(line.ending == 2 ? "\r\n" : "\n", stdout);
-        }
+        if (mode == 'f')
+            cut_fields(selection, &line, delimiter, onlyDelimited, outputDelimiter, delimiterLength);
+        else
+            cut_characters(selection, &line, mode, outputDelimiter, delimiterLength);
     }
 
     free(text);

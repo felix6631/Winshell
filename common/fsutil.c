@@ -183,35 +183,59 @@ static int is_link_attributes(DWORD attributes) {
 
 /* ---- copying ------------------------------------------------------------------ */
 
+/**
+ * What is at the destination of a copy: refused when it is a directory or the file itself, left alone with
+ * -n or when -i is answered with no, made writable when it is read-only and -f was given.
+ * Returns 0 to go on, 1 for an error (reported), 2 to copy nothing.
+ */
+static int prepare_copy_destination(const FsOptions* o, const char* srcDisplay, const char* srcNative,
+                                    const char* dstDisplay, const char* dstNative) {
+    DWORD dstAttributes;
+
+    if (fs_attributes(dstNative, &dstAttributes) != 0)
+        return 0;
+    if (is_directory_attributes(dstAttributes)) {
+        fprintf(stderr, "%s: cannot overwrite directory '%s' with non-directory\n", o->program, dstDisplay);
+        return 1;
+    }
+    if (fs_same_file(srcNative, dstNative)) {
+        fprintf(stderr, "%s: '%s' and '%s' are the same file\n", o->program, srcDisplay, dstDisplay);
+        return 1;
+    }
+    if (o->noClobber)
+        return 2;
+    if (o->interactive && !fs_confirm("%s: overwrite '%s'? ", o->program, dstDisplay))
+        return 2;
+    if (dstAttributes & FILE_ATTRIBUTE_READONLY) {
+        if (!o->force) {
+            report(o, "cannot create regular file", dstDisplay, "Permission denied");
+            return 1;
+        }
+        SetFileAttributesA(dstNative, FILE_ATTRIBUTE_NORMAL);
+    }
+    return 0;
+}
+
+/** Like the mode bits on UNIX: a read-only file stays read-only; -p keeps the other attributes too. */
+static void copy_attributes(const FsOptions* o, DWORD srcAttributes, const char* dstNative) {
+    DWORD keep = srcAttributes & (o->preserve
+                                      ? (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM |
+                                         FILE_ATTRIBUTE_ARCHIVE)
+                                      : FILE_ATTRIBUTE_READONLY);
+    if (keep & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM))
+        SetFileAttributesA(dstNative, keep);
+}
+
 static int copy_file(const FsOptions* o, const char* srcDisplay, const char* srcNative,
                      const char* dstDisplay, const char* dstNative, DWORD srcAttributes) {
-    DWORD dstAttributes;
     HANDLE in, out;
     static char buffer[64 * 1024];
     DWORD got, put;
-    int failed = 0;
+    int failed = 0, prepared;
 
-    if (fs_attributes(dstNative, &dstAttributes) == 0) {
-        if (is_directory_attributes(dstAttributes)) {
-            fprintf(stderr, "%s: cannot overwrite directory '%s' with non-directory\n", o->program, dstDisplay);
-            return 1;
-        }
-        if (fs_same_file(srcNative, dstNative)) {
-            fprintf(stderr, "%s: '%s' and '%s' are the same file\n", o->program, srcDisplay, dstDisplay);
-            return 1;
-        }
-        if (o->noClobber)
-            return 0;
-        if (o->interactive && !fs_confirm("%s: overwrite '%s'? ", o->program, dstDisplay))
-            return 0;
-        if (dstAttributes & FILE_ATTRIBUTE_READONLY) {
-            if (!o->force) {
-                report(o, "cannot create regular file", dstDisplay, "Permission denied");
-                return 1;
-            }
-            SetFileAttributesA(dstNative, FILE_ATTRIBUTE_NORMAL);
-        }
-    }
+    prepared = prepare_copy_destination(o, srcDisplay, srcNative, dstDisplay, dstNative);
+    if (prepared != 0)
+        return prepared == 2 ? 0 : 1;
 
     in = CreateFileA(srcNative, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
                      FILE_ATTRIBUTE_NORMAL, NULL);
@@ -245,15 +269,7 @@ static int copy_file(const FsOptions* o, const char* srcDisplay, const char* src
     if (failed)
         return 1;
 
-    // like the mode bits on UNIX: a read-only file stays read-only; -p keeps the other attributes too
-    {
-        DWORD keep = srcAttributes & (o->preserve
-                                          ? (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM |
-                                             FILE_ATTRIBUTE_ARCHIVE)
-                                          : FILE_ATTRIBUTE_READONLY);
-        if (keep & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM))
-            SetFileAttributesA(dstNative, keep);
-    }
+    copy_attributes(o, srcAttributes, dstNative);
 
     if (o->verbose)
         printf("'%s' -> '%s'\n", srcDisplay, dstDisplay);
