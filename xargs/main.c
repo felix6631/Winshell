@@ -111,7 +111,23 @@ typedef struct {
     int         showLimits;
 } Config;
 
-static Config config = { 0, -1, NULL, NULL, NULL, 0, 0, 1, 0, 0, DEFAULT_MAX_CHARS, 0, 0, 0 };
+static const Config defaultConfig = { 0, -1, NULL, NULL, NULL, 0, 0, 1, 0, 0, DEFAULT_MAX_CHARS, 0, 0, 0 };
+
+/** Everything one run keeps: the options, the command, the batch being filled and the children running. */
+typedef struct {
+    Config   config;
+    int      status;
+    HANDLE   running[MAXIMUM_WAIT_OBJECTS];
+    int      runningCount;
+    int      fatal;                 // a run ended with 255 or the command is not found: stop
+    char**   commandWords;          // COMMAND and INITIAL-ARGS
+    int      commandCount;
+    size_t   baseLength;            // of them, with a separator each
+    char**   batch;
+    size_t   batchCount, batchCapacity, batchLength;
+    long     linesInBatch;
+    int      ranOnce;
+} Xargs;
 
 static int parse_count(const char* name, const char* text, long minimum, long* out) {
     char* end;
@@ -125,69 +141,70 @@ static int parse_count(const char* name, const char* text, long minimum, long* o
 }
 
 static int on_option(int id, const char* value, void* context) {
+    Xargs* x = context;
     (void)context;
     switch (id) {
-        case OPT_NULL:         config.nullSeparated = 1; config.delimiter = 0; break;
-        case OPT_ARG_FILE:     config.argFile = value; break;
+        case OPT_NULL:         x->config.nullSeparated = 1; x->config.delimiter = 0; break;
+        case OPT_ARG_FILE:     x->config.argFile = value; break;
         case OPT_DELIMITER: {
             // a character, or one of the escapes \n \t \0 \\ or an octal/hex number
             if (value[0] == '\\' && value[1] != '\0') {
                 switch (value[1]) {
-                    case 'n': config.delimiter = '\n'; break;
-                    case 't': config.delimiter = '\t'; break;
-                    case '0': config.delimiter = 0; break;
-                    case '\\': config.delimiter = '\\'; break;
-                    case 'a': config.delimiter = '\a'; break;
-                    case 'f': config.delimiter = '\f'; break;
-                    case 'r': config.delimiter = '\r'; break;
-                    case 'v': config.delimiter = '\v'; break;
-                    case 'x': config.delimiter = (int)strtol(value + 2, NULL, 16) & 0xFF; break;
-                    default:  config.delimiter = (int)strtol(value + 1, NULL, 8) & 0xFF; break;
+                    case 'n': x->config.delimiter = '\n'; break;
+                    case 't': x->config.delimiter = '\t'; break;
+                    case '0': x->config.delimiter = 0; break;
+                    case '\\': x->config.delimiter = '\\'; break;
+                    case 'a': x->config.delimiter = '\a'; break;
+                    case 'f': x->config.delimiter = '\f'; break;
+                    case 'r': x->config.delimiter = '\r'; break;
+                    case 'v': x->config.delimiter = '\v'; break;
+                    case 'x': x->config.delimiter = (int)strtol(value + 2, NULL, 16) & 0xFF; break;
+                    default:  x->config.delimiter = (int)strtol(value + 1, NULL, 8) & 0xFF; break;
                 }
             } else if (value[0] != '\0' && value[1] == '\0') {
-                config.delimiter = (unsigned char)value[0];
+                x->config.delimiter = (unsigned char)value[0];
             } else {
                 fprintf(stderr, PROGRAM ": invalid delimiter: %s\n", value);
                 return -1;
             }
             break;
         }
-        case OPT_EOF_STR:      config.eofString = value; break;
-        case OPT_EOF_OPT:      config.eofString = value != NULL && value[0] != '\0' ? value : NULL; break;
+        case OPT_EOF_STR:      x->config.eofString = value; break;
+        case OPT_EOF_OPT:      x->config.eofString = value != NULL && value[0] != '\0' ? value : NULL; break;
         case OPT_REPLACE_STR:
         case OPT_REPLACE_OPT:
-            if (config.maxArgs > 0 || config.maxLines > 0) {
+            if (x->config.maxArgs > 0 || x->config.maxLines > 0) {
                 fprintf(stderr, PROGRAM ": warning: options --max-args and --replace are mutually exclusive, ignoring previous --max-args value\n");
-                config.maxArgs = 0;
-                config.maxLines = 0;
+                x->config.maxArgs = 0;
+                x->config.maxLines = 0;
             }
-            config.replace = id == OPT_REPLACE_STR || (value != NULL && value[0] != '\0') ? value : "{}";
+            x->config.replace = id == OPT_REPLACE_STR || (value != NULL && value[0] != '\0') ? value : "{}";
             break;
         case OPT_MAX_LINES:
-            if (config.replace) {
+            if (x->config.replace) {
                 fprintf(stderr, PROGRAM ": warning: options --max-lines and --replace are mutually exclusive, ignoring previous --replace value\n");
-                config.replace = NULL;
+                x->config.replace = NULL;
             }
-            return parse_count("-L", value, 1, &config.maxLines);
+            return parse_count("-L", value, 1, &x->config.maxLines);
         case OPT_MAX_LINES_OPT:
             if (value == NULL || value[0] == '\0')
-                config.maxLines = 1;
+                x->config.maxLines = 1;
             else
-                return parse_count("-l", value, 1, &config.maxLines);
+                return parse_count("-l", value, 1, &x->config.maxLines);
             break;
         case OPT_MAX_ARGS:
-            if (config.replace) {
+            if (x->config.replace) {
                 fprintf(stderr, PROGRAM ": warning: options --replace and --max-args/-n are mutually exclusive, ignoring previous --replace value\n");
-                config.replace = NULL;
+                x->config.replace = NULL;
             }
-            return parse_count("-n", value, 1, &config.maxArgs);
-        case OPT_MAX_PROCS:    return parse_count("-P", value, 0, &config.maxProcs);
-        case OPT_INTERACTIVE:  config.interactive = 1; config.verbose = 1; break;
-        case OPT_NO_RUN:       config.noRunIfEmpty = 1; break;
-        case OPT_MAX_CHARS:    return parse_count("-s", value, 1, &config.maxChars);
-        case OPT_VERBOSE:      config.verbose = 1; break;
-        case OPT_EXIT:         config.exitOnSize = 1; break;
-        case OPT_SHOW_LIMITS:  config.showLimits = 1; break;
+            return parse_count("-n", value, 1, &x->config.maxArgs);
+        case OPT_MAX_PROCS:    return parse_count("-P", value, 0, &x->config.maxProcs);
+        case OPT_INTERACTIVE:  x->config.interactive = 1; x->config.verbose = 1; break;
+        case OPT_NO_RUN:       x->config.noRunIfEmpty = 1; break;
+        case OPT_MAX_CHARS:    return parse_count("-s", value, 1, &x->config.maxChars);
+        case OPT_VERBOSE:      x->config.verbose = 1; break;
+        case OPT_EXIT:         x->config.exitOnSize = 1; break;
+        case OPT_SHOW_LIMITS:  x->config.showLimits = 1; break;
         default:               break;
     }
     return 0;
@@ -219,7 +236,7 @@ static char* make_item(const unsigned char* bytes, size_t length) {
  * The next item. *endsLine is set when it is the last of its input line (for -L). Returns 1, 0 at the end
  * of the input, or -1 after a message (a quote that is not closed).
  */
-static int next_item(Input* in, char** out, int* endsLine) {
+static int next_item(Xargs* x, Input* in, char** out, int* endsLine) {
     {
         size_t capacity = 0, used = 0;
         unsigned char* text = NULL;
@@ -227,11 +244,11 @@ static int next_item(Input* in, char** out, int* endsLine) {
 
         *endsLine = 1;
 
-        if (config.delimiter >= 0) {
+        if (x->config.delimiter >= 0) {
             size_t start = in->pos;
             if (in->pos >= in->length)
                 return 0;
-            while (in->pos < in->length && in->data[in->pos] != (unsigned char)config.delimiter)
+            while (in->pos < in->length && in->data[in->pos] != (unsigned char)x->config.delimiter)
                 in->pos++;
             *out = make_item(in->data + start, in->pos - start);
             if (in->pos < in->length)
@@ -282,7 +299,7 @@ static int next_item(Input* in, char** out, int* endsLine) {
                 c = in->data[in->pos++];
             } else if (c == '\n') {
                 break;                          // the end of the item and of the line
-            } else if (is_blank(c) && !config.replace) {
+            } else if (is_blank(c) && !x->config.replace) {
                 // the item ends; the line goes on unless only blanks and a line feed follow
                 size_t k = in->pos;
                 while (k < in->length && is_blank(in->data[k]))
@@ -308,35 +325,30 @@ static int next_item(Input* in, char** out, int* endsLine) {
 
 /* ---- running the command ------------------------------------------------------------------- */
 
-static int status = 0;
-static HANDLE running[MAXIMUM_WAIT_OBJECTS];
-static int runningCount;
-static int fatal;                       // a run ended with 255 or the command is not found: stop
-
-static void note_exit(DWORD code) {
+static void note_exit(Xargs* x, DWORD code) {
     if (code == 255) {
         fprintf(stderr, PROGRAM ": the command exited with status 255; aborting\n");
-        status = 124;
-        fatal = 1;
-    } else if (code != 0 && status != 124) {
-        status = 123;
+        x->status = 124;
+        x->fatal = 1;
+    } else if (code != 0 && x->status != 124) {
+        x->status = 123;
     }
 }
 
-static void wait_one(void) {
+static void wait_one(Xargs* x) {
     DWORD which, code = 1;
-    if (runningCount == 0)
+    if (x->runningCount == 0)
         return;
-    which = WaitForMultipleObjects((DWORD)runningCount, running, FALSE, INFINITE) - WAIT_OBJECT_0;
-    GetExitCodeProcess(running[which], &code);
-    CloseHandle(running[which]);
-    running[which] = running[--runningCount];
-    note_exit(code);
+    which = WaitForMultipleObjects((DWORD)x->runningCount, x->running, FALSE, INFINITE) - WAIT_OBJECT_0;
+    GetExitCodeProcess(x->running[which], &code);
+    CloseHandle(x->running[which]);
+    x->running[which] = x->running[--x->runningCount];
+    note_exit(x, code);
 }
 
-static void wait_all(void) {
-    while (runningCount > 0)
-        wait_one();
+static void wait_all(Xargs* x) {
+    while (x->runningCount > 0)
+        wait_one(x);
 }
 
 static int confirm_run(char* const* argv) {
@@ -357,7 +369,7 @@ static int confirm_run(char* const* argv) {
     return answer[0] == 'y' || answer[0] == 'Y';
 }
 
-static void run_command(char** argv) {
+static void run_command(Xargs* x, char** argv) {
     char path[VPATH_MAX];
     char* command;
     STARTUPINFOA si;
@@ -366,38 +378,38 @@ static void run_command(char** argv) {
     HANDLE in;
     size_t i;
 
-    if (config.verbose && !config.interactive) {
+    if (x->config.verbose && !x->config.interactive) {
         for (i = 0; argv[i] != NULL; i++)
             fprintf(stderr, "%s%s", i > 0 ? " " : "", argv[i]);
         fputc('\n', stderr);
     }
-    if (config.interactive && !confirm_run(argv))
+    if (x->config.interactive && !confirm_run(argv))
         return;
 
     if (program_find(argv[0], path, sizeof path) != 0 &&
         SearchPathA(NULL, argv[0], ".exe", sizeof path, path, NULL) == 0) {
         fprintf(stderr, PROGRAM ": %s: No such file or directory\n", argv[0]);
-        status = 127;
-        fatal = 1;
+        x->status = 127;
+        x->fatal = 1;
         return;
     }
     command = cmdline_build(argv);
     if (command == NULL) {
         fprintf(stderr, PROGRAM ": memory exhausted\n");
-        status = 1;
-        fatal = 1;
+        x->status = 1;
+        x->fatal = 1;
         return;
     }
     if (strlen(command) > 32000) {
         fprintf(stderr, PROGRAM ": argument list too long\n");
         free(command);
-        status = 1;
-        fatal = 1;
+        x->status = 1;
+        x->fatal = 1;
         return;
     }
 
-    while (runningCount >= config.maxProcs && config.maxProcs > 0)
-        wait_one();
+    while (x->runningCount >= x->config.maxProcs && x->config.maxProcs > 0)
+        wait_one(x);
 
     in = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, NULL);
     ZeroMemory(&si, sizeof si);
@@ -412,16 +424,16 @@ static void run_command(char** argv) {
     fflush(stdout);
     if (!CreateProcessA(path, command, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
         fprintf(stderr, PROGRAM ": cannot run %s\n", argv[0]);
-        status = 126;
-        fatal = 1;
+        x->status = 126;
+        x->fatal = 1;
     } else {
         CloseHandle(pi.hThread);
-        if (runningCount < MAXIMUM_WAIT_OBJECTS)
-            running[runningCount++] = pi.hProcess;
+        if (x->runningCount < MAXIMUM_WAIT_OBJECTS)
+            x->running[x->runningCount++] = pi.hProcess;
         else
             CloseHandle(pi.hProcess);
-        if (config.maxProcs == 1)
-            wait_one();
+        if (x->config.maxProcs == 1)
+            wait_one(x);
     }
     CloseHandle(in);
     free(command);
@@ -429,62 +441,54 @@ static void run_command(char** argv) {
 
 /* ---- batches ------------------------------------------------------------------------------- */
 
-static char** commandWords;             // COMMAND and INITIAL-ARGS
-static int commandCount;
-static size_t baseLength;               // of them, with a separator each
-static char** batch;
-static size_t batchCount, batchCapacity, batchLength;
-static long linesInBatch;
-static int ranOnce;
-
-static void run_batch(void) {
+static void run_batch(Xargs* x) {
     char** argv;
     int i;
     size_t k;
 
-    argv = calloc((size_t)commandCount + batchCount + 1, sizeof *argv);
+    argv = calloc((size_t)x->commandCount + x->batchCount + 1, sizeof *argv);
     if (argv == NULL) {
         fprintf(stderr, PROGRAM ": memory exhausted\n");
         exit(1);
     }
-    for (i = 0; i < commandCount; i++)
-        argv[i] = commandWords[i];
-    for (k = 0; k < batchCount; k++)
-        argv[commandCount + k] = batch[k];
-    run_command(argv);
-    ranOnce = 1;
+    for (i = 0; i < x->commandCount; i++)
+        argv[i] = x->commandWords[i];
+    for (k = 0; k < x->batchCount; k++)
+        argv[x->commandCount + k] = x->batch[k];
+    run_command(x, argv);
+    x->ranOnce = 1;
     free(argv);
-    for (k = 0; k < batchCount; k++)
-        free(batch[k]);
-    batchCount = 0;
-    batchLength = baseLength;
-    linesInBatch = 0;
+    for (k = 0; k < x->batchCount; k++)
+        free(x->batch[k]);
+    x->batchCount = 0;
+    x->batchLength = x->baseLength;
+    x->linesInBatch = 0;
 }
 
 /** -I: the command with the replacement string replaced by the item, run once. */
-static void run_replace(const char* item) {
-    char** argv = calloc((size_t)commandCount + 1, sizeof *argv);
-    size_t replaceLength = strlen(config.replace), total = 0;
+static void run_replace(Xargs* x, const char* item) {
+    char** argv = calloc((size_t)x->commandCount + 1, sizeof *argv);
+    size_t replaceLength = strlen(x->config.replace), total = 0;
     int i;
 
     if (argv == NULL) {
         fprintf(stderr, PROGRAM ": memory exhausted\n");
         exit(1);
     }
-    for (i = 0; i < commandCount; i++) {
-        const char* word = commandWords[i];
+    for (i = 0; i < x->commandCount; i++) {
+        const char* word = x->commandWords[i];
         size_t itemLength = strlen(item), count = 0, length = strlen(word);
         const char* p;
         char* out;
         size_t o = 0;
 
-        for (p = word; (p = strstr(p, config.replace)) != NULL; p += replaceLength)
+        for (p = word; (p = strstr(p, x->config.replace)) != NULL; p += replaceLength)
             count++;
         out = malloc(length + count * itemLength + 1);
         if (out == NULL)
             exit(1);
         for (p = word; *p != '\0';) {
-            if (strncmp(p, config.replace, replaceLength) == 0) {
+            if (strncmp(p, x->config.replace, replaceLength) == 0) {
                 memcpy(out + o, item, itemLength);
                 o += itemLength;
                 p += replaceLength;
@@ -496,88 +500,88 @@ static void run_replace(const char* item) {
         argv[i] = out;
         total += o + 1;
     }
-    if (total > (size_t)config.maxChars) {
+    if (total > (size_t)x->config.maxChars) {
         fprintf(stderr, PROGRAM ": argument line too long\n");
-        status = 1;
-        fatal = 1;
+        x->status = 1;
+        x->fatal = 1;
     } else {
-        run_command(argv);
-        ranOnce = 1;
+        run_command(x, argv);
+        x->ranOnce = 1;
     }
-    for (i = 0; i < commandCount; i++)
+    for (i = 0; i < x->commandCount; i++)
         free(argv[i]);
     free(argv);
 }
 
-static void add_item(char* item, int endsLine) {
+static void add_item(Xargs* x, char* item, int endsLine) {
     size_t length = strlen(item) + 1;
 
-    if (batchCount > 0 && batchLength + length > (size_t)config.maxChars) {
-        if (config.exitOnSize && (config.maxArgs == 0 || batchCount < (size_t)config.maxArgs)) {
+    if (x->batchCount > 0 && x->batchLength + length > (size_t)x->config.maxChars) {
+        if (x->config.exitOnSize && (x->config.maxArgs == 0 || x->batchCount < (size_t)x->config.maxArgs)) {
             fprintf(stderr, PROGRAM ": argument line too long\n");
-            status = 1;
-            fatal = 1;
+            x->status = 1;
+            x->fatal = 1;
             free(item);
             return;
         }
-        run_batch();
-        if (fatal) {
+        run_batch(x);
+        if (x->fatal) {
             free(item);
             return;
         }
     }
-    if (batchCount == 0 && baseLength + length > (size_t)config.maxChars) {
+    if (x->batchCount == 0 && x->baseLength + length > (size_t)x->config.maxChars) {
         fprintf(stderr, PROGRAM ": can't fit single argument within argument list size limit\n");
-        status = 1;
-        fatal = 1;
+        x->status = 1;
+        x->fatal = 1;
         free(item);
         return;
     }
-    if (VEC_RESERVE(batch, batchCapacity, batchCount + 1) != 0) {
+    if (VEC_RESERVE(x->batch, x->batchCapacity, x->batchCount + 1) != 0) {
         fprintf(stderr, PROGRAM ": memory exhausted\n");
         exit(1);
     }
-    batch[batchCount++] = item;
-    batchLength += length;
+    x->batch[x->batchCount++] = item;
+    x->batchLength += length;
 
     if (endsLine)
-        linesInBatch++;
-    if ((config.maxArgs > 0 && batchCount >= (size_t)config.maxArgs) ||
-        (config.maxLines > 0 && linesInBatch >= config.maxLines))
-        run_batch();
+        x->linesInBatch++;
+    if ((x->config.maxArgs > 0 && x->batchCount >= (size_t)x->config.maxArgs) ||
+        (x->config.maxLines > 0 && x->linesInBatch >= x->config.maxLines))
+        run_batch(x);
 }
 
-static void show_limits(void) {
+static void show_limits(Xargs* x) {
     fprintf(stderr, "POSIX upper limit on argument length (this system): 32767\n"
                     "POSIX smallest allowable upper limit on argument length (all systems): 4096\n"
                     "Maximum length of command we could actually use: %d\n"
                     "Size of command buffer we are actually using: %ld\n"
                     "Maximum parallelism (--max-procs must be no greater): 64\n\n",
-            DEFAULT_MAX_CHARS, config.maxChars);
+            DEFAULT_MAX_CHARS, x->config.maxChars);
 }
 
 /** Reads the items of the input one by one and hands them to the batches (or runs the -I command). */
-static void process_items(Input* input) {
-    while (!fatal) {
+static void process_items(Xargs* x, Input* input) {
+    while (!x->fatal) {
         char* item;
         int endsLine;
-        int r = next_item(input, &item, &endsLine);
+        int r = next_item(x, input, &item, &endsLine);
 
         if (r < 0) {
-            status = 1;
+            x->status = 1;
             break;
         }
         if (r == 0)
             break;
-        if (config.eofString != NULL && config.delimiter < 0 && strcmp(item, config.eofString) == 0) {
+        if (x->config.eofString != NULL && x->config.delimiter < 0 && strcmp(item, x->config.eofString) == 0) {
             free(item);
             break;
         }
-        if (config.replace) {
-            run_replace(item);
+        if (x->config.replace) {
+            run_replace(x, item);
             free(item);
         } else {
-            add_item(item, endsLine);
+            add_item(x, item, endsLine);
         }
     }
 }
@@ -590,31 +594,36 @@ int main(int argc, char* argv[]) {
     size_t length;
     Input input;
     static char* defaultCommand[] = { "echo", NULL };
+    Xargs state;
+    Xargs* x = &state;
 
-    result = args_parse(&spec, argc, argv, on_option, NULL, &operands, &operandCount);
+    memset(x, 0, sizeof *x);
+    x->config = defaultConfig;
+
+    result = args_parse(&spec, argc, argv, on_option, x, &operands, &operandCount);
     if (result != ARGS_OK)
         return result == ARGS_EXIT ? 0 : 1;
 
-    if (config.maxProcs == 0)
-        config.maxProcs = MAXIMUM_WAIT_OBJECTS - 1;
-    if (config.maxProcs > MAXIMUM_WAIT_OBJECTS - 1)
-        config.maxProcs = MAXIMUM_WAIT_OBJECTS - 1;
-    if (config.showLimits)
-        show_limits();
+    if (x->config.maxProcs == 0)
+        x->config.maxProcs = MAXIMUM_WAIT_OBJECTS - 1;
+    if (x->config.maxProcs > MAXIMUM_WAIT_OBJECTS - 1)
+        x->config.maxProcs = MAXIMUM_WAIT_OBJECTS - 1;
+    if (x->config.showLimits)
+        show_limits(x);
 
     if (operandCount == 0) {
-        commandWords = defaultCommand;
-        commandCount = 1;
+        x->commandWords = defaultCommand;
+        x->commandCount = 1;
     } else {
-        commandWords = (char**)operands;
-        commandCount = operandCount;
+        x->commandWords = (char**)operands;
+        x->commandCount = operandCount;
     }
-    for (i = 0; i < commandCount; i++)
-        baseLength += strlen(commandWords[i]) + 1;
-    batchLength = baseLength;
+    for (i = 0; i < x->commandCount; i++)
+        x->baseLength += strlen(x->commandWords[i]) + 1;
+    x->batchLength = x->baseLength;
 
     text_binary_streams();
-    if (config.argFile != NULL && text_open(PROGRAM, config.argFile, 1, &source) != 0)
+    if (x->config.argFile != NULL && text_open(PROGRAM, x->config.argFile, 1, &source) != 0)
         return 1;
     data = text_slurp(source, &length);
     if (data == NULL) {
@@ -625,15 +634,15 @@ int main(int argc, char* argv[]) {
     input.length = length;
     input.pos = 0;
 
-    process_items(&input);
+    process_items(x, &input);
 
-    if (!fatal && result == ARGS_OK) {
-        if (batchCount > 0)
-            run_batch();
-        else if (!ranOnce && !config.noRunIfEmpty && !config.replace)
-            run_batch();
+    if (!x->fatal && result == ARGS_OK) {
+        if (x->batchCount > 0)
+            run_batch(x);
+        else if (!x->ranOnce && !x->config.noRunIfEmpty && !x->config.replace)
+            run_batch(x);
     }
-    wait_all();
+    wait_all(x);
     fflush(stdout);
-    return status;
+    return x->status;
 }

@@ -41,11 +41,14 @@ typedef struct {
     size_t             startLength;    // of the display name of the start point it was found from
 } Entry;
 
-static const FindOptions* options;
-static Node* root;
-static int exitStatus;
-static int quitting;
-static unsigned long long nowSeconds;
+/** Everything one walk keeps: what the options ask for, the expression, and how it went. */
+typedef struct {
+    const FindOptions* options;
+    Node*              root;
+    int                exitStatus;
+    int                quitting;
+    unsigned long long nowSeconds;
+} Walk;
 
 /* ---- file information ---------------------------------------------------------------------- */
 
@@ -79,13 +82,13 @@ static void follow_link(Entry* e) {
     }
 }
 
-static void report(const char* path, const char* reason) {
+static void report(Walk* x, const char* path, const char* reason) {
     fprintf(stderr, PROGRAM ": `%s': %s\n", path, reason);
-    exitStatus = 1;
+    x->exitStatus = 1;
 }
 
 /** Looks the start point up. Returns 0, or -1 after a message. */
-static int stat_start(Entry* e, const char* path) {
+static int stat_start(Walk* x, Entry* e, const char* path) {
     char native[VPATH_MAX];
     WIN32_FIND_DATAA data;
     HANDLE find;
@@ -101,7 +104,7 @@ static int stat_start(Entry* e, const char* path) {
         return 0;
     }
     if (kind != 0) {
-        report(path, "No such file or directory");
+        report(x, path, "No such file or directory");
         return -1;
     }
     e->native = _strdup(native);
@@ -118,7 +121,7 @@ static int stat_start(Entry* e, const char* path) {
     } else {
         WIN32_FILE_ATTRIBUTE_DATA info;
         if (!GetFileAttributesExA(native, GetFileExInfoStandard, &info)) {
-            report(path, GetLastError() == ERROR_ACCESS_DENIED ? "Permission denied" : "No such file or directory");
+            report(x, path, GetLastError() == ERROR_ACCESS_DENIED ? "Permission denied" : "No such file or directory");
             return -1;
         }
         e->attributes = info.dwFileAttributes;
@@ -128,7 +131,7 @@ static int stat_start(Entry* e, const char* path) {
         e->create = info.ftCreationTime;
         e->isDir = (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
     }
-    if (options->follow)
+    if (x->options->follow)
         follow_link(e);
     return 0;
 }
@@ -324,19 +327,19 @@ static FILETIME time_of(const Entry* e, char which) {
     return which == 'a' ? e->access : which == 'c' ? e->create : e->write;
 }
 
-static int test_time(const Node* n, const Entry* e) {
-    long long age = (long long)nowSeconds - (long long)to_seconds(time_of(e, n->type));
+static int test_time(Walk* x, const Node* n, const Entry* e) {
+    long long age = (long long)x->nowSeconds - (long long)to_seconds(time_of(e, n->type));
     long long divisor = n->unit == 'm' ? 60 : 86400;
     // GNU find counts whole units, a time in the future is a negative number of them
     long long value = age >= 0 ? age / divisor : -((-age + divisor - 1) / divisor);
     return compare_number(value, n->number, n->compare);
 }
 
-static int run_node(Node* n, Entry* e);
+static int run_node(Walk* x, Node* n, Entry* e);
 
 /* ---- actions ------------------------------------------------------------------------------- */
 
-static int run_command(char* const* argv, const char* directory, int confirm) {
+static int run_command(Walk* x, char* const* argv, const char* directory, int confirm) {
     char path[VPATH_MAX];
     char* command;
     STARTUPINFOA si;
@@ -348,7 +351,7 @@ static int run_command(char* const* argv, const char* directory, int confirm) {
     if (program_find(argv[0], path, sizeof path) != 0 &&
         SearchPathA(NULL, argv[0], ".exe", sizeof path, path, NULL) == 0) {
         fprintf(stderr, PROGRAM ": `%s': No such file or directory\n", argv[0]);
-        exitStatus = 1;
+        x->exitStatus = 1;
         return 0;
     }
     command = cmdline_build(argv);
@@ -370,7 +373,7 @@ static int run_command(char* const* argv, const char* directory, int confirm) {
     fflush(stdout);
     if (!CreateProcessA(path, command, NULL, NULL, TRUE, 0, NULL, directory, &si, &pi)) {
         fprintf(stderr, PROGRAM ": cannot run `%s'\n", argv[0]);
-        exitStatus = 1;
+        x->exitStatus = 1;
         free(command);
         if (in != INVALID_HANDLE_VALUE)
             CloseHandle(in);
@@ -432,7 +435,7 @@ static void free_argv(char** argv, int count) {
 }
 
 /** Runs the batch of a -exec ... {} + that has collected paths. */
-static void flush_batch(Node* n) {
+static void flush_batch(Walk* x, Node* n) {
     char** argv;
     int fixed = n->argc - 1, i;
     size_t k;
@@ -449,8 +452,8 @@ static void flush_batch(Node* n) {
         argv[fixed + k] = n->pending[k];
     if (n->inDirectory && n->pendingDirectory != NULL)
         snprintf(directory, sizeof directory, "%s", n->pendingDirectory);
-    if (!run_command(argv, n->inDirectory ? directory : NULL, 0))
-        exitStatus = 1;
+    if (!run_command(x, argv, n->inDirectory ? directory : NULL, 0))
+        x->exitStatus = 1;
     for (i = 0; i < fixed; i++)
         free(argv[i]);
     free(argv);
@@ -459,7 +462,7 @@ static void flush_batch(Node* n) {
     n->pendingDirectory = NULL;
 }
 
-static int action_exec(Node* n, const Entry* e) {
+static int action_exec(Walk* x, Node* n, const Entry* e) {
     char path[VPATH_MAX + 4];
     char directory[VPATH_MAX];
     char** argv;
@@ -474,14 +477,14 @@ static int action_exec(Node* n, const Entry* e) {
 
     if (n->batch) {
         if (n->inDirectory && n->pendingDirectory != NULL && strcmp(n->pendingDirectory, directory) != 0)
-            flush_batch(n);
+            flush_batch(x, n);
         if (VEC_RESERVE(n->pending, n->pendingCapacity, n->pendingCount + 1) != 0)
             return 0;
         n->pending[n->pendingCount++] = _strdup(path);
         if (n->inDirectory && n->pendingDirectory == NULL)
             n->pendingDirectory = _strdup(directory);
         if (n->pendingCount >= 500)
-            flush_batch(n);
+            flush_batch(x, n);
         return 1;
     }
 
@@ -500,12 +503,12 @@ static int action_exec(Node* n, const Entry* e) {
             return 0;
         }
     }
-    result = run_command(argv, n->inDirectory ? directory : NULL, n->confirm);
+    result = run_command(x, argv, n->inDirectory ? directory : NULL, n->confirm);
     free_argv(argv, n->argc);
     return result;
 }
 
-static int action_delete(const Entry* e) {
+static int action_delete(Walk* x, const Entry* e) {
     BOOL ok;
 
     if (e->isDir && !e->isLink) {
@@ -519,7 +522,7 @@ static int action_delete(const Entry* e) {
     }
     if (!ok) {
         fprintf(stderr, PROGRAM ": cannot delete `%s': %s\n", e->display, fs_strerror(GetLastError()));
-        exitStatus = 1;
+        x->exitStatus = 1;
         return 0;
     }
     return 1;
@@ -596,7 +599,7 @@ static void action_printf(const char* format, const Entry* e) {
 
 /* ---- evaluation ---------------------------------------------------------------------------- */
 
-static int run_test(Node* n, Entry* e) {
+static int run_test(Walk* x, Node* n, Entry* e) {
     switch (n->pred) {
         case P_TRUE:
         case P_OPTION:
@@ -636,7 +639,7 @@ static int run_test(Node* n, Entry* e) {
             return CompareFileTime(&e->write, &n->reference) > 0;
         case P_TIME:
         case P_MIN:
-            return test_time(n, e);
+            return test_time(x, n, e);
         case P_READABLE:
             return 1;
         case P_WRITABLE:
@@ -644,11 +647,11 @@ static int run_test(Node* n, Entry* e) {
         case P_EXECUTABLE:
             return e->isDir || has_executable_extension(e->display);
         case P_PRUNE:
-            if (!options->depthFirst)
+            if (!x->options->depthFirst)
                 e->pruned = 1;
             return 1;
         case P_QUIT:
-            quitting = 1;
+            x->quitting = 1;
             return 1;
         case P_PRINT:
             fputs(e->display, stdout);
@@ -662,36 +665,36 @@ static int run_test(Node* n, Entry* e) {
             action_printf(n->text, e);
             return 1;
         case P_EXEC:
-            return action_exec(n, e);
+            return action_exec(x, n, e);
         case P_DELETE:
-            return action_delete(e);
+            return action_delete(x, e);
     }
     return 0;
 }
 
-static int run_node(Node* n, Entry* e) {
+static int run_node(Walk* x, Node* n, Entry* e) {
     switch (n->kind) {
         case N_NOT:
-            return !run_node(n->left, e);
+            return !run_node(x, n->left, e);
         case N_AND:
-            return run_node(n->left, e) && run_node(n->right, e);
+            return run_node(x, n->left, e) && run_node(x, n->right, e);
         case N_OR:
-            return run_node(n->left, e) || run_node(n->right, e);
+            return run_node(x, n->left, e) || run_node(x, n->right, e);
         case N_COMMA:
-            run_node(n->left, e);
-            return run_node(n->right, e);
+            run_node(x, n->left, e);
+            return run_node(x, n->right, e);
         default:
-            return run_test(n, e);
+            return run_test(x, n, e);
     }
 }
 
-static void flush_all(Node* n) {
+static void flush_all(Walk* x, Node* n) {
     if (n == NULL)
         return;
-    flush_all(n->left);
-    flush_all(n->right);
+    flush_all(x, n->left);
+    flush_all(x, n->right);
     if (n->kind == N_TEST && n->pred == P_EXEC && n->batch)
-        flush_batch(n);
+        flush_batch(x, n);
 }
 
 /* ---- the walk ------------------------------------------------------------------------------ */
@@ -725,9 +728,9 @@ static char* join_native(const char* directory, const char* name) {
     return out;
 }
 
-static void walk(Entry* e);
+static void walk(Walk* x, Entry* e);
 
-static void walk_children(Entry* e) {
+static void walk_children(Walk* x, Entry* e) {
     Child* children = NULL;
     size_t count = 0, capacity = 0, i;
 
@@ -756,7 +759,7 @@ static void walk_children(Entry* e) {
         if (find == INVALID_HANDLE_VALUE) {
             DWORD error = GetLastError();
             if (error != ERROR_FILE_NOT_FOUND && error != ERROR_NO_MORE_FILES)
-                report(e->display, error == ERROR_ACCESS_DENIED ? "Permission denied" : fs_strerror(error));
+                report(x, e->display, error == ERROR_ACCESS_DENIED ? "Permission denied" : fs_strerror(error));
             return;
         }
         do {
@@ -771,7 +774,7 @@ static void walk_children(Entry* e) {
         FindClose(find);
     }
 
-    for (i = 0; i < count && !quitting; i++) {
+    for (i = 0; i < count && !x->quitting; i++) {
         Entry child;
         memset(&child, 0, sizeof child);
         child.display = join_display(e->display, children[i].name);
@@ -783,14 +786,14 @@ static void walk_children(Entry* e) {
         fill(&child, &children[i].data);
         if (e->native[0] == '\0') {
             // a drive: "c" is C:\ .
-            char* root = malloc(4);
-            snprintf(root, 4, "%c:\\", children[i].name[0]);
+            char* driveRoot = malloc(4);
+            snprintf(driveRoot, 4, "%c:\\", children[i].name[0]);
             free(child.native);
-            child.native = root;
+            child.native = driveRoot;
         }
-        if (options->follow)
+        if (x->options->follow)
             follow_link(&child);
-        walk(&child);
+        walk(x, &child);
         free(child.display);
         free(child.native);
     }
@@ -799,43 +802,47 @@ static void walk_children(Entry* e) {
     free(children);
 }
 
-static void visit(Entry* e) {
-    if (e->depth >= options->minDepth)
-        run_node(root, e);
+static void visit(Walk* x, Entry* e) {
+    if (e->depth >= x->options->minDepth)
+        run_node(x, x->root, e);
 }
 
-static void walk(Entry* e) {
-    if (quitting)
+static void walk(Walk* x, Entry* e) {
+    if (x->quitting)
         return;
-    if (!options->depthFirst)
-        visit(e);
-    if (!quitting && e->isDir && !e->pruned && (options->maxDepth < 0 || e->depth < options->maxDepth))
-        walk_children(e);
-    if (options->depthFirst && !quitting)
-        visit(e);
+    if (!x->options->depthFirst)
+        visit(x, e);
+    if (!x->quitting && e->isDir && !e->pruned && (x->options->maxDepth < 0 || e->depth < x->options->maxDepth))
+        walk_children(x, e);
+    if (x->options->depthFirst && !x->quitting)
+        visit(x, e);
 }
 
 int find_walk(Node* expression, const FindOptions* opts, const char* const* starts, int startCount) {
+    Walk state;
+    Walk* x = &state;
     int i;
     FILETIME now;
 
-    options = opts;
-    root = expression;
+    memset(x, 0, sizeof *x);
+
+    x->options = opts;
+    x->root = expression;
     GetSystemTimeAsFileTime(&now);
-    nowSeconds = to_seconds(now);
+    x->nowSeconds = to_seconds(now);
     _setmode(_fileno(stdout), _O_BINARY);
 
-    for (i = 0; i < startCount && !quitting; i++) {
+    for (i = 0; i < startCount && !x->quitting; i++) {
         Entry e;
-        if (stat_start(&e, starts[i]) != 0)
+        if (stat_start(x, &e, starts[i]) != 0)
             continue;
         e.startLength = strlen(e.display);
-        walk(&e);
+        walk(x, &e);
         free(e.display);
         free(e.native);
     }
-    flush_all(root);
+    flush_all(x, x->root);
     if (fflush(stdout) != 0)
-        exitStatus = 1;
-    return exitStatus;
+        x->exitStatus = 1;
+    return x->exitStatus;
 }
