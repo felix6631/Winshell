@@ -53,7 +53,8 @@ int interp_run_simple(const char* text, int* exitShell, int status) {
                 status = interp_substitution_status();
         // a builtin only makes sense as a command of its own, not inside a pipeline
         } else if (pipeline.count == 1 && pipeline.commands[0].argv != NULL &&
-                   builtin_exists(pipeline.commands[0].argv[0])) {
+                   (builtin_exists(pipeline.commands[0].argv[0]) ||
+                    command_has_function(pipeline.commands[0].argv[0]))) {
             // NAME=value in front of a builtin holds for the builtin only (IFS=: read a b)
             const Command* command = &pipeline.commands[0];
             char* old[16];
@@ -81,7 +82,10 @@ int interp_run_simple(const char* text, int* exitShell, int status) {
                 } else {
                     if (redirected && saved.inputRedirected)
                         interp_input_redirected(1);
-                    builtin_run(command, &builtinStatus, exitShell);
+                    if (command_has_function(command->argv[0]))
+                        builtinStatus = command_call_function(command->argv[0], command->argv, exitShell, status);
+                    else
+                        builtin_run(command, &builtinStatus, exitShell);
                     if (redirected && saved.inputRedirected)
                         interp_input_redirected(-1);
                     if (redirected)
@@ -128,6 +132,8 @@ typedef struct {
 
 static const char* const parameter_names[13] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "#", "@", "*" };
 
+static void set_parameter_values(const char* name, const char* const* arguments, int count);
+
 static void save_parameters(Parameters* p) {
     int i;
 
@@ -150,12 +156,38 @@ static void restore_parameters(Parameters* p) {
 }
 
 static void set_parameters(const char* name, const char* const* arguments, int count) {
+    set_parameter_values(name, arguments, count);
+}
+
+struct ParameterFrame {
+    Parameters saved;
+};
+
+ParameterFrame* interp_parameters_push(const char* const* arguments, int count) {
+    ParameterFrame* frame = calloc(1, sizeof *frame);
+
+    if (frame == NULL)
+        return NULL;
+    save_parameters(&frame->saved);
+    set_parameter_values(NULL, arguments, count);
+    return frame;
+}
+
+void interp_parameters_pop(ParameterFrame* frame) {
+    if (frame == NULL)
+        return;
+    restore_parameters(&frame->saved);
+    free(frame);
+}
+
+static void set_parameter_values(const char* name, const char* const* arguments, int count) {
     char number[16];
     size_t total = 1;
     char* all;
     int i;
 
-    var_set("0", name);
+    if (name != NULL)
+        var_set("0", name);
     for (i = 1; i <= 9; i++) {
         if (i <= count) {
             var_set(parameter_names[i], arguments[i - 1]);

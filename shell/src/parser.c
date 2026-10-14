@@ -631,7 +631,7 @@ static int lex_substitution(Lexer* L) {
 
 /* ---- ${NAME...} -------------------------------------------------------------------------- */
 
-/** Whether the pattern (with * ? [..] and \ escapes) matches the n characters of s completely. */
+/** Whether the pattern (with * ? [..], \ and GLOB_ESCAPE escapes) matches the n characters of s completely. */
 static int pattern_matches(const char* p, const char* s, size_t n) {
     for (; *p != '\0'; p++) {
         if (*p == '*') {
@@ -670,7 +670,7 @@ static int pattern_matches(const char* p, const char* s, size_t n) {
                 return 0;
             p = q;
         } else {
-            if (*p == '\\' && p[1] != '\0')
+            if ((*p == '\\' || *p == GLOB_ESCAPE) && p[1] != '\0')
                 p++;
             if (*p != *s)
                 return 0;
@@ -679,6 +679,10 @@ static int pattern_matches(const char* p, const char* s, size_t n) {
         n--;
     }
     return n == 0;
+}
+
+int winshell_pattern_matches(const char* pattern, const char* text) {
+    return pattern_matches(pattern, text, strlen(text));
 }
 
 /** Removes the shortest or longest match of the pattern from the start or the end of value. */

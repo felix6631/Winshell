@@ -55,9 +55,9 @@ static void test_running(void) {
     run_result_free(&r);
 
     // programs are only run from the bin directory, not from the current one
-    write_text(workDir, "local.bat", "@echo local\r\n");
-    script("local\n", &r);
-    CHECK(strstr(r.err, "Failed to execute command 'local'") != NULL);
+    write_text(workDir, "localprog.bat", "@echo local\r\n");
+    script("localprog\n", &r);
+    CHECK(strstr(r.err, "Failed to execute command 'localprog'") != NULL);
     run_result_free(&r);
 
     // a very long argument list is passed on completely

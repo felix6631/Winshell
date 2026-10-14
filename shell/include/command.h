@@ -34,6 +34,20 @@ int command_incomplete(const char* text);
  */
 int command_break(int levels, int isContinue);
 
+/**
+ * Functions: `name() compound-command` defines one (for the rest of the session); a command whose name is a
+ * function runs its body with the arguments as $1.. $9, $# and $@. command_has_function tells whether a
+ * name is one, command_call_function runs it (argv[0] is the name; 127 when there is none).
+ * return [N] ends the function with the status N (default: that of the last command); local NAME[=value]
+ * makes the variable the function's own, put back when it returns. Both return 0, or 1 after a message
+ * when not in a function. command_unset_function removes one (unset -f); returns 1 when there was one.
+ */
+int command_has_function(const char* name);
+int command_call_function(const char* name, char* const* argv, int* exitShell, int status);
+int command_return(int status);
+int command_local(const char* name, const char* value);
+int command_unset_function(const char* name);
+
 /** Ctrl+C: the loops that are running stop (status 130) at the end of the round. Called from the console handler. */
 void command_interrupt(void);
 

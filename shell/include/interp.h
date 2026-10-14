@@ -55,6 +55,14 @@ typedef struct InputRedirection InputRedirection;
 InputRedirection* interp_input_from_bytes(const char* data, size_t length);
 void interp_input_restore(InputRedirection* input);
 
+/**
+ * The positional parameters of a function call: $1.. $9, $#, $@ and $* become the arguments until the
+ * frame is popped, which puts the caller's back ($0 is not changed). Returns NULL when out of memory.
+ */
+typedef struct ParameterFrame ParameterFrame;
+ParameterFrame* interp_parameters_push(const char* const* arguments, int count);
+void interp_parameters_pop(ParameterFrame* frame);
+
 /** Makes $(...) work in the parser: call once at the start. */
 void interp_init(void);
 

@@ -10,11 +10,13 @@
 #include <string.h>
 #include <windows.h>
 #include "command.h"
+#include "cwd.h"
 #include "executer.h"
 #include "interp.h"
 #include "parser.h"
 #include "variables.h"
 #include "vec.h"
+#include "vpath.h"
 
 /* ---- the tree ---------------------------------------------------------------------------- */
 
@@ -26,13 +28,24 @@ typedef struct {
     size_t count;
 } List;
 
-typedef enum { NODE_SIMPLE, NODE_IF, NODE_WHILE, NODE_FOR, NODE_PIPE } NodeType;
+typedef enum {
+    NODE_SIMPLE, NODE_IF, NODE_WHILE, NODE_FOR, NODE_PIPE, NODE_CASE, NODE_GROUP, NODE_SUBSHELL, NODE_FUNCTION
+} NodeType;
+
+/** One clause of a case: the patterns (text, expanded when the case is run) and the commands. */
+typedef struct {
+    char** patterns;
+    size_t patternCount;
+    List   body;
+} CaseClause;
 
 struct Node {
+    CaseClause* clauses;        // NODE_CASE; its word is in text
+    size_t   clauseCount;
     NodeType type;
     char*    text;              // NODE_SIMPLE: the command; NODE_FOR: the words after `in` (NULL: "$@")
     char*    redirects;         // a compound command: the redirections written after it (`done < file`), or NULL
-    char*    name;              // NODE_FOR: the variable
+    char*    name;              // NODE_FOR: the variable; NODE_FUNCTION: the name of the function
     int      until;             // NODE_WHILE: until
     int      hasElse;           // NODE_IF
     List     first;             // IF: the condition, WHILE: the condition
@@ -55,6 +68,15 @@ static void free_list(List* list) {
 static void free_node(Node* node) {
     if (node == NULL)
         return;
+    size_t i, k;
+
+    for (i = 0; i < node->clauseCount; i++) {
+        for (k = 0; k < node->clauses[i].patternCount; k++)
+            free(node->clauses[i].patterns[k]);
+        free(node->clauses[i].patterns);
+        free_list(&node->clauses[i].body);
+    }
+    free(node->clauses);
     free(node->text);
     free(node->redirects);
     free(node->name);
@@ -91,6 +113,7 @@ typedef struct {
     int         error;
     int         quiet;          // no messages: only the kind of error is wanted
     int         pipeToCompound; // scan_simple stopped at a | that is followed by a compound command
+    int         subshellDepth;  // inside ( ... ): a ) ends a command
     char        message[200];
 } Parser;
 
@@ -129,6 +152,8 @@ static int skip_separators(Parser* p, int afterCommand) {
     for (;;) {
         char c = p->text[p->pos];
 
+        if (c == ';' && p->text[p->pos + 1] == ';')
+            return 0;                   // ;; ends the clause of a case: the caller looks for it
         if (c == ';') {
             if (!semicolonAllowed)
                 return syntax(p, "Syntax error near unexpected token '%s'", ";");
@@ -179,7 +204,8 @@ static int at_word(const Parser* p, const char* word) {
 }
 
 static int is_reserved(const char* word) {
-    static const char* const words[] = { "if", "then", "elif", "else", "fi", "while", "until", "do", "done", "for", "in" };
+    static const char* const words[] = { "if", "then", "elif", "else", "fi", "while", "until", "do", "done", "for", "in",
+                                          "case", "esac", "{", "}" };
     size_t i;
 
     for (i = 0; i < sizeof words / sizeof words[0]; i++)
@@ -268,6 +294,8 @@ static size_t scan_simple(Parser* p, size_t start) {
                 i++;
             continue;
         }
+        if (c == ')' && p->subshellDepth > 0 && quote == '\0')
+            return i;
         if (c == '|' && text[i + 1] != '|') {
             // a pipe into a compound command (`cmd | while read x; do ...; done`) ends the simple command
             size_t j = i + 1;
@@ -278,7 +306,7 @@ static size_t scan_simple(Parser* p, size_t start) {
                 j++;
             if (plain_word(p, j, word, sizeof word, &wordEnd) &&
                 (strcmp(word, "while") == 0 || strcmp(word, "until") == 0 || strcmp(word, "for") == 0 ||
-                 strcmp(word, "if") == 0)) {
+                 strcmp(word, "if") == 0 || strcmp(word, "case") == 0 || strcmp(word, "{") == 0)) {
                 p->pipeToCompound = 1;
                 return i;
             }
@@ -320,6 +348,10 @@ static int parse_list(Parser* p, List* list, const char* const* stops) {
         if (skip_separators(p, op != LIST_FIRST) != 0)
             return -1;
         if (p->text[p->pos] == '\0' || is_stop(p, stops))
+            return 0;
+        if (p->text[p->pos] == ';' && p->text[p->pos + 1] == ';')
+            return 0;                   // the end of a clause of a case
+        if (p->text[p->pos] == ')' && p->subshellDepth > 0)
             return 0;
         if (parse_andor(p, list, op) != 0)
             return -1;
@@ -493,7 +525,8 @@ static int parse_trailer(Parser* p, Node* node) {
     skip_blanks(p);
     c = p->text[p->pos];
     next = c != '\0' ? p->text[p->pos + 1] : '\0';
-    if (c == '\0' || c == '\n' || c == ';' || c == '#' || (c == '&' && next == '&') || (c == '|' && next == '|'))
+    if (c == '\0' || c == '\n' || c == ';' || c == '#' || (c == '&' && next == '&') || (c == '|' && next == '|') ||
+        (c == ')' && p->subshellDepth > 0))
         return 0;
     if (c == '|')
         return syntax(p, "Syntax error: the output of a compound command cannot be piped%s", NULL);
@@ -525,6 +558,201 @@ static int parse_trailer(Parser* p, Node* node) {
     }
 }
 
+
+/** Reads one word as it is written (quotes and substitutions in it passed) from pos; returns its end. */
+static size_t scan_word(Parser* p, size_t pos) {
+    const char* text = p->text;
+    char quote = '\0';
+
+    for (;;) {
+        char c = text[pos];
+        size_t passed;
+
+        if (c == '\0')
+            return pos;
+        if (quote != '\'' && ((c == '$' && (text[pos + 1] == '(' || text[pos + 1] == '{')) || c == '`')) {
+            size_t n = winshell_substitution_length(text + pos);
+
+            if (n == 0)
+                return pos;
+            pos += n;
+            continue;
+        }
+        passed = winshell_pass_quoted(text, pos, &quote);
+        if (passed > 0) {
+            pos += passed;
+            continue;
+        }
+        if (is_blank(c) || c == '\n' || c == ';' || c == '&' || c == '|' || c == '<' || c == '>' || c == ')')
+            return pos;
+        pos++;
+    }
+}
+
+static int add_pattern(CaseClause* clause, const char* start, size_t length) {
+    char** grown;
+    char* copy;
+
+    while (length > 0 && is_blank(start[0])) {
+        start++;
+        length--;
+    }
+    while (length > 0 && is_blank(start[length - 1]))
+        length--;
+    copy = malloc(length + 1);
+    grown = realloc(clause->patterns, (clause->patternCount + 1) * sizeof *grown);
+    if (copy == NULL || grown == NULL) {
+        free(copy);
+        if (grown != NULL)
+            clause->patterns = grown;
+        return -1;
+    }
+    memcpy(copy, start, length);
+    copy[length] = '\0';
+    grown[clause->patternCount++] = copy;
+    clause->patterns = grown;
+    return 0;
+}
+
+static int parse_case(Parser* p, Node* node) {
+    static const char* const toEsac[] = { "esac", NULL };
+    size_t start, end;
+
+    skip_blanks(p);
+    start = p->pos;
+    end = scan_word(p, start);
+    if (end == start) {
+        if (p->text[p->pos] == '\0')
+            return incomplete(p, "Syntax error: unexpected end of input (expected a word after 'case')");
+        return syntax(p, "Syntax error: 'case' needs a word%s", NULL);
+    }
+    node->text = malloc(end - start + 1);
+    if (node->text == NULL) {
+        p->error = ERROR_MEMORY;
+        return -1;
+    }
+    memcpy(node->text, p->text + start, end - start);
+    node->text[end - start] = '\0';
+    p->pos = end;
+
+    if (expect_word(p, "in") != 0)
+        return -1;
+
+    for (;;) {
+        CaseClause* grown;
+        CaseClause* clause;
+        size_t patternStart;
+        char quote = '\0';
+
+        if (skip_separators(p, 0) != 0)
+            return -1;
+        if (p->text[p->pos] == '\0')
+            return incomplete(p, "Syntax error: unexpected end of input (expected 'esac')");
+        if (at_word(p, "esac")) {
+            p->pos += 4;
+            return 0;
+        }
+        if (p->text[p->pos] == '(')
+            p->pos++;                   // the optional ( in front of the patterns
+
+        grown = realloc(node->clauses, (node->clauseCount + 1) * sizeof *grown);
+        if (grown == NULL) {
+            p->error = ERROR_MEMORY;
+            return -1;
+        }
+        node->clauses = grown;
+        clause = &node->clauses[node->clauseCount];
+        memset(clause, 0, sizeof *clause);
+        node->clauseCount++;
+
+        // the patterns: up to the ) outside of quotes, separated by |
+        patternStart = p->pos;
+        for (;;) {
+            char c = p->text[p->pos];
+            size_t passed;
+
+            if (c == '\0')
+                return incomplete(p, "Syntax error: unexpected end of input (expected ')' of a pattern)");
+            if (quote != '\'' && ((c == '$' && (p->text[p->pos + 1] == '(' || p->text[p->pos + 1] == '{')) || c == '`')) {
+                size_t n = winshell_substitution_length(p->text + p->pos);
+
+                if (n > 0) {
+                    p->pos += n;
+                    continue;
+                }
+            }
+            passed = winshell_pass_quoted(p->text, p->pos, &quote);
+            if (passed > 0) {
+                p->pos += passed;
+                continue;
+            }
+            if (c == '|') {
+                if (add_pattern(clause, p->text + patternStart, p->pos - patternStart) != 0) {
+                    p->error = ERROR_MEMORY;
+                    return -1;
+                }
+                p->pos++;
+                patternStart = p->pos;
+                continue;
+            }
+            if (c == ')') {
+                if (add_pattern(clause, p->text + patternStart, p->pos - patternStart) != 0) {
+                    p->error = ERROR_MEMORY;
+                    return -1;
+                }
+                p->pos++;
+                break;
+            }
+            p->pos++;
+        }
+        {
+            size_t k;
+            for (k = 0; k < clause->patternCount; k++)
+                if (clause->patterns[k][0] == '\0')
+                    return syntax(p, "Syntax error: empty pattern in 'case'%s", NULL);
+        }
+
+        if (parse_list(p, &clause->body, toEsac) != 0)
+            return -1;
+        if (p->text[p->pos] == ';' && p->text[p->pos + 1] == ';')
+            p->pos += 2;
+        else if (!at_word(p, "esac")) {
+            if (p->text[p->pos] == '\0')
+                return incomplete(p, "Syntax error: unexpected end of input (expected 'esac')");
+            return syntax(p, "Syntax error: expected ';;' or 'esac'%s", NULL);
+        }
+    }
+}
+
+static int parse_group(Parser* p, Node* node) {
+    static const char* const toBrace[] = { "}", NULL };
+
+    if (parse_list(p, &node->second, toBrace) != 0)
+        return -1;
+    if (node->second.count == 0)
+        return syntax(p, "Syntax error: missing command after '{'%s", NULL);
+    return expect_word(p, "}");
+}
+
+static int parse_subshell(Parser* p, Node* node) {
+    p->subshellDepth++;
+    if (parse_list(p, &node->second, NULL) != 0) {
+        p->subshellDepth--;
+        return -1;
+    }
+    p->subshellDepth--;
+    if (node->second.count == 0)
+        return syntax(p, "Syntax error: missing command after '('%s", NULL);
+    if (skip_separators(p, 1) != 0)
+        return -1;
+    if (p->text[p->pos] == '\0')
+        return incomplete(p, "Syntax error: unexpected end of input (expected ')')");
+    if (p->text[p->pos] != ')')
+        return syntax(p, "Syntax error: expected ')'%s", NULL);
+    p->pos++;
+    return 0;
+}
+
 static Node* parse_command(Parser* p) {
     char buffer[16];
     const char* word;
@@ -535,6 +763,87 @@ static Node* parse_command(Parser* p) {
         incomplete(p, "Syntax error: missing command");
         return NULL;
     }
+
+    // name() compound-command
+    if (isalpha((unsigned char)p->text[p->pos]) || p->text[p->pos] == '_') {
+        size_t nameEnd = p->pos, k;
+
+        while (isalnum((unsigned char)p->text[nameEnd]) || p->text[nameEnd] == '_')
+            nameEnd++;
+        k = nameEnd;
+        while (is_blank(p->text[k]))
+            k++;
+        if (p->text[k] == '(') {
+            k++;
+            while (is_blank(p->text[k]))
+                k++;
+            if (p->text[k] == ')') {
+                Node* function;
+                Node* body;
+
+                function = new_node(NODE_FUNCTION);
+                if (function == NULL) {
+                    p->error = ERROR_MEMORY;
+                    return NULL;
+                }
+                function->type = NODE_FUNCTION;
+                function->name = malloc(nameEnd - p->pos + 1);
+                if (function->name == NULL) {
+                    free_node(function);
+                    p->error = ERROR_MEMORY;
+                    return NULL;
+                }
+                memcpy(function->name, p->text + p->pos, nameEnd - p->pos);
+                function->name[nameEnd - p->pos] = '\0';
+                p->pos = k + 1;
+                while (is_blank(p->text[p->pos]) || p->text[p->pos] == '\n')
+                    p->pos++;
+                if (p->text[p->pos] == '\0') {
+                    free_node(function);
+                    incomplete(p, "Syntax error: unexpected end of input (the body of a function)");
+                    return NULL;
+                }
+                body = parse_command(p);
+                if (body == NULL) {
+                    free_node(function);
+                    return NULL;
+                }
+                if (body->type == NODE_SIMPLE || body->type == NODE_PIPE) {
+                    free_node(body);
+                    free_node(function);
+                    syntax(p, "Syntax error: the body of a function has to be a compound command%s", NULL);
+                    return NULL;
+                }
+                if (list_add(&function->second, body, LIST_FIRST) != 0) {
+                    free_node(body);
+                    free_node(function);
+                    p->error = ERROR_MEMORY;
+                    return NULL;
+                }
+                return function;
+            }
+        }
+    }
+
+    // ( list ): a subshell
+    if (p->text[p->pos] == '(') {
+        int status;
+
+        node = new_node(NODE_SUBSHELL);
+        if (node == NULL) {
+            p->error = ERROR_MEMORY;
+            return NULL;
+        }
+        node->type = NODE_SUBSHELL;
+        p->pos++;
+        status = parse_subshell(p, node);
+        if (status != 0 || parse_trailer(p, node) != 0) {
+            free_node(node);
+            return NULL;
+        }
+        return node;
+    }
+
     word = reserved_here(p, buffer, sizeof buffer);
     if (word != NULL) {
         NodeType type;
@@ -546,6 +855,10 @@ static Node* parse_command(Parser* p) {
             type = NODE_WHILE;
         else if (strcmp(word, "for") == 0)
             type = NODE_FOR;
+        else if (strcmp(word, "case") == 0)
+            type = NODE_CASE;
+        else if (strcmp(word, "{") == 0)
+            type = NODE_GROUP;
         else {
             syntax(p, "Syntax error near unexpected token '%s'", word);
             return NULL;
@@ -558,7 +871,16 @@ static Node* parse_command(Parser* p) {
         node->type = type;
         node->until = strcmp(word, "until") == 0;
         p->pos += strlen(word);
-        status = type == NODE_IF ? parse_if(p, node) : (type == NODE_WHILE ? parse_while(p, node) : parse_for(p, node));
+        if (type == NODE_IF)
+            status = parse_if(p, node);
+        else if (type == NODE_WHILE)
+            status = parse_while(p, node);
+        else if (type == NODE_FOR)
+            status = parse_for(p, node);
+        else if (type == NODE_CASE)
+            status = parse_case(p, node);
+        else
+            status = parse_group(p, node);
         if (status != 0) {
             free_node(node);
             return NULL;
@@ -696,6 +1018,271 @@ static int after_round(void) {
 
 static int run_node(Runner* r, const Node* node, int status);
 
+
+/* ---- functions ------------------------------------------------------------------------------- */
+
+typedef struct {
+    char* name;
+    Node* body;                 // owned: taken from the tree of the definition
+} Function;
+
+static Function* functions;
+static size_t functionCount;
+static int callDepth;
+static int pendingReturn;
+static int returnStatus;
+
+typedef struct {
+    char* name;
+    char* old;                  // NULL: it was not set
+} LocalVariable;
+
+static LocalVariable* locals;
+static size_t localCount;
+
+static Function* find_function(const char* name) {
+    size_t i;
+
+    for (i = 0; i < functionCount; i++)
+        if (strcmp(functions[i].name, name) == 0)
+            return &functions[i];
+    return NULL;
+}
+
+int command_has_function(const char* name) {
+    return find_function(name) != NULL;
+}
+
+/** Defines the function, taking the body out of the tree. */
+static int define_function(Node* node) {
+    Function* function = find_function(node->name);
+    Node* body = node->second.nodes[0];
+
+    if (function != NULL) {
+        free_node(function->body);
+    } else {
+        Function* grown = realloc(functions, (functionCount + 1) * sizeof *grown);
+
+        if (grown == NULL)
+            return -1;
+        functions = grown;
+        function = &functions[functionCount++];
+        function->name = _strdup(node->name);
+        if (function->name == NULL) {
+            functionCount--;
+            return -1;
+        }
+    }
+    function->body = body;
+    node->second.nodes[0] = NULL;       // the table owns it now
+    return 0;
+}
+
+int command_unset_function(const char* name) {
+    size_t i;
+
+    for (i = 0; i < functionCount; i++) {
+        if (strcmp(functions[i].name, name) == 0) {
+            free(functions[i].name);
+            free_node(functions[i].body);
+            functions[i] = functions[--functionCount];
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int command_return(int status) {
+    if (callDepth == 0) {
+        fprintf(stderr, "return: can only `return' from a function\n");
+        return 1;
+    }
+    pendingReturn = 1;
+    returnStatus = status & 0xFF;
+    pendingLevels = 1 << 20;            // stops the lists and the loops of the function, up to its call
+    pendingContinue = 0;
+    return 0;
+}
+
+int command_local(const char* name, const char* value) {
+    LocalVariable* grown;
+    const char* old;
+
+    if (callDepth == 0) {
+        fprintf(stderr, "local: can only be used in a function\n");
+        return 1;
+    }
+    grown = realloc(locals, (localCount + 1) * sizeof *grown);
+    if (grown == NULL)
+        return 1;
+    locals = grown;
+    old = var_get(name);
+    locals[localCount].name = _strdup(name);
+    locals[localCount].old = old != NULL ? _strdup(old) : NULL;
+    localCount++;
+    if (value != NULL)
+        var_set(name, value);
+    else
+        var_unset(name);
+    return 0;
+}
+
+static int run_function(Runner* r, const Function* function, char* const* argv, int status) {
+    ParameterFrame* frame;
+    size_t localsBefore = localCount, i;
+    int count = 0, result;
+
+    if (callDepth >= 200) {
+        fprintf(stderr, "%s: maximum function nesting level exceeded\n", argv[0]);
+        return 1;
+    }
+    while (argv[1 + count] != NULL)
+        count++;
+    frame = interp_parameters_push((const char* const*)argv + 1, count);
+    callDepth++;
+    activeLoopDepth += 0;
+    result = run_node(r, function->body, status);
+    if (pendingReturn) {
+        result = returnStatus;
+        pendingReturn = 0;
+        pendingLevels = 0;
+    }
+    callDepth--;
+    for (i = localCount; i > localsBefore; i--) {
+        LocalVariable* local = &locals[i - 1];
+
+        if (local->old != NULL)
+            var_set(local->name, local->old);
+        else
+            var_unset(local->name);
+        free(local->name);
+        free(local->old);
+    }
+    localCount = localsBefore;
+    interp_parameters_pop(frame);
+    return result;
+}
+
+int command_call_function(const char* name, char* const* argv, int* exitShell, int status) {
+    Runner runner;
+    Function* function = find_function(name);
+
+    if (function == NULL)
+        return 127;
+    runner.exitShell = exitShell;
+    runner.loopDepth = 0;
+    return run_function(&runner, function, argv, status);
+}
+
+/** The text of a case word or pattern, expanded as the word of a command is, but not split or matched to files. */
+static char* expand_case_word(const char* text, char** pattern) {
+    Pipeline pipeline;
+    char* line = malloc(strlen(text) + 8);
+    char* word = NULL;
+
+    *pattern = NULL;
+    if (line == NULL)
+        return NULL;
+    sprintf(line, "x \"\" %s", text);
+    if (winshell_parse(line, &pipeline) != 0) {
+        free(line);
+        return NULL;
+    }
+    free(line);
+    if (pipeline.count > 0 && pipeline.commands[0].argv != NULL && pipeline.commands[0].argv[2] != NULL) {
+        const Command* c = &pipeline.commands[0];
+        size_t total = 1, i;
+
+        // all the words that the text became are one: they are joined with a space
+        for (i = 2; c->argv[i] != NULL; i++)
+            total += strlen(c->argv[i]) + 1;
+        word = malloc(total);
+        *pattern = malloc(total * 2 + 1);
+        if (word != NULL && *pattern != NULL) {
+            word[0] = '\0';
+            (*pattern)[0] = '\0';
+            for (i = 2; c->argv[i] != NULL; i++) {
+                if (i > 2) {
+                    strcat(word, " ");
+                    strcat(*pattern, " ");
+                }
+                strcat(word, c->argv[i]);
+                if (c->patterns != NULL && c->patterns[i] != NULL) {
+                    strcat(*pattern, c->patterns[i]);
+                } else {
+                    // a word with no active wildcard (all quoted): every wildcard in it is plain
+                    const char* from;
+                    size_t used = strlen(*pattern);
+
+                    for (from = c->argv[i]; *from != '\0'; from++) {
+                        if (*from == '*' || *from == '?' || *from == '[' || *from == '\\')
+                            (*pattern)[used++] = GLOB_ESCAPE;
+                        (*pattern)[used++] = *from;
+                    }
+                    (*pattern)[used] = '\0';
+                }
+            }
+        }
+    } else {
+        word = _strdup("");
+        *pattern = _strdup("");
+    }
+    winshell_freePipeline(&pipeline);
+    return word;
+}
+
+static int run_case(Runner* r, const Node* node, int status) {
+    char* pattern = NULL;
+    char* word = expand_case_word(node->text, &pattern);
+    size_t i, k;
+    int result = 0;
+
+    free(pattern);
+    if (word == NULL)
+        return 1;
+    for (i = 0; i < node->clauseCount; i++) {
+        const CaseClause* clause = &node->clauses[i];
+        int matched = 0;
+
+        for (k = 0; k < clause->patternCount && !matched; k++) {
+            char* literal = NULL;
+            char* text = expand_case_word(clause->patterns[k], &literal);
+
+            if (text != NULL && literal != NULL)
+                matched = winshell_pattern_matches(literal, word);
+            free(text);
+            free(literal);
+        }
+        if (matched) {
+            result = run_list(r, &clause->body, status);
+            break;
+        }
+    }
+    free(word);
+    return result;
+}
+
+/** ( list ): runs in a subshell, as far as that can be done in the process (see $(...)): exit, cd and the variables stay inside. */
+static int run_subshell(Runner* r, const Node* node, int status) {
+    char directory[VPATH_MAX];
+    VarSnapshot* variables;
+    int exitInside = 0, result;
+    Runner inner;
+
+    cwd_get(directory, sizeof directory);
+    variables = var_save();
+    inner.exitShell = &exitInside;
+    inner.loopDepth = 0;
+    result = run_list(&inner, &node->second, status);
+    if (variables != NULL) {
+        char absolute[VPATH_MAX];
+
+        cwd_change(directory, absolute, sizeof absolute);
+        var_restore(variables);
+    }
+    (void)r;
+    return result;
+}
 /** A compound command with the redirections written after it: they are in force while it runs. */
 static int run_redirected(Runner* r, const Node* node, int status) {
     Pipeline pipeline;
@@ -763,6 +1350,18 @@ static int run_node(Runner* r, const Node* node, int status) {
     switch (node->type) {
     case NODE_PIPE:
         return 0;
+
+    case NODE_CASE:
+        return run_case(r, node, status);
+
+    case NODE_GROUP:
+        return run_list(r, &node->second, status);
+
+    case NODE_SUBSHELL:
+        return run_subshell(r, node, status);
+
+    case NODE_FUNCTION:
+        return define_function((Node*)node) == 0 ? 0 : 1;
     case NODE_SIMPLE:
         return interp_run_simple(node->text, r->exitShell, status);
 

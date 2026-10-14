@@ -264,9 +264,21 @@ static int builtin_read(char* const argv[]) {
 }
 
 static int builtin_unset(char* const argv[]) {
-    int i, status = 0;
+    int i, status = 0, functions = 0;
 
     for (i = 1; argv[i] != NULL; i++) {
+        if (strcmp(argv[i], "-f") == 0) {
+            functions = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "-v") == 0) {
+            functions = 0;
+            continue;
+        }
+        if (functions) {
+            command_unset_function(argv[i]);
+            continue;
+        }
         if (!valid_name(argv[i], strlen(argv[i]))) {
             fprintf(stderr, "unset: '%s': not a valid identifier\n", argv[i]);
             status = 1;
@@ -279,7 +291,7 @@ static int builtin_unset(char* const argv[]) {
 
 int builtin_exists(const char* name) {
     static const char* const names[] = { "cd", "export", "unset", "exit", "quit", "source", ".", ":", "break",
-                                         "continue", "read" };
+                                         "continue", "read", "return", "local" };
     size_t i;
 
     for (i = 0; i < sizeof names / sizeof names[0]; i++)
@@ -305,6 +317,43 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
     }
     if (strcmp(name, "read") == 0) {
         *status = builtin_read(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "return") == 0) {
+        int value = *status;
+
+        if (command->argv[1] != NULL) {
+            char* end;
+            long number = strtol(command->argv[1], &end, 10);
+
+            if (*end != '\0' || command->argv[1][0] == '\0') {
+                fprintf(stderr, "return: %s: numeric argument required\n", command->argv[1]);
+                number = 2;
+            }
+            value = (int)(number & 0xFF);
+        }
+        *status = command_return(value) == 0 ? value : 1;
+        return 1;
+    }
+    if (strcmp(name, "local") == 0) {
+        int i, failed = 0;
+
+        for (i = 1; command->argv[i] != NULL; i++) {
+            const char* equals = strchr(command->argv[i], '=');
+            char variable[256];
+            size_t length = equals != NULL ? (size_t)(equals - command->argv[i]) : strlen(command->argv[i]);
+
+            if (length == 0 || length >= sizeof variable || !valid_name(command->argv[i], length)) {
+                fprintf(stderr, "local: '%s': not a valid identifier\n", command->argv[i]);
+                failed = 1;
+                continue;
+            }
+            memcpy(variable, command->argv[i], length);
+            variable[length] = '\0';
+            if (command_local(variable, equals != NULL ? equals + 1 : NULL) != 0)
+                failed = 1;
+        }
+        *status = failed;
         return 1;
     }
     if (strcmp(name, ":") == 0) {

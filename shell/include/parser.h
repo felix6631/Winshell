@@ -80,6 +80,12 @@ size_t winshell_substitution_length(const CHAR* text);
 size_t winshell_pass_quoted(const CHAR* line, size_t i, CHAR* quote);
 int winshell_operator_at(const CHAR* line, size_t i, size_t* length, size_t* skip);
 
+/**
+ * Whether the text matches the whole of the pattern: * ? [..], and a backslash or GLOB_ESCAPE makes the next
+ * character plain (as the patterns of Command.patterns are written).
+ */
+int winshell_pattern_matches(const char* pattern, const char* text);
+
 /** How a command of a list depends on the one before it. */
 #define LIST_FIRST 0    // the first command of the line
 #define LIST_SEQ   1    // ;   always runs

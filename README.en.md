@@ -6,13 +6,13 @@ Winshell is a project and toolchain for using a Linux-style shell and coreutils 
 It is written in plain C on top of the Win32 API, and aims to run as far back as Windows XP.
 
 > **Status: early development.** The shell reads a line and runs `bin\<command>.exe`;
-> background jobs (`&`), `case`, shell functions and `{ ...; }`/`( ... )` groups are not implemented yet.
+> background jobs (`&`), brace expansion and arrays are not implemented yet.
 
 ## Implemented
 
 | Command | Status |
 | --- | --- |
-| `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion (`$? $0 $1..$9 $# $@ $*`), command substitution (`$(...)`, backticks), comments (`#`), control structures (`if`/`elif`/`else`, `while`, `until`, `for`, `break`, `continue`, `:`), arithmetic expansion (`$((...))`), parameter expansion (`${NAME:-value}` and more), `read`, redirections and pipes of loops, wildcards, running scripts (`shell FILE [ARG...]`, `shell -c`, `source`/`.`), `cd` `export` `unset` `exit` `source` |
+| `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion (`$? $0 $1..$9 $# $@ $*`), command substitution (`$(...)`, backticks), comments (`#`), control structures (`if`/`elif`/`else`, `while`, `until`, `for`, `case`, `break`, `continue`, `:`), functions (`name() { ...; }`, `return`, `local`), groups (`{ ...; }`, `( ... )`), arithmetic expansion (`$((...))`), parameter expansion (`${NAME:-value}` and more), `read`, redirections and pipes of loops, wildcards, running scripts (`shell FILE [ARG...]`, `shell -c`, `source`/`.`), `cd` `export` `unset` `exit` `source` |
 | `arch` | Done |
 | `basename` | Done (`-a -s -z`; both `/` and `\` separate; the suffix is removed unless it is the whole name) |
 | `date` | Done (`-d -u -r -I -R --rfc-3339`, the format letters `%a %A %b %B %c %C %d %D %e %F %g %G %H %I %j %k %l %m %M %N %p %P %q %r %R %s %S %T %u %U %V %w %W %x %X %y %Y %z %:z %Z` with the flags `- _ 0 ^ #` and a width; `-d` reads `@SECONDS`, ISO dates and times, month names, `now yesterday tomorrow`, `+2 days`, `3 weeks ago`, `next month`, weekdays; years before 1970 and after 3000 work; `-s` (setting the clock) is not supported) |
@@ -141,7 +141,18 @@ See [Planned](#planned) for what is still to come.
     input and output of the shell itself, so the builtins and the programs run inside read and write there.
   - A compound command may stand on the right of a pipe: `cmd | while read x; do ...; done`. The left part runs to its end (in a
     subshell) and its output is the input of the compound command (it is not streamed, so a left part that never ends does not
-    work). The output of a compound command into a pipe (`done | cmd`), `case`, functions, `{ ...; }` and `( ... )` are not there yet.
+    work). The output of a compound command into a pipe (`done | cmd`), and a call of a function as a stage of a pipe (`f | cat`) are not there yet.
+  - `case WORD in PATTERN[|PATTERN]...) LIST ;; ... esac`: the word and the patterns are expanded like the arguments of a command
+    (variables, substitutions, quotes) and a pattern uses `* ? [..]`. A `*` in quotes is plain, and only the first clause that matches runs.
+    The status is 0 when none matches; the `;;` of the last clause may be left out.
+  - Functions: `name() compound-command` (`name() { ...; }`, `name() if ...; fi`, ...). A definition stays for the session, a new one with the
+    same name replaces it, `unset -f name` removes it. A call makes the arguments `$1`..`$9`, `$#`, `$@` and `$*` and puts the caller's back
+    when it ends (`$0` is not changed). `return [N]` ends the function (without N with the status of the last command); `local NAME[=value]`
+    makes a variable the function's own, put back when it ends. A function runs in the same shell, so its assignments stay; a call may be in a
+    `&&`/`||` list, have redirections (`f > file`), be in a substitution (`$(f x)` ) and in a loop. The nesting is limited to 200 levels.
+  - `{ LIST; }` groups a list into one command in the current shell (it may have redirections and be on the right of a pipe); `( LIST )` is a
+    subshell: the directory and the variables are as they were when it ends, and an `exit` inside ends only the subshell. `{` and `}` are
+    reserved words only as the first word of a command.
   - The input is read one command of the top level at a time (up to the next newline) and parsed whole before it runs, so a line with a
     syntax error runs nothing; in a script file the commands before the error have run when it ends with status 2. At a terminal an
     unfinished `if`/`while`/`for`, an open quote, or a line that ends in `&&`, `||` or `$(` goes on in the next line (prompt `> `). Ctrl+C
@@ -319,7 +330,7 @@ the build structure in line with the directories.
 
 ## Planned
 
-**Shell features**: background jobs (`&`), brace expansion, `case`, functions, `{ ...; }`, subshells `( ... )`, `${NAME/pattern/value}`, `$$`, arrays
+**Shell features**: background jobs (`&`), brace expansion, `${NAME/pattern/value}`, `$$`, arrays, functions and control structures inside pipelines, `select`, `trap`
 
 **coreutils**
 

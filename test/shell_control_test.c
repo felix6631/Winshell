@@ -225,12 +225,107 @@ static void test_input(void) {
     }
 }
 
+static void test_case(void) {
+    printf("case\n");
+    expect("k1.sh", "case abc in abc) echo exact ;; esac\n", "", "exact\n", 0);
+    expect("k2.sh", "case x.txt in *.c) echo c ;; *.txt) echo txt ;; *) echo other ;; esac\n", "", "txt\n", 0);
+    expect("k3.sh", "case b in a|b|c) echo abc ;; esac\n", "", "abc\n", 0);
+    expect("k4.sh", "case none in a) echo a ;; b) echo b ;; esac\necho $?\n", "", "0\n", 0);
+    expect("k5.sh", "v=\"a b\"\ncase \"$v\" in \"a b\") echo quoted ;; *) echo no ;; esac\n", "", "quoted\n", 0);
+    expect("k6.sh", "case 5 in [0-9]) echo digit ;; esac\ncase a in [!0-9]) echo notdigit ;; esac\n", "",
+           "digit\nnotdigit\n", 0);
+
+    // quoted wildcards are plain; the first clause that matches is the only one that runs
+    expect("k7.sh", "case abc in \"a*\") echo literal ;; a*) echo glob ;; esac\ncase \"*\" in \"*\") echo star ;; esac\n", "",
+           "glob\nstar\n", 0);
+    expect("k8.sh", "case a in a) echo first ;; a) echo second ;; esac\n", "", "first\n", 0);
+
+    // the word is expanded; clauses on several lines; the last clause needs no ;;
+    expect("k9.sh", "f=file.c\ncase $f in\n  *.c)\n    echo c source\n    echo second line\n    ;;\n  *)\n    echo other\nesac\n",
+           "", "c source\nsecond line\n", 0);
+    expect("k10.sh", "case $(echo hi) in hi) echo from-substitution ;; esac\ncase x in (x) echo paren ;; esac\n", "",
+           "from-substitution\nparen\n", 0);
+
+    // inside a loop, with break
+    expect("k11.sh", "for w in a b stop c; do case $w in stop) break ;; *) echo $w ;; esac; done\n", "", "a\nb\n", 0);
+}
+
+static void test_functions(void) {
+    printf("functions, groups, subshells\n");
+    expect("fn1.sh", "hello() { echo \"hello $1\"; }\nhello world\nhello there\n", "", "hello world\nhello there\n", 0);
+    expect("fn2.sh", "f() { echo $#:$1:$2; }\nf a b c\nf\n", "", "3:a:b\n0::\n", 0);
+    expect("fn3.sh", "f() { return 3; echo no; }\nf\necho $?\n", "", "3\n", 0);
+    expect("fn4.sh", "f() { expr 1 = 2; }\nf\necho $?\n", "", "0\n1\n", 0);
+    expect("fn5.sh", "f() { echo in; return; }\nexpr 1 = 2\nf\necho $?\n", "", "0\nin\n0\n", 0);
+
+    // the arguments of the caller come back; $0 is the script
+    expect("fn6.sh", "f() { echo $1; }\ng() { f inner; echo $1; }\ng outer\necho \"[$1]\"\n", "x", "inner\nouter\n[x]\n", 0);
+
+    // variables are the shell's own, unless local
+    expect("fn7.sh", "n=1\nf() { n=2; }\nf\necho $n\n", "", "2\n", 0);
+    expect("fn8.sh", "n=1\nf() { local n=2; echo in $n; }\nf\necho out $n\n", "", "in 2\nout 1\n", 0);
+    expect("fn9.sh", "f() { local u; echo \"[$u]\"; u=set; }\nf\necho \"[$u]\"\n", "", "[]\n[]\n", 0);
+
+    // recursion, and a function in a substitution
+    expect("fn10.sh", "fact() { if [ $1 -le 1 ]; then echo 1; return; fi; p=$(fact $(($1 - 1))); echo $(($1 * p)); }\n"
+                      "echo $(fact 5)\n", "", "120\n", 0);
+    expect("fn11.sh", "count() { if [ $1 -gt 0 ]; then echo $1; count $(($1 - 1)); fi; }\ncount 3\n", "", "3\n2\n1\n", 0);
+
+    // return from inside loops; break in a function leaves the loops of the function
+    expect("fn12.sh", "f() { for i in 1 2 3; do if [ $i -eq 2 ]; then return 9; fi; echo $i; done; }\nf\necho $?\n", "",
+           "1\n9\n", 0);
+
+    // other bodies and the layout
+    expect("fn13.sh", "f()\n{\n  echo layout\n}\nf\ng () { echo spaced; }\ng\nh() if true; then echo ifbody; fi\nh\n", "",
+           "layout\nspaced\nifbody\n", 0);
+    expect("fn14.sh", "f() { echo one; }\nf() { echo two; }\nf\nunset -f f\nf 2> nul\necho $?\n", "", "two\n127\n", 0);
+
+    // exit in a function ends the shell; a function can be a loop's command
+    expect("fn15.sh", "f() { echo bye; exit 6; }\nf\necho never\n", "", "bye\n", 6);
+    expect("fn16.sh", "show() { echo \"<$1>\"; }\nfor x in a b; do show $x; done\n", "", "<a>\n<b>\n", 0);
+
+    // redirections and && of a call
+    expect("fn17.sh", "f() { echo to-file; }\nf > fn17.txt\ncat fn17.txt\nf && echo ok\n", "", "to-file\nto-file\nok\n", 0);
+
+    // a function body has to be a compound command; return outside of a function
+    {
+        RunResult r;
+
+        write_text(workDir, "fn18.sh", "f() echo no\n");
+        run_shell("fn18.sh", "", &r);
+        CHECK_INT(r.exitCode, 2);
+        CHECK(strstr(r.err, "compound command") != NULL);
+        run_result_free(&r);
+
+        write_text(workDir, "fn19.sh", "return 4\necho $?\n");
+        run_shell("fn19.sh", "", &r);
+        lf_only(r.out);
+        CHECK_STR(r.out, "1\n");
+        CHECK(strstr(r.err, "can only `return' from a function") != NULL);
+        run_result_free(&r);
+    }
+
+    // { list; }
+    expect("g1.sh", "{ echo a; echo b; }\n{ echo c\n  echo d\n} > g1.txt\ncat g1.txt\n", "", "a\nb\nc\nd\n", 0);
+    expect("g2.sh", "{ expr 1 = 2; } || echo failed\ntrue && { echo yes; echo yes2; }\n", "", "0\nfailed\nyes\nyes2\n", 0);
+    expect("g3.sh", "echo piped | { read a; echo \"got $a\"; }\n", "", "got piped\n", 0);
+
+    // ( list ): a subshell
+    expect("s1.sh", "(echo in)\n(exit 4)\necho $?\n", "", "in\n4\n", 0);
+    expect("s2.sh", "v=1\n(v=2; echo $v)\necho $v\n", "", "2\n1\n", 0);
+    expect("s3.sh", "cd /c\n(cd /c/Users; pwd)\npwd\n", "", "/c/Users\n/c\n", 0);
+    expect("s4.sh", "f() { echo $1; }\n(f sub)\n(echo a; echo b) > s4.txt\ncat s4.txt\n", "", "sub\na\nb\n", 0);
+    expect("s5.sh", "(echo a; (echo b; (echo c)))\n", "", "a\nb\nc\n", 0);
+}
+
 int main(void) {
     tools_init("shell_control_test");
     test_if();
     test_loops();
     test_break_continue();
     test_input();
+    test_case();
+    test_functions();
     test_syntax();
     return test_summary("shell_control_test");
 }
