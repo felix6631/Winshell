@@ -6,13 +6,13 @@ Winshell is a project and toolchain for using a Linux-style shell and coreutils 
 It is written in plain C on top of the Win32 API, and aims to run as far back as Windows XP.
 
 > **Status: early development.** The shell reads a line and runs `bin\<command>.exe`;
-> background jobs (`&`), control structures and shell functions are not implemented yet.
+> background jobs (`&`), `case`, shell functions and arithmetic expansion are not implemented yet.
 
 ## Implemented
 
 | Command | Status |
 | --- | --- |
-| `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion (`$? $0 $1..$9 $# $@ $*`), command substitution (`$(...)`, backticks), comments (`#`), wildcards, running scripts (`shell FILE [ARG...]`, `shell -c`, `source`/`.`), `cd` `export` `unset` `exit` `source` |
+| `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion (`$? $0 $1..$9 $# $@ $*`), command substitution (`$(...)`, backticks), comments (`#`), control structures (`if`/`elif`/`else`, `while`, `until`, `for`, `break`, `continue`, `:`), wildcards, running scripts (`shell FILE [ARG...]`, `shell -c`, `source`/`.`), `cd` `export` `unset` `exit` `source` |
 | `arch` | Done |
 | `basename` | Done (`-a -s -z`; both `/` and `\` separate; the suffix is removed unless it is the whole name) |
 | `date` | Done (`-d -u -r -I -R --rfc-3339`, the format letters `%a %A %b %B %c %C %d %D %e %F %g %G %H %I %j %k %l %m %M %N %p %P %q %r %R %s %S %T %u %U %V %w %W %x %X %y %Y %z %:z %Z` with the flags `- _ 0 ^ #` and a width; `-d` reads `@SECONDS`, ISO dates and times, month names, `now yesterday tomorrow`, `+2 days`, `3 weeks ago`, `next month`, weekdays; years before 1970 and after 3000 work; `-s` (setting the clock) is not supported) |
@@ -120,6 +120,18 @@ See [Planned](#planned) for what is still to come.
     well) are what they were when the substitution has ended, and an `exit` inside ends only the substitution. For a line that is
     only `x=$(command)`, `$?` is the status of the command; otherwise `$?` around a substitution is not changed.
   - A `#` at the start of a word (outside of quotes) makes the rest of the line a comment.
+- **Control structures**
+  - `if LIST; then LIST; [elif LIST; then LIST;]... [else LIST;] fi`, `while LIST; do LIST; done`, `until LIST; do LIST; done`,
+    `for NAME [in WORD...]; do LIST; done`, and `break [N]`, `continue [N]`, `:`. A reserved word is one only as the first word of a
+    command and unquoted; a newline may stand where `;` does. The words of `for` are expanded like the arguments of a command
+    (variables, substitutions, wildcards); without `in` it goes over `$1`..`$9`. The status of an `if` is that of the branch that ran
+    (0 when none did), that of a loop is the status of its last round.
+  - A compound command stands where a command stands in a `&&`/`||` list (`if ...; fi && echo`), but not inside a pipeline
+    (`while ...; done | cmd`). Redirections of it (`done < file`), `case`, functions, `{ ...; }` and `( ... )` are not there yet.
+  - The input is read one command of the top level at a time (up to the next newline) and parsed whole before it runs, so a line with a
+    syntax error runs nothing; in a script file the commands before the error have run when it ends with status 2. At a terminal an
+    unfinished `if`/`while`/`for`, an open quote, or a line that ends in `&&`, `||` or `$(` goes on in the next line (prompt `> `). Ctrl+C
+    in a loop stops it at the end of the round (status 130).
 - **Ctrl+C / Ctrl+Break**
   - While a program is running, only that program is interrupted and the shell keeps running.
   - At the prompt the shell does not exit; it discards the line being typed.
@@ -189,6 +201,7 @@ The test programs are divided by feature (`test\`).
 | `shell_utf8_test` | shell: Korean names and directories, wildcards that match a character, variables, redirection (Windows 10 1903 or later) |
 | `shell_run_test` | shell: running commands, quoting, pipes, redirection |
 | `shell_script_test` | shell scripts: file/`-c`/`source`, `$0 $1.. $# $@`, command substitution (`$(...)`, backticks), comments, exit status |
+| `shell_control_test` | shell control structures: `if`/`elif`/`else`, `while`, `until`, `for`, `break`/`continue`, several lines, syntax errors |
 | `test_cmd_test` | `test`, `[`, `true`, `false`: strings, integers, files, expressions, the rules of the number of arguments, errors |
 | `shell_cd_test` | shell: `cd`, the virtual file system, wildcards |
 | `shell_lists_test` | shell: `; && \|\|`, exit status, variables, `exit` |
@@ -292,7 +305,7 @@ the build structure in line with the directories.
 
 ## Planned
 
-**Shell features**: background jobs (`&`), brace expansion, `if`/`for`/`while`
+**Shell features**: background jobs (`&`), brace expansion, `case`, functions, `$((...))` arithmetic, parameter expansion such as `${NAME:-value}`, `read`
 
 **coreutils**
 

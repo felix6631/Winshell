@@ -16,6 +16,12 @@
 int interp_run_line(const char* line, int* exitShell, int status);
 
 /**
+ * Runs one simple command (a pipeline, NAME=value, or a builtin): variables, substitutions and wildcards
+ * are expanded, then it runs. The compound commands of command.h call this for each command.
+ */
+int interp_run_simple(const char* text, int* exitShell, int status);
+
+/**
  * Runs the lines of a file, one after the other, until its end or an `exit`. A line that cannot be
  * parsed is reported and the next one runs. #! and # lines are comments.
  *

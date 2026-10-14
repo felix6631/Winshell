@@ -62,8 +62,8 @@ static void test_scripts(void) {
     expect_script("s8.sh", "expr 1 = 2\n", "", "0\n", 1);
     expect_script("s9.sh", "exit\n", "", "", 0);
 
-    // a line that cannot be parsed is reported, the next one runs
-    expect_script("s10.sh", "echo 'open\necho next\n", "", "next\n", 0);
+    // a command that cannot be parsed is reported and ends the script; what was before it has run
+    expect_script("s10.sh", "echo before\necho 'open\necho next\n", "", "before\n", 2);
 
     // variables and the directory are the script's own in a script
     expect_script("s11.sh", "x=5\necho $x\ncd /c\npwd\n", "", "5\n/c\n", 0);

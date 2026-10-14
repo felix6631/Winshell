@@ -1,5 +1,6 @@
 #include "builtin.h"
 #include "interp.h"
+#include "command.h"
 #include "cwd.h"
 #include "vpath.h"
 #include "variables.h"
@@ -139,6 +140,25 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
     }
     if (strcmp(name, "unset") == 0) {
         *status = builtin_unset(command->argv);
+        return 1;
+    }
+    if (strcmp(name, ":") == 0) {
+        *status = 0;
+        return 1;
+    }
+    if (strcmp(name, "break") == 0 || strcmp(name, "continue") == 0) {
+        long levels = 1;
+
+        if (command->argv[1] != NULL) {
+            char* end;
+            levels = strtol(command->argv[1], &end, 10);
+            if (*end != '\0' || levels < 1) {
+                fprintf(stderr, "%s: %s: loop count out of range\n", name, command->argv[1]);
+                *status = 1;
+                return 1;
+            }
+        }
+        *status = command_break((int)levels, name[0] == 'c');
         return 1;
     }
     if (strcmp(name, "source") == 0 || strcmp(name, ".") == 0) {

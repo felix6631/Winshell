@@ -48,7 +48,7 @@ static int list_add(CommandList* list, const char* start, size_t length, int op)
  * double quote escapes it), and any character inside quotes. Returns how many characters were
  * passed, or 0 when line[i] is outside of quotes (it may be an operator) or the end of the line.
  */
-static size_t pass_quoted(const CHAR* line, size_t i, CHAR* quote) {
+size_t winshell_pass_quoted(const CHAR* line, size_t i, CHAR* quote) {
     CHAR c = line[i];
     size_t backslashes = 0;
 
@@ -85,7 +85,7 @@ static size_t pass_quoted(const CHAR* line, size_t i, CHAR* quote) {
  * character that belongs to the pipeline (*skip says how many more characters do, as for the
  * second one of "&>"). -1 for a '&' that starts no operator of this shell (no background jobs).
  */
-static int operator_at(const CHAR* line, size_t i, size_t* length, size_t* skip) {
+int winshell_operator_at(const CHAR* line, size_t i, size_t* length, size_t* skip) {
     CHAR c = line[i];
 
     *length = *skip = 0;
@@ -133,7 +133,7 @@ int winshell_parse_list(const CHAR* line, CommandList* list) {
             }
         }
 
-        passed = pass_quoted(line, i, &quote);
+        passed = winshell_pass_quoted(line, i, &quote);
         if (passed > 0) {
             i += passed - 1;
             continue;
@@ -167,7 +167,7 @@ int winshell_parse_list(const CHAR* line, CommandList* list) {
             break;
         }
 
-        op = operator_at(line, i, &operatorLength, &skip);
+        op = winshell_operator_at(line, i, &operatorLength, &skip);
         if (op < 0) {
             fprintf(stderr, "Error: Syntax error: '&' is not supported (no background commands)\n");
             goto err;

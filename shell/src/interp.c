@@ -5,6 +5,7 @@
 #include <string.h>
 #include <windows.h>
 #include "interp.h"
+#include "command.h"
 #include "parser.h"
 #include "executer.h"
 #include "builtin.h"
@@ -15,7 +16,7 @@
 
 /* a pipeline: variables and wildcards are expanded, then it runs as a builtin or as programs */
 
-static int run_item(const char* text, int* exitShell, int status) {
+int interp_run_simple(const char* text, int* exitShell, int status) {
     Pipeline pipeline;
     unsigned long substitutionsBefore = interp_substitution_count();
 
@@ -67,31 +68,7 @@ static int run_item(const char* text, int* exitShell, int status) {
 }
 
 int interp_run_line(const char* line, int* exitShell, int status) {
-    CommandList list;
-    size_t i;
-
-    if (winshell_parse_list(line, &list) != 0) {
-        winshell_setLastStatus(2);
-        return 2;
-    }
-
-    // The commands of the line are run one after the other, each one parsed when its
-    // turn has come: it sees the directory and the variables the one before left.
-    for (i = 0; i < list.count && !*exitShell; i++) {
-        int op = list.items[i].op;
-        int run = op == LIST_FIRST || op == LIST_SEQ ||
-                  (op == LIST_AND && status == 0) || (op == LIST_OR && status != 0);
-
-        if (!run)
-            continue;           // the status stays that of the last command that ran
-
-        winshell_setLastStatus(status);
-        status = run_item(list.items[i].text, exitShell, status);
-        winshell_setLastStatus(status);
-    }
-
-    winshell_freeList(&list);
-    return status;
+    return command_run_text(line, exitShell, status);
 }
 
 /* ---- files ------------------------------------------------------------------------------ */
@@ -191,28 +168,16 @@ int interp_run_file(const char* path, const char* const* arguments, int argument
         set_parameters(path, arguments, argumentCount);
     }
 
-    while (text[offset] != '\0' && !*exitShell) {
-        size_t end = offset;
-        size_t lineLength;
-        char* line;
+    // CR LF line ends are line ends
+    {
+        size_t from, to = offset;
 
-        while (text[end] != '\0' && text[end] != '\n')
-            end++;
-        lineLength = end - offset;
-        if (lineLength > 0 && text[offset + lineLength - 1] == '\r')
-            lineLength--;
-        line = malloc(lineLength + 1);
-        if (line == NULL) {
-            fprintf(stderr, "Error: Out of memory\n");
-            status = 1;
-            break;
-        }
-        memcpy(line, text + offset, lineLength);
-        line[lineLength] = '\0';
-        status = interp_run_line(line, exitShell, status);
-        free(line);
-        offset = text[end] == '\n' ? end + 1 : end;
+        for (from = offset; text[from] != '\0'; from++)
+            if (!(text[from] == '\r' && text[from + 1] == '\n'))
+                text[to++] = text[from];
+        text[to] = '\0';
     }
+    status = command_run_text(text + offset, exitShell, status);
 
     if (setParameters)
         restore_parameters(&saved);

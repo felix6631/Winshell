@@ -96,10 +96,10 @@ static void test_quoting(void) {
     // the empty argument is there
     SCRIPT_OUT("echo a \"\" b\n", "a  b\n");
 
-    // unclosed quotes: error, nothing runs, the shell goes on
+    // unclosed quotes go on in the next lines (as in other shells); at the end of the input it is an error
     script("echo \"open\necho next\n", &r);
     CHECK(strstr(r.err, "Unterminated double quote") != NULL);
-    CHECK_STR(r.out, "next\n");
+    CHECK_STR(r.out, "");
     run_result_free(&r);
 }
 

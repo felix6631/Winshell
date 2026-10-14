@@ -67,6 +67,19 @@ void winshell_setSubstitution(SubstitutionHandler handler);
  */
 size_t winshell_substitution_length(const CHAR* text);
 
+/**
+ * The scanning primitives that the list and the compound commands share (see command.h).
+ *
+ * winshell_pass_quoted: how many characters at line[i] can be no operator: a quote mark, a run of
+ * backslashes in front of a double quote, any character inside quotes (*quote is the quote state);
+ * 0 for a character outside of quotes that may be an operator, or the end of the line.
+ *
+ * winshell_operator_at: the list operator at line[i] (LIST_SEQ, LIST_AND, LIST_OR) with its *length,
+ * 0 for a character that belongs to the pipeline (*skip says how many more do), -1 for a lone '&'.
+ */
+size_t winshell_pass_quoted(const CHAR* line, size_t i, CHAR* quote);
+int winshell_operator_at(const CHAR* line, size_t i, size_t* length, size_t* skip);
+
 /** How a command of a list depends on the one before it. */
 #define LIST_FIRST 0    // the first command of the line
 #define LIST_SEQ   1    // ;   always runs

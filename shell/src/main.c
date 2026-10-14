@@ -4,6 +4,7 @@
 #include <windows.h>
 #include "parser.h"
 #include "interp.h"
+#include "command.h"
 #include "cwd.h"
 #include "variables.h"
 #include "vec.h"
@@ -25,6 +26,7 @@ static BOOL WINAPI winshell_ctrlHandler(DWORD type) {
         case CTRL_C_EVENT:
         case CTRL_BREAK_EVENT:
             InterlockedExchange(&interrupted, 1);
+            command_interrupt();
             return TRUE;
         default:
             return FALSE;
@@ -191,6 +193,32 @@ static int interactive_loop(void) {
 
         // strip linefeed
         input[strcspn(input, "\r\n")] = '\0';
+
+        // a command that is not finished (an `if` without its `fi`, an open quote) goes on in the next lines
+        while (command_incomplete(input)) {
+            DWORD mode;
+            char* more;
+            char* joined;
+
+            if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode)) {
+                printf("> ");
+                fflush(stdout);
+            }
+            more = read_line();
+            if (more == NULL)
+                break;                  // the end of the input: what is there is run, and reported
+            more[strcspn(more, "\r\n")] = '\0';
+            joined = malloc(strlen(input) + strlen(more) + 2);
+            if (joined == NULL) {
+                free(more);
+                break;
+            }
+            sprintf(joined, "%s\n%s", input, more);
+            free(input);
+            free(more);
+            input = joined;
+        }
+
         status = interp_run_line(input, &exitShell, status);
         free(input);
     }
