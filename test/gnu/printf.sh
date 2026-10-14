@@ -9,8 +9,8 @@ done
 # the Unicode escapes and character constants are UTF-8 here: compared with the GNU tools in a UTF-8 locale
 add_case out U - printf 'é€\n'
 add_case out U - printf '\U0001F600\n'
-add_case out U - printf '%x\n' "'é"
-add_case out U - printf '%d\n' "'가"
+add_case out U - printf '%b\n' 'é'
+# (GNU 8.32 takes the first byte of a multibyte character constant: printf_test has the UTF-8 forms)
 # (a double backslash in an argument is changed by the batch runner's quoting: run at once)
 compare_now printf 'a\\b\n'
 compare_now printf '%b\n' 'a\nb\\c'
@@ -54,7 +54,6 @@ compare printf '%b\n' '\0101'
 compare printf '%b\n' '\101'
 compare printf '%b\n' '\x41'
 compare printf '%b|%b\n' 'x\cy' z
-compare printf '%b\n' 'é'
 compare printf '%b\n' '100%'
 compare printf '%s\n' 'a\tb'
 
