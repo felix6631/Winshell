@@ -392,16 +392,16 @@ static void test_variables(void) {
     CHECK_STR(p.commands[0].argv[1], "[]");
     winshell_freePipeline(&p);
 
-    // a $ that starts no name is a $
-    CHECK_INT(parse("echo $ a$ $+ \"$\" ${ ${} $-", &p), 0);
+    // a $ that starts no name is a $ (a ${ that is not closed as well; ${} is a bad substitution)
+    CHECK_INT(parse("echo $ a$ $+ \"$\" ${ $-", &p), 0);
     CHECK_STR(p.commands[0].argv[1], "$");
     CHECK_STR(p.commands[0].argv[2], "a$");
     CHECK_STR(p.commands[0].argv[3], "$+");
     CHECK_STR(p.commands[0].argv[4], "$");
     CHECK_STR(p.commands[0].argv[5], "${");
-    CHECK_STR(p.commands[0].argv[6], "${}");
-    CHECK_STR(p.commands[0].argv[7], "$-");
+    CHECK_STR(p.commands[0].argv[6], "$-");
     winshell_freePipeline(&p);
+    CHECK_INT(parse("echo ${}", &p), -1);
 
     // the status of the last command
     winshell_setLastStatus(7);

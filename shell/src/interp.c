@@ -52,7 +52,55 @@ int interp_run_simple(const char* text, int* exitShell, int status) {
             if (status == 0 && interp_substitution_count() != substitutionsBefore)
                 status = interp_substitution_status();
         // a builtin only makes sense as a command of its own, not inside a pipeline
-        } else if (pipeline.count == 1 && builtin_run(&pipeline.commands[0], &builtinStatus, exitShell)) {
+        } else if (pipeline.count == 1 && pipeline.commands[0].argv != NULL &&
+                   builtin_exists(pipeline.commands[0].argv[0])) {
+            // NAME=value in front of a builtin holds for the builtin only (IFS=: read a b)
+            const Command* command = &pipeline.commands[0];
+            char* old[16];
+            size_t i, count = command->assignmentCount < 16 ? command->assignmentCount : 16;
+
+            for (i = 0; i < count; i++) {
+                const char* assignment = command->assignments[i];
+                size_t length = strcspn(assignment, "=");
+                char name[256];
+                const char* previous;
+
+                memcpy(name, assignment, length < sizeof name ? length : sizeof name - 1);
+                name[length < sizeof name ? length : sizeof name - 1] = '\0';
+                previous = var_get(name);
+                old[i] = previous != NULL ? _strdup(previous) : NULL;
+                var_set(name, assignment + length + 1);
+            }
+            {
+                // redirections of a builtin (read x < file, cd > log) are in force while it runs
+                StdRedirection saved;
+                int redirected = command->input != NULL || command->redirectCount > 0;
+
+                if (redirected && redirect_begin(command, &saved) != 0) {
+                    builtinStatus = 1;
+                } else {
+                    if (redirected && saved.inputRedirected)
+                        interp_input_redirected(1);
+                    builtin_run(command, &builtinStatus, exitShell);
+                    if (redirected && saved.inputRedirected)
+                        interp_input_redirected(-1);
+                    if (redirected)
+                        redirect_end(&saved);
+                }
+            }
+            for (i = 0; i < count; i++) {
+                const char* assignment = command->assignments[i];
+                size_t length = strcspn(assignment, "=");
+                char name[256];
+
+                memcpy(name, assignment, length < sizeof name ? length : sizeof name - 1);
+                name[length < sizeof name ? length : sizeof name - 1] = '\0';
+                if (old[i] != NULL)
+                    var_set(name, old[i]);
+                else
+                    var_unset(name);
+                free(old[i]);
+            }
             status = builtinStatus;
         } else {
             int result = execute_pipeline(&pipeline);
@@ -223,7 +271,7 @@ static DWORD WINAPI capture_thread(LPVOID parameter) {
  * subshell as far as that can be done in the process: the directory and the variables are what they were
  * before when it has ended, and an `exit` ends only the substitution.
  */
-static int substitute(const char* command, char** output) {
+int interp_capture(const char* command, char** output, size_t* outputLength, int* statusOut) {
     HANDLE read = NULL, write = NULL;
     Capture capture;
     HANDLE thread;
@@ -282,7 +330,130 @@ static int substitute(const char* command, char** output) {
     }
     capture.data[capture.length] = '\0';
     *output = capture.data;
+    if (outputLength != NULL)
+        *outputLength = capture.length;
+    if (statusOut != NULL)
+        *statusOut = status;
     return 0;
+}
+
+static int substitute(const char* command, char** output) {
+    return interp_capture(command, output, NULL, NULL);
+}
+
+/* ---- the input of the shell: read, and what a compound command is fed --------------------- */
+
+static int inputRedirected;
+static char* (*lineReader)(void);
+
+void interp_input_redirected(int delta) {
+    inputRedirected += delta;
+}
+
+void interp_set_line_reader(char* (*reader)(void)) {
+    lineReader = reader;
+}
+
+int interp_read_line(char** line) {
+    size_t length = 0, capacity = 0;
+    char* text = NULL;
+
+    *line = NULL;
+    if (inputRedirected == 0) {
+        char* input = lineReader != NULL ? lineReader() : NULL;
+        size_t n;
+
+        if (input == NULL)
+            return 0;
+        n = strcspn(input, "\r\n");
+        input[n] = '\0';
+        *line = input;
+        return 1;
+    }
+
+    // standard input was replaced (`done < file`, a pipe into a loop): the bytes come from it, one by one,
+    // so that what is read stays where the programs started in the loop would continue
+    for (;;) {
+        char c;
+        int got = _read(0, &c, 1);
+
+        if (got <= 0) {
+            if (length == 0) {
+                free(text);
+                return 0;
+            }
+            break;
+        }
+        if (c == '\n')
+            break;
+        if (VEC_RESERVE(text, capacity, length + 2) != 0) {
+            free(text);
+            return 0;
+        }
+        text[length++] = c;
+    }
+    if (text == NULL) {
+        text = malloc(1);
+        if (text == NULL)
+            return 0;
+    }
+    if (length > 0 && text[length - 1] == '\r')
+        length--;
+    text[length] = '\0';
+    *line = text;
+    return 1;
+}
+
+struct InputRedirection {
+    int  saved;
+    char path[MAX_PATH];
+};
+
+InputRedirection* interp_input_from_bytes(const char* data, size_t length) {
+    InputRedirection* r = calloc(1, sizeof *r);
+    char directory[MAX_PATH];
+    FILE* file;
+    int fd;
+
+    if (r == NULL)
+        return NULL;
+    if (GetTempPathA(sizeof directory, directory) == 0 || GetTempFileNameA(directory, "wsh", 0, r->path) == 0) {
+        free(r);
+        return NULL;
+    }
+    file = fopen(r->path, "wb");
+    if (file == NULL) {
+        free(r);
+        return NULL;
+    }
+    if (length > 0 && fwrite(data, 1, length, file) != length) {
+        fclose(file);
+        DeleteFileA(r->path);
+        free(r);
+        return NULL;
+    }
+    fclose(file);
+    fd = _open(r->path, _O_RDONLY | _O_BINARY | _O_TEMPORARY);
+    if (fd < 0) {
+        DeleteFileA(r->path);
+        free(r);
+        return NULL;
+    }
+    r->saved = _dup(0);
+    _dup2(fd, 0);
+    _close(fd);
+    return r;
+}
+
+void interp_input_restore(InputRedirection* r) {
+    if (r == NULL)
+        return;
+    if (r->saved >= 0) {
+        _dup2(r->saved, 0);
+        _close(r->saved);
+    }
+    DeleteFileA(r->path);               // gone already when it was opened as a temporary file
+    free(r);
 }
 
 void interp_init(void) {

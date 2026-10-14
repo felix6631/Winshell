@@ -1,5 +1,6 @@
 #include "builtin.h"
 #include "interp.h"
+#include "vec.h"
 #include "command.h"
 #include "cwd.h"
 #include "vpath.h"
@@ -113,6 +114,155 @@ static int builtin_export(char* const argv[]) {
     return status;
 }
 
+/**
+ * read [-r] [-p PROMPT] [NAME...]: one line of the input, cut at the characters of IFS (blanks by default) into
+ * the variables; the last one gets the rest. Without a name the line goes to REPLY. A backslash makes the next
+ * character plain, and a backslash at the end joins the next line (-r: no backslashes). Status 0, or 1 at the
+ * end of the input (the variables are set from what was read).
+ */
+static int builtin_read(char* const argv[]) {
+    int raw = 0, i, count, status = 0, gotAny = 0;
+    const char* prompt = NULL;
+    const char* ifs;
+    char* line = NULL;
+    char* text = NULL;
+    size_t length = 0, capacity = 0, position = 0;
+    char* const* names;
+
+    for (i = 1; argv[i] != NULL && argv[i][0] == '-' && argv[i][1] != '\0'; i++) {
+        const char* option = argv[i] + 1;
+
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
+        for (; *option != '\0'; option++) {
+            if (*option == 'r') {
+                raw = 1;
+            } else if (*option == 's') {
+                // no echo: nothing to do here
+            } else if (*option == 'p') {
+                if (option[1] != '\0')
+                    prompt = option + 1;
+                else if (argv[i + 1] != NULL)
+                    prompt = argv[++i];
+                break;
+            } else {
+                fprintf(stderr, "read: -%c: invalid option\n", *option);
+                return 2;
+            }
+        }
+    }
+    names = argv + i;
+    for (count = 0; names[count] != NULL; count++) {
+        const char* n = names[count];
+        size_t k;
+
+        if (!(isalpha((unsigned char)n[0]) || n[0] == '_')) {
+            fprintf(stderr, "read: '%s': not a valid identifier\n", n);
+            return 1;
+        }
+        for (k = 0; n[k] != '\0'; k++) {
+            if (!(isalnum((unsigned char)n[k]) || n[k] == '_')) {
+                fprintf(stderr, "read: '%s': not a valid identifier\n", n);
+                return 1;
+            }
+        }
+    }
+
+    if (prompt != NULL) {
+        DWORD mode;
+
+        if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode)) {
+            fputs(prompt, stderr);
+            fflush(stderr);
+        }
+    }
+
+    // the line, with the continuation lines of a trailing backslash
+    for (;;) {
+        size_t n;
+
+        if (!interp_read_line(&line)) {
+            status = 1;
+            break;
+        }
+        gotAny = 1;
+        n = strlen(line);
+        if (VEC_RESERVE(text, capacity, length + n + 2) != 0) {
+            free(line);
+            return 1;
+        }
+        if (!raw && n > 0 && line[n - 1] == '\\') {
+            memcpy(text + length, line, n - 1);
+            length += n - 1;
+            free(line);
+            continue;
+        }
+        memcpy(text + length, line, n);
+        length += n;
+        free(line);
+        break;
+    }
+    if (text == NULL) {
+        text = malloc(1);
+        if (text == NULL)
+            return 1;
+    }
+    text[length] = '\0';
+    (void)gotAny;
+
+    ifs = var_get("IFS");
+    if (ifs == NULL)
+        ifs = " \t\n";
+
+    if (count == 0) {
+        var_set("REPLY", text);
+    } else {
+        for (i = 0; i < count; i++) {
+            size_t start, end, k, out = 0;
+            int last = i == count - 1;
+            char* value;
+
+            // blanks in IFS in front of a field go
+            while (position < length && strchr(ifs, text[position]) != NULL && strchr(" \t\n", text[position]) != NULL)
+                position++;
+            start = position;
+            end = start;
+            if (last) {
+                end = length;
+                while (end > start && strchr(" \t\n", text[end - 1]) != NULL && strchr(ifs, text[end - 1]) != NULL)
+                    end--;
+                position = length;
+            } else {
+                while (end < length && strchr(ifs, text[end]) == NULL) {
+                    if (!raw && text[end] == '\\' && end + 1 < length)
+                        end++;
+                    end++;
+                }
+                position = end;
+                if (position < length)
+                    position++;             // the separator
+            }
+            value = malloc(end - start + 1);
+            if (value == NULL) {
+                free(text);
+                return 1;
+            }
+            for (k = start; k < end; k++) {
+                if (!raw && text[k] == '\\' && k + 1 < end)
+                    k++;
+                value[out++] = text[k];
+            }
+            value[out] = '\0';
+            var_set(names[i], value);
+            free(value);
+        }
+    }
+    free(text);
+    return status;
+}
+
 static int builtin_unset(char* const argv[]) {
     int i, status = 0;
 
@@ -125,6 +275,17 @@ static int builtin_unset(char* const argv[]) {
         var_unset(argv[i]);
     }
     return status;
+}
+
+int builtin_exists(const char* name) {
+    static const char* const names[] = { "cd", "export", "unset", "exit", "quit", "source", ".", ":", "break",
+                                         "continue", "read" };
+    size_t i;
+
+    for (i = 0; i < sizeof names / sizeof names[0]; i++)
+        if (strcmp(name, names[i]) == 0)
+            return 1;
+    return 0;
 }
 
 int builtin_run(const Command* command, int* status, int* exitShell) {
@@ -140,6 +301,10 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
     }
     if (strcmp(name, "unset") == 0) {
         *status = builtin_unset(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "read") == 0) {
+        *status = builtin_read(command->argv);
         return 1;
     }
     if (strcmp(name, ":") == 0) {

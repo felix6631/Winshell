@@ -2,7 +2,10 @@
 #include "vpath.h"
 #include "program.h"
 #include "cmdline.h"
+#include <fcntl.h>
+#include <io.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
@@ -336,4 +339,91 @@ int execute_pipeline(const Pipeline* pipeline) {
 
     free(processes);
     return (int)exitCode;
+}
+
+/* ---- redirections of the shell itself, for compound commands ------------------------------- */
+
+void redirect_end(StdRedirection* r) {
+    int fd;
+
+    fflush(stdout);
+    fflush(stderr);
+    for (fd = 0; fd < 3; fd++) {
+        if (r->saved[fd] >= 0) {
+            _dup2(r->saved[fd], fd);
+            _close(r->saved[fd]);
+            r->saved[fd] = -1;
+        }
+    }
+}
+
+static int redirect_save(StdRedirection* r, int fd) {
+    if (r->saved[fd] < 0)
+        r->saved[fd] = _dup(fd);
+    return r->saved[fd] >= 0;
+}
+
+int redirect_begin(const Command* command, StdRedirection* r) {
+    size_t i;
+
+    r->saved[0] = r->saved[1] = r->saved[2] = -1;
+    r->inputRedirected = 0;
+    fflush(stdout);
+    fflush(stderr);
+
+    if (command->input != NULL) {
+        char native[VPATH_MAX];
+        int fd;
+
+        if (vpath_to_native(command->input, native, sizeof native) != 0 ||
+            (fd = _open(native, _O_RDONLY | _O_BINARY)) < 0) {
+            fprintf(stderr, "Error: Cannot open '%s' for reading\n", command->input);
+            redirect_end(r);
+            return -1;
+        }
+        if (!redirect_save(r, 0)) {
+            _close(fd);
+            redirect_end(r);
+            return -1;
+        }
+        _dup2(fd, 0);
+        _close(fd);
+        r->inputRedirected = 1;
+    }
+
+    for (i = 0; i < command->redirectCount; i++) {
+        const Redirect* redirect = &command->redirects[i];
+        int slot = redirect->fd == 2 ? 2 : 1;
+
+        if (!redirect_save(r, slot)) {
+            redirect_end(r);
+            return -1;
+        }
+        if (redirect->file == NULL) {
+            _dup2(redirect->dupOf == 2 ? 2 : 1, slot);
+        } else {
+            char native[VPATH_MAX];
+            int fd = -1;
+
+            if (vpath_to_native(redirect->file, native, sizeof native) == 0) {
+                // through the handle: FILE_APPEND_DATA makes every write, also of the programs that
+                // share it, go to the end
+                HANDLE h = open_output_file(redirect->file, redirect->append);
+
+                if (h != INVALID_HANDLE_VALUE) {
+                    fd = _open_osfhandle((intptr_t)h, _O_WRONLY | _O_BINARY | (redirect->append ? _O_APPEND : 0));
+                    if (fd < 0)
+                        CloseHandle(h);
+                }
+            }
+            if (fd < 0) {
+                fprintf(stderr, "Error: Cannot open '%s' for writing\n", redirect->file);
+                redirect_end(r);
+                return -1;
+            }
+            _dup2(fd, slot);
+            _close(fd);
+        }
+    }
+    return 0;
 }

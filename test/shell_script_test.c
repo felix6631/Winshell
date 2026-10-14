@@ -144,6 +144,62 @@ static void test_conditions(void) {
     expect_script("c6.sh", "[ -d /c ]\necho $?\n[ 1 -eq x ] 2> nul\necho $?\n", "", "0\n2\n", 0);
 }
 
+static void test_expansion(void) {
+    RunResult r;
+
+    printf("arithmetic expansion\n");
+    expect_c("-c \"echo $((1+2)) $((2*3+4)) $((10/3)) $((10%3)) $((2**10)) $((-5+2))\"", "3 10 3 1 1024 -3\n", 0);
+    expect_c("-c \"echo $(( (1+2)*3 )) $((7-2-1)) $((100/10/5)) $((1<<4)) $((0xff)) $((010))\"", "9 4 2 16 255 8\n", 0);
+    expect_c("-c \"echo $((5>3)) $((5<3)) $((3==3)) $((3!=3)) $((2<=2)) $((1&&0)) $((1||0)) $((!5)) $((~0))\"",
+             "1 0 1 0 1 0 1 0 -1\n", 0);
+    expect_c("-c \"echo $((6&3)) $((6|3)) $((6^3)) $((1?10:20)) $((0?10:20))\"", "2 7 5 10 20\n", 0);
+
+    // variables, by name or by $; assignment operators change them; the empty one is 0
+    expect_c("-c \"x=7; echo $((x*2)) $(($x+1)) $((y)) $((x+=3)) $x $((z=x*2, z+1)) $z\"", "14 8 0 10 10 21 20\n", 0);
+    expect_c("-c \"n=3; echo [$((n+1))] \\\"$((n*n))\\\"\"", "[4] 9\n", 0);
+    expect_c("-c \"a=b+1; b=4; echo $((a))\"", "5\n", 0);
+
+    // the branch that is not taken has no effect (and no division by zero)
+    expect_c("-c \"echo $((0 && 1/0)) $((1 || 1/0)) $((1 ? 5 : 1/0))\"", "0 1 5\n", 0);
+
+    // errors: reported, the command does not run, the shell goes on
+    run_shell("-c \"echo $((1/0)); echo next\"", "", &r);
+    lf_only(r.out);
+    CHECK_STR(r.out, "next\n");
+    CHECK(strstr(r.err, "division by 0") != NULL);
+    run_result_free(&r);
+    run_shell("-c \"echo $((1+)); echo next\"", "", &r);
+    lf_only(r.out);
+    CHECK_STR(r.out, "next\n");
+    CHECK(r.err[0] != '\0');
+    run_result_free(&r);
+
+    printf("parameter expansion\n");
+    expect_c("-c \"x=set; e=; echo ${x:-d} ${u:-d} ${e:-d} ${e-d}end ${u-d}\"", "set d d end d\n", 0);
+    expect_c("-c \"x=set; e=; echo ${x:+alt} ${u:+alt}end ${e:+alt}end ${e+alt}\"", "alt end end alt\n", 0);
+    expect_c("-c \"echo ${v:=assigned} $v ${v:=other} ${w=x} $w\"", "assigned assigned assigned x x\n", 0);
+    expect_c("-c \"s=hello; echo ${#s} ${#nosuch}\"", "5 0\n", 0);
+    expect_c("-c \"p=/a/b/file.tar.gz; echo ${p#*/} ${p##*/} ${p%.*} ${p%%.*} ${p%/*} ${p%%/*}end\"",
+             "a/b/file.tar.gz file.tar.gz /a/b/file.tar /a/b/file /a/b end\n", 0);
+    expect_c("-c \"s=abcdef; echo ${s:2} ${s:1:3} ${s: -2} ${s:4:10}end ${s:9}end\"", "cdef bcd ef efend end\n", 0);
+    expect_c("-c \"f=photo.jpg; echo ${f%.jpg}.png ${f#photo}\"", "photo.png .jpg\n", 0);
+
+    // the word is expanded; quotes keep a default in one piece
+    expect_c("-c \"y=Y; echo ${u:-$y} ${u:-$(echo cmd)} ${u:-$((1+1))}\"", "Y cmd 2\n", 0);
+    expect_c("-c \"for w in \\\"${u:-a b}\\\"; do echo [$w]; done\"", "[a b]\n", 0);
+    expect_c("-c \"for w in ${u:-a b}; do echo [$w]; done\"", "[a]\n[b]\n", 0);
+
+    // a ; inside the braces is not a separator
+    expect_c("-c \"echo ${u:-a;b}; echo c\"", "a;b\nc\n", 0);
+
+    // ${NAME:?word}: an error, the command does not run
+    run_shell("-c \"echo ${u:?must be set}; echo next\"", "", &r);
+    lf_only(r.out);
+    CHECK_STR(r.out, "next\n");
+    CHECK(strstr(r.err, "u: must be set") != NULL);
+    run_result_free(&r);
+}
+
 static void test_source(void) {
     printf("source\n");
     write_text(workDir, "lib.sh", "echo lib $1 $#\nv=from_lib\n");
@@ -175,6 +231,7 @@ int main(void) {
     tools_init("shell_script_test");
     test_scripts();
     test_substitution();
+    test_expansion();
     test_conditions();
     test_source();
     return test_summary("shell_script_test");

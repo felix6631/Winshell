@@ -6,13 +6,13 @@ Winshell is a project and toolchain for using a Linux-style shell and coreutils 
 It is written in plain C on top of the Win32 API, and aims to run as far back as Windows XP.
 
 > **Status: early development.** The shell reads a line and runs `bin\<command>.exe`;
-> background jobs (`&`), `case`, shell functions and arithmetic expansion are not implemented yet.
+> background jobs (`&`), `case`, shell functions and `{ ...; }`/`( ... )` groups are not implemented yet.
 
 ## Implemented
 
 | Command | Status |
 | --- | --- |
-| `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion (`$? $0 $1..$9 $# $@ $*`), command substitution (`$(...)`, backticks), comments (`#`), control structures (`if`/`elif`/`else`, `while`, `until`, `for`, `break`, `continue`, `:`), wildcards, running scripts (`shell FILE [ARG...]`, `shell -c`, `source`/`.`), `cd` `export` `unset` `exit` `source` |
+| `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion (`$? $0 $1..$9 $# $@ $*`), command substitution (`$(...)`, backticks), comments (`#`), control structures (`if`/`elif`/`else`, `while`, `until`, `for`, `break`, `continue`, `:`), arithmetic expansion (`$((...))`), parameter expansion (`${NAME:-value}` and more), `read`, redirections and pipes of loops, wildcards, running scripts (`shell FILE [ARG...]`, `shell -c`, `source`/`.`), `cd` `export` `unset` `exit` `source` |
 | `arch` | Done |
 | `basename` | Done (`-a -s -z`; both `/` and `\` separate; the suffix is removed unless it is the whole name) |
 | `date` | Done (`-d -u -r -I -R --rfc-3339`, the format letters `%a %A %b %B %c %C %d %D %e %F %g %G %H %I %j %k %l %m %M %N %p %P %q %r %R %s %S %T %u %U %V %w %W %x %X %y %Y %z %:z %Z` with the flags `- _ 0 ^ #` and a width; `-d` reads `@SECONDS`, ISO dates and times, month names, `now yesterday tomorrow`, `+2 days`, `3 weeks ago`, `next month`, weekdays; years before 1970 and after 3000 work; `-s` (setting the clock) is not supported) |
@@ -120,14 +120,28 @@ See [Planned](#planned) for what is still to come.
     well) are what they were when the substitution has ended, and an `exit` inside ends only the substitution. For a line that is
     only `x=$(command)`, `$?` is the status of the command; otherwise `$?` around a substitution is not changed.
   - A `#` at the start of a word (outside of quotes) makes the rest of the line a comment.
+- **Arithmetic, parameter expansion, read**
+  - `$(( expression ))`: 64-bit integers, the operators of C (`+ - * / % ** << >> & | ^ ~ ! && || ?: , < <= > >= == !=` and the
+    assignments `= += -= ...`), decimal, `0x` and `0` octal, variables by name (an unset one is 0). Dividing by 0 is an error and the
+    command does not run. The branch that is not taken is not computed.
+  - `${NAME:-w}` `${NAME-w}` `${NAME:=w}` `${NAME:+w}` `${NAME:?w}`, `${#NAME}`, `${NAME#p}` `${NAME##p}` `${NAME%p}` `${NAME%%p}`,
+    `${NAME:offset}` and `${NAME:offset:length}`. The word and the pattern are expanded like the arguments of a command, a pattern uses
+    `* ? [..]`. With the `:` an empty value counts as not set.
+  - `read [-r] [-p prompt] [name...]`: a line of the input is cut at `IFS` (blanks by default) into the variables, the last one gets the
+    rest; without a name it is `REPLY`. Without `-r` a backslash protects the next character and one at the end joins the next line. Status
+    1 at the end of the input. At a terminal the `-p` prompt is shown. `NAME=value` in front of a builtin (`IFS=: read a b`) holds for it only.
 - **Control structures**
   - `if LIST; then LIST; [elif LIST; then LIST;]... [else LIST;] fi`, `while LIST; do LIST; done`, `until LIST; do LIST; done`,
     `for NAME [in WORD...]; do LIST; done`, and `break [N]`, `continue [N]`, `:`. A reserved word is one only as the first word of a
     command and unquoted; a newline may stand where `;` does. The words of `for` are expanded like the arguments of a command
     (variables, substitutions, wildcards); without `in` it goes over `$1`..`$9`. The status of an `if` is that of the branch that ran
     (0 when none did), that of a loop is the status of its last round.
-  - A compound command stands where a command stands in a `&&`/`||` list (`if ...; fi && echo`), but not inside a pipeline
-    (`while ...; done | cmd`). Redirections of it (`done < file`), `case`, functions, `{ ...; }` and `( ... )` are not there yet.
+  - A compound command stands where a command stands in a `&&`/`||` list (`if ...; fi && echo`). Redirections may follow its end:
+    `while read a b; do ...; done < file`, `for ...; do ...; done > out 2>&1`, `fi >> log`. They are applied to the standard
+    input and output of the shell itself, so the builtins and the programs run inside read and write there.
+  - A compound command may stand on the right of a pipe: `cmd | while read x; do ...; done`. The left part runs to its end (in a
+    subshell) and its output is the input of the compound command (it is not streamed, so a left part that never ends does not
+    work). The output of a compound command into a pipe (`done | cmd`), `case`, functions, `{ ...; }` and `( ... )` are not there yet.
   - The input is read one command of the top level at a time (up to the next newline) and parsed whole before it runs, so a line with a
     syntax error runs nothing; in a script file the commands before the error have run when it ends with status 2. At a terminal an
     unfinished `if`/`while`/`for`, an open quote, or a line that ends in `&&`, `||` or `$(` goes on in the next line (prompt `> `). Ctrl+C
@@ -305,7 +319,7 @@ the build structure in line with the directories.
 
 ## Planned
 
-**Shell features**: background jobs (`&`), brace expansion, `case`, functions, `$((...))` arithmetic, parameter expansion such as `${NAME:-value}`, `read`
+**Shell features**: background jobs (`&`), brace expansion, `case`, functions, `{ ...; }`, subshells `( ... )`, `${NAME/pattern/value}`, `$$`, arrays
 
 **coreutils**
 

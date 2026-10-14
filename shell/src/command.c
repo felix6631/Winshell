@@ -10,6 +10,7 @@
 #include <string.h>
 #include <windows.h>
 #include "command.h"
+#include "executer.h"
 #include "interp.h"
 #include "parser.h"
 #include "variables.h"
@@ -25,11 +26,12 @@ typedef struct {
     size_t count;
 } List;
 
-typedef enum { NODE_SIMPLE, NODE_IF, NODE_WHILE, NODE_FOR } NodeType;
+typedef enum { NODE_SIMPLE, NODE_IF, NODE_WHILE, NODE_FOR, NODE_PIPE } NodeType;
 
 struct Node {
     NodeType type;
     char*    text;              // NODE_SIMPLE: the command; NODE_FOR: the words after `in` (NULL: "$@")
+    char*    redirects;         // a compound command: the redirections written after it (`done < file`), or NULL
     char*    name;              // NODE_FOR: the variable
     int      until;             // NODE_WHILE: until
     int      hasElse;           // NODE_IF
@@ -54,6 +56,7 @@ static void free_node(Node* node) {
     if (node == NULL)
         return;
     free(node->text);
+    free(node->redirects);
     free(node->name);
     free_list(&node->first);
     free_list(&node->second);
@@ -87,6 +90,7 @@ typedef struct {
     size_t      pos;
     int         error;
     int         quiet;          // no messages: only the kind of error is wanted
+    int         pipeToCompound; // scan_simple stopped at a | that is followed by a compound command
     char        message[200];
 } Parser;
 
@@ -244,7 +248,7 @@ static size_t scan_simple(Parser* p, size_t start) {
                        (size_t)-1;
             return i;
         }
-        if (quote != '\'' && ((c == '$' && text[i + 1] == '(') || c == '`')) {
+        if (quote != '\'' && ((c == '$' && (text[i + 1] == '(' || text[i + 1] == '{')) || c == '`')) {
             size_t n = winshell_substitution_length(text + i);
 
             if (n == 0)
@@ -263,6 +267,21 @@ static size_t scan_simple(Parser* p, size_t start) {
             while (text[i] != '\0' && text[i] != '\n')
                 i++;
             continue;
+        }
+        if (c == '|' && text[i + 1] != '|') {
+            // a pipe into a compound command (`cmd | while read x; do ...; done`) ends the simple command
+            size_t j = i + 1;
+            char word[16];
+            size_t wordEnd;
+
+            while (is_blank(text[j]) || text[j] == '\n')
+                j++;
+            if (plain_word(p, j, word, sizeof word, &wordEnd) &&
+                (strcmp(word, "while") == 0 || strcmp(word, "until") == 0 || strcmp(word, "for") == 0 ||
+                 strcmp(word, "if") == 0)) {
+                p->pipeToCompound = 1;
+                return i;
+            }
         }
         op = winshell_operator_at(text, i, &length, &skip);
         if (op < 0)
@@ -464,6 +483,48 @@ static int parse_for(Parser* p, Node* node) {
     return expect_word(p, "done");
 }
 
+/**
+ * What may follow a compound command: the end of the command, && or ||, or redirections of it (`done < file`,
+ * `fi > out 2>&1`), which are kept as text for the redirection parser at the time it runs.
+ */
+static int parse_trailer(Parser* p, Node* node) {
+    char c, next;
+
+    skip_blanks(p);
+    c = p->text[p->pos];
+    next = c != '\0' ? p->text[p->pos + 1] : '\0';
+    if (c == '\0' || c == '\n' || c == ';' || c == '#' || (c == '&' && next == '&') || (c == '|' && next == '|'))
+        return 0;
+    if (c == '|')
+        return syntax(p, "Syntax error: the output of a compound command cannot be piped%s", NULL);
+    if (c == '<' || c == '>' || (c == '&' && next == '>') || (isdigit((unsigned char)c) && next == '>')) {
+        size_t start = p->pos, end = scan_simple(p, start);
+
+        if (end == (size_t)-1)
+            return -1;
+        node->redirects = malloc(end - start + 1);
+        if (node->redirects == NULL) {
+            p->error = ERROR_MEMORY;
+            return -1;
+        }
+        memcpy(node->redirects, p->text + start, end - start);
+        node->redirects[end - start] = '\0';
+        p->pos = end;
+        return 0;
+    }
+    {
+        char word[40];
+        size_t n = 0;
+
+        while (!is_word_end(p->text[p->pos + n]) && n < sizeof word - 1) {
+            word[n] = p->text[p->pos + n];
+            n++;
+        }
+        word[n] = '\0';
+        return syntax(p, "Syntax error near unexpected token '%s'", word);
+    }
+}
+
 static Node* parse_command(Parser* p) {
     char buffer[16];
     const char* word;
@@ -502,6 +563,10 @@ static Node* parse_command(Parser* p) {
             free_node(node);
             return NULL;
         }
+        if (parse_trailer(p, node) != 0) {
+            free_node(node);
+            return NULL;
+        }
         return node;
     }
 
@@ -533,6 +598,44 @@ static Node* parse_command(Parser* p) {
         memcpy(node->text, p->text + start, end - start);
         node->text[end - start] = '\0';
         p->pos = end;
+
+        if (p->pipeToCompound) {
+            // left | compound: the left part runs, its output is the input of the compound command
+            Node* pipe;
+            Node* right;
+
+            p->pipeToCompound = 0;
+            p->pos++;                       // the |
+            while (is_blank(p->text[p->pos]) || p->text[p->pos] == '\n')
+                p->pos++;
+            right = parse_command(p);
+            if (right == NULL) {
+                free_node(node);
+                return NULL;
+            }
+            pipe = new_node(NODE_PIPE);
+            if (pipe == NULL) {
+                free_node(node);
+                free_node(right);
+                p->error = ERROR_MEMORY;
+                return NULL;
+            }
+            pipe->type = NODE_PIPE;
+            if (list_add(&pipe->first, node, LIST_FIRST) != 0) {
+                free_node(node);
+                free_node(right);
+                free_node(pipe);
+                p->error = ERROR_MEMORY;
+                return NULL;
+            }
+            if (list_add(&pipe->second, right, LIST_FIRST) != 0) {
+                free_node(right);
+                free_node(pipe);            // frees the left part with it
+                p->error = ERROR_MEMORY;
+                return NULL;
+            }
+            return pipe;
+        }
         return node;
     }
 }
@@ -591,8 +694,75 @@ static int after_round(void) {
     return 0;
 }
 
+static int run_node(Runner* r, const Node* node, int status);
+
+/** A compound command with the redirections written after it: they are in force while it runs. */
+static int run_redirected(Runner* r, const Node* node, int status) {
+    Pipeline pipeline;
+    StdRedirection saved;
+    Node copy;
+    char* line = malloc(strlen(node->redirects) + 4);
+    int result;
+
+    if (line == NULL)
+        return 1;
+    sprintf(line, "x %s", node->redirects);
+    if (winshell_parse(line, &pipeline) != 0) {
+        free(line);
+        return 2;
+    }
+    free(line);
+    if (pipeline.count != 1) {
+        winshell_freePipeline(&pipeline);
+        return 2;
+    }
+    if (redirect_begin(&pipeline.commands[0], &saved) != 0) {
+        winshell_freePipeline(&pipeline);
+        return 1;
+    }
+    if (saved.inputRedirected)
+        interp_input_redirected(1);
+    copy = *node;
+    copy.redirects = NULL;              // not again
+    result = run_node(r, &copy, status);
+    if (saved.inputRedirected)
+        interp_input_redirected(-1);
+    redirect_end(&saved);
+    winshell_freePipeline(&pipeline);
+    return result;
+}
+
+/** left | compound: the output of the left part (run to the end, in a subshell) is the input of the compound. */
+static int run_pipe_into(Runner* r, const Node* node, int status) {
+    char* output = NULL;
+    size_t length = 0;
+    int leftStatus, result;
+    InputRedirection* input;
+
+    if (interp_capture(node->first.nodes[0]->text, &output, &length, &leftStatus) != 0)
+        return 1;
+    input = interp_input_from_bytes(output, length);
+    free(output);
+    if (input == NULL) {
+        fprintf(stderr, "Error: Cannot make the input of the command\n");
+        return 1;
+    }
+    interp_input_redirected(1);
+    result = run_node(r, node->second.nodes[0], status);
+    interp_input_redirected(-1);
+    interp_input_restore(input);
+    return result;
+}
+
 static int run_node(Runner* r, const Node* node, int status) {
+    if (node->redirects != NULL)
+        return run_redirected(r, node, status);
+    if (node->type == NODE_PIPE)
+        return run_pipe_into(r, node, status);
+
     switch (node->type) {
+    case NODE_PIPE:
+        return 0;
     case NODE_SIMPLE:
         return interp_run_simple(node->text, r->exitShell, status);
 

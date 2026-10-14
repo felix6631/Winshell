@@ -125,7 +125,7 @@ int winshell_parse_list(const CHAR* line, CommandList* list) {
         int op;
 
         // $( ) and ` ` are one piece, whatever is inside of them (outside of single quotes)
-        if (quote != '\'' && ((line[i] == '$' && line[i + 1] == '(') || line[i] == '`')) {
+        if (quote != '\'' && ((line[i] == '$' && (line[i + 1] == '(' || line[i + 1] == '{')) || line[i] == '`')) {
             size_t length = winshell_substitution_length(line + i);
             if (length > 0) {
                 i += length - 1;

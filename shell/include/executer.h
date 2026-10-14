@@ -26,4 +26,21 @@
  */
 int execute_pipeline(const Pipeline* pipeline);
 
+/**
+ * The redirections of a compound command (`done < file`, `fi > out 2>&1`): they are applied to the standard
+ * descriptors of the shell itself for as long as the command runs, so that what it runs (builtins such as
+ * read, and the programs it starts) writes and reads there, and restored after it. The command is the one
+ * the parser made of "x <redirections>"; its words are not used.
+ */
+typedef struct {
+    int saved[3];           // the descriptors 0, 1, 2 as they were, or -1 when not changed
+    int inputRedirected;    // standard input was replaced
+} StdRedirection;
+
+/** Applies the redirections in the order written. Returns 0, or -1 after a message (nothing is changed then). */
+int redirect_begin(const Command* command, StdRedirection* saved);
+
+/** Puts the descriptors back. */
+void redirect_end(StdRedirection* saved);
+
 #endif //EXECUTER_H

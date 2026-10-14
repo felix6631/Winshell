@@ -5,6 +5,7 @@
 #include "parser.h"
 #include "vpath.h"
 #include "variables.h"
+#include "arith.h"
 #include "vec.h"
 
 #define DELIMITERS " \t\r\n"
@@ -377,13 +378,15 @@ static int lex_quote_mark(Lexer* L) {
     return 1;
 }
 
-/* ---- command substitution ------------------------------------------------------------- */
+/* ---- command substitution, arithmetic and ${...} --------------------------------------------- */
 
 static SubstitutionHandler substitutionHandler;
 
 void winshell_setSubstitution(SubstitutionHandler handler) {
     substitutionHandler = handler;
 }
+
+static size_t piece_length(const CHAR* text);
 
 /** Length of a double-quoted piece that starts at text[0] == '"', closing quote included; 0 when not closed. */
 static size_t quoted_length(const CHAR* text) {
@@ -392,8 +395,8 @@ static size_t quoted_length(const CHAR* text) {
     while (text[i] != '\0' && text[i] != '"') {
         if (text[i] == '\\' && text[i + 1] == '"') {
             i += 2;
-        } else if ((text[i] == '$' && text[i + 1] == '(') || text[i] == '`') {
-            size_t n = winshell_substitution_length(text + i);
+        } else if ((text[i] == '$' && (text[i + 1] == '(' || text[i + 1] == '{')) || text[i] == '`') {
+            size_t n = piece_length(text + i);
             if (n == 0)
                 return 0;
             i += n;
@@ -404,9 +407,12 @@ static size_t quoted_length(const CHAR* text) {
     return text[i] == '"' ? i + 1 : 0;
 }
 
-size_t winshell_substitution_length(const CHAR* text) {
+/**
+ * The length of what starts at text[0] with a backtick, "${", "$((" or "$(": up to and including its end
+ * (quotes and nested pieces inside are passed); 0 when it is not closed, or text is none of them.
+ */
+static size_t piece_length(const CHAR* text) {
     size_t i;
-    int depth = 1;
 
     if (text[0] == '`') {
         for (i = 1; text[i] != '\0'; i++) {
@@ -417,13 +423,27 @@ size_t winshell_substitution_length(const CHAR* text) {
         }
         return 0;
     }
-    if (text[0] != '$' || text[1] != '(')
+    if (text[0] != '$')
+        return 0;
+
+    if (text[1] == '(' && text[2] == '(') {         // $(( arithmetic ))
+        int depth = 2;
+
+        for (i = 3; text[i] != '\0'; i++) {
+            if (text[i] == '(')
+                depth++;
+            else if (text[i] == ')' && --depth == 0)
+                return i + 1;
+        }
+        return 0;
+    }
+    if (text[1] != '(' && text[1] != '{')
         return 0;
 
     for (i = 2; text[i] != '\0';) {
         CHAR c = text[i];
 
-        if (c == '\\' && text[i + 1] == '"') {
+        if (c == '\\' && text[i + 1] != '\0' && (text[1] == '{' || text[i + 1] == '"')) {
             i += 2;
         } else if (c == '\'') {
             const CHAR* close = strchr(text + i + 1, '\'');
@@ -435,18 +455,22 @@ size_t winshell_substitution_length(const CHAR* text) {
             if (n == 0)
                 return 0;
             i += n;
-        } else if (c == '$' && text[i + 1] == '(') {
-            depth++;
-            i += 2;
-        } else if (c == ')') {
-            i++;
-            if (--depth == 0)
-                return i;
+        } else if ((c == '$' && (text[i + 1] == '(' || text[i + 1] == '{')) || c == '`') {
+            size_t n = piece_length(text + i);
+            if (n == 0)
+                return 0;
+            i += n;
+        } else if (c == (text[1] == '{' ? '}' : ')')) {
+            return i + 1;
         } else {
             i++;
         }
     }
     return 0;
+}
+
+size_t winshell_substitution_length(const CHAR* text) {
+    return piece_length(text);
 }
 
 /* ---- the value of a variable or of a substitution goes into the word ---------------------- */
@@ -464,7 +488,99 @@ static void lexer_value(Lexer* L, const char* value) {
     }
 }
 
-/** $(command) and `command`: the standard output of the command, without the line ends at its end. */
+/**
+ * The text as the words of a command are expanded (variables, substitutions, quotes), the words joined with
+ * a space. Returns NULL after a message, or when out of memory (*nomem). The result has to be freed.
+ */
+static char* expand_text(const char* text, int* nomem) {
+    Pipeline pipeline;
+    char* line = malloc(strlen(text) + 4);
+    char* result;
+    size_t i, length = 0;
+
+    *nomem = 0;
+    if (line == NULL) {
+        *nomem = 1;
+        return NULL;
+    }
+    sprintf(line, "x %s", text);
+    if (winshell_parse(line, &pipeline) != 0) {
+        free(line);
+        return NULL;
+    }
+    free(line);
+    for (i = 1; pipeline.count > 0 && pipeline.commands[0].argv != NULL && pipeline.commands[0].argv[i] != NULL; i++)
+        length += strlen(pipeline.commands[0].argv[i]) + 1;
+    result = malloc(length + 1);
+    if (result == NULL) {
+        winshell_freePipeline(&pipeline);
+        *nomem = 1;
+        return NULL;
+    }
+    result[0] = '\0';
+    for (i = 1; pipeline.count > 0 && pipeline.commands[0].argv != NULL && pipeline.commands[0].argv[i] != NULL; i++) {
+        if (i > 1)
+            strcat(result, " ");
+        strcat(result, pipeline.commands[0].argv[i]);
+    }
+    winshell_freePipeline(&pipeline);
+    return result;
+}
+
+/** $(( expression )): the variables in it are expanded first, then it is evaluated. */
+static int lex_arithmetic(Lexer* L, const CHAR* r, size_t total) {
+    size_t innerLength;
+    char* inner;
+    char* expanded;
+    char message[200], number[32];
+    long long value;
+    int nomem;
+
+    if (total < 5 || r[total - 2] != ')') {
+        lexer_syntax_error(L, "Syntax error: bad arithmetic expression");
+        return 1;
+    }
+    innerLength = total - 5;
+    inner = malloc(innerLength + 4);
+    if (inner == NULL) {
+        L->error = LEX_NOMEM;
+        return 1;
+    }
+    memcpy(inner + 1, r + 3, innerLength);
+    inner[0] = '"';
+    inner[innerLength + 1] = '"';
+    inner[innerLength + 2] = '\0';
+    L->read = r + total;
+
+    // inside double quotes the variables and substitutions are expanded and nothing is split
+    if (memchr(inner + 1, '"', innerLength) != NULL) {
+        expanded = _strdup(inner + 1);
+        if (expanded != NULL)
+            expanded[innerLength] = '\0';
+        nomem = expanded == NULL;
+    } else {
+        expanded = expand_text(inner, &nomem);
+    }
+    free(inner);
+    if (expanded == NULL) {
+        if (nomem)
+            L->error = LEX_NOMEM;
+        else
+            L->error = LEX_SYNTAX;              // the message is printed
+        return 1;
+    }
+    if (arith_eval(expanded, &value, message, sizeof message) != 0) {
+        free(expanded);
+        lexer_syntax_error(L, message);
+        return 1;
+    }
+    free(expanded);
+    snprintf(number, sizeof number, "%lld", value);
+    lexer_value(L, number);
+    return 1;
+}
+
+/** $(command), `command` and $(( expression )). */
 static int lex_substitution(Lexer* L) {
     const CHAR* r = L->read;
     size_t total, skip, innerLength;
@@ -474,11 +590,13 @@ static int lex_substitution(Lexer* L) {
     if (!((r[0] == '$' && r[1] == '(') || r[0] == '`'))
         return 0;
 
-    total = winshell_substitution_length(r);
+    total = piece_length(r);
     if (total == 0) {
         lexer_syntax_error(L, "Syntax error: unterminated command substitution");
         return 1;
     }
+    if (r[0] == '$' && r[1] == '(' && r[2] == '(')
+        return lex_arithmetic(L, r, total);
     if (substitutionHandler == NULL) {
         lexer_syntax_error(L, "Command substitution is not available here");
         return 1;
@@ -507,44 +625,332 @@ static int lex_substitution(Lexer* L) {
             output[--length] = '\0';
     }
     lexer_value(L, output);
-    L->quoted = L->quote != '\0' || L->quoted;      // "$(true)" is an empty word
     free(output);
     return 1;
 }
 
+/* ---- ${NAME...} -------------------------------------------------------------------------- */
+
+/** Whether the pattern (with * ? [..] and \ escapes) matches the n characters of s completely. */
+static int pattern_matches(const char* p, const char* s, size_t n) {
+    for (; *p != '\0'; p++) {
+        if (*p == '*') {
+            size_t k;
+            while (p[1] == '*')
+                p++;
+            for (k = 0; k <= n; k++)
+                if (pattern_matches(p + 1, s + k, n - k))
+                    return 1;
+            return 0;
+        }
+        if (n == 0)
+            return 0;
+        if (*p == '?') {
+            // any character
+        } else if (*p == '[') {
+            const char* q = p + 1;
+            int negate = 0, matched = 0;
+
+            if (*q == '!' || *q == '^') {
+                negate = 1;
+                q++;
+            }
+            for (; *q != '\0' && (*q != ']' || q == p + 1 + negate); q++) {
+                if (q[1] == '-' && q[2] != '\0' && q[2] != ']') {
+                    if (*s >= q[0] && *s <= q[2])
+                        matched = 1;
+                    q += 2;
+                } else if (*q == *s) {
+                    matched = 1;
+                }
+            }
+            if (*q != ']')
+                return 0;                       // not a set: no match
+            if (matched == negate)
+                return 0;
+            p = q;
+        } else {
+            if (*p == '\\' && p[1] != '\0')
+                p++;
+            if (*p != *s)
+                return 0;
+        }
+        s++;
+        n--;
+    }
+    return n == 0;
+}
+
+/** Removes the shortest or longest match of the pattern from the start or the end of value. */
+static void remove_pattern(char* value, const char* pattern, int fromEnd, int longest) {
+    size_t length = strlen(value), k;
+
+    if (!fromEnd) {
+        if (longest) {
+            for (k = length + 1; k-- > 0;)
+                if (pattern_matches(pattern, value, k)) {
+                    memmove(value, value + k, length - k + 1);
+                    return;
+                }
+        } else {
+            for (k = 0; k <= length; k++)
+                if (pattern_matches(pattern, value, k)) {
+                    memmove(value, value + k, length - k + 1);
+                    return;
+                }
+        }
+    } else {
+        if (longest) {
+            for (k = 0; k <= length; k++)
+                if (pattern_matches(pattern, value + k, length - k)) {
+                    value[k] = '\0';
+                    return;
+                }
+        } else {
+            for (k = length + 1; k-- > 0;)
+                if (pattern_matches(pattern, value + k, length - k)) {
+                    value[k] = '\0';
+                    return;
+                }
+        }
+    }
+}
+
 /**
- * $NAME, ${NAME}, $? and the parameters of a script ($0 $1..$9, $#, $@, $*): the value goes into
- * the word, cut at blanks unless quoted or assigned.
+ * ${NAME}, ${#NAME}, ${NAME:-w} ${NAME-w} ${NAME:=w} ${NAME=w} ${NAME:+w} ${NAME+w} ${NAME:?w} ${NAME?w},
+ * ${NAME#p} ${NAME##p} ${NAME%p} ${NAME%%p}, ${NAME:offset} and ${NAME:offset:length}. The word and the
+ * pattern are expanded like the arguments of a command.
  */
+static int lex_braced(Lexer* L) {
+    const CHAR* r = L->read;
+    size_t total = piece_length(r), bodyLength, nameLength = 0;
+    char name[256];
+    char scratch[VPATH_MAX];
+    const char* body;
+    const char* rest;
+    const char* current;
+    char* value = NULL;
+    int set, nonnull, colon = 0, nomem;
+    char op;
+
+    if (r[0] != '$' || r[1] != '{' || total == 0)
+        return 0;
+    body = r + 2;
+    bodyLength = total - 3;
+    L->read = r + total;
+
+    // ${#NAME}: the length of the value
+    if (bodyLength > 1 && body[0] == '#') {
+        size_t n;
+
+        for (n = 1; n < bodyLength && n < sizeof name; n++) {
+            if (!(is_name_char(body[n])))
+                break;
+            name[n - 1] = body[n];
+        }
+        if (n == bodyLength) {
+            char number[32];
+            const char* v;
+
+            name[n - 1] = '\0';
+            v = variable_value(name, scratch, sizeof scratch);
+            snprintf(number, sizeof number, "%lu", (unsigned long)(v != NULL ? strlen(v) : 0));
+            lexer_value(L, number);
+            return 1;
+        }
+    }
+
+    // the name
+    if (bodyLength > 0 && is_name_start(body[0])) {
+        while (nameLength < bodyLength && is_name_char(body[nameLength]))
+            nameLength++;
+    } else if (bodyLength > 0 && isdigit((unsigned char)body[0])) {
+        while (nameLength < bodyLength && isdigit((unsigned char)body[nameLength]))
+            nameLength++;
+    } else if (bodyLength > 0 && strchr("?#@*", body[0]) != NULL) {
+        nameLength = 1;
+    }
+    if (nameLength == 0 || nameLength >= sizeof name) {
+        lexer_syntax_error(L, "Syntax error: bad substitution");
+        return 1;
+    }
+    memcpy(name, body, nameLength);
+    name[nameLength] = '\0';
+    rest = body + nameLength;
+    bodyLength -= nameLength;
+
+    current = variable_value(name, scratch, sizeof scratch);
+    set = current != NULL;
+    nonnull = set && current[0] != '\0';
+    if (bodyLength == 0) {
+        lexer_value(L, current);
+        return 1;
+    }
+
+    if (rest[0] == ':') {
+        colon = 1;
+        rest++;
+        bodyLength--;
+    }
+    if (bodyLength == 0) {
+        lexer_syntax_error(L, "Syntax error: bad substitution");
+        return 1;
+    }
+    op = rest[0];
+
+    if (colon && strchr("-=+?", op) == NULL) {
+        // ${NAME:offset} and ${NAME:offset:length}
+        char* text = malloc(bodyLength + 1);
+        char* expanded;
+        long offset, count = -1;
+        char* colonAt;
+        size_t length = current != NULL ? strlen(current) : 0;
+
+        if (text == NULL) {
+            L->error = LEX_NOMEM;
+            return 1;
+        }
+        memcpy(text, rest, bodyLength);
+        text[bodyLength] = '\0';
+        colonAt = strchr(text, ':');
+        if (colonAt != NULL)
+            *colonAt = '\0';
+        expanded = expand_text(text, &nomem);
+        if (expanded == NULL) {
+            free(text);
+            L->error = nomem ? LEX_NOMEM : LEX_SYNTAX;
+            return 1;
+        }
+        offset = atol(expanded);
+        free(expanded);
+        if (colonAt != NULL) {
+            expanded = expand_text(colonAt + 1, &nomem);
+            if (expanded == NULL) {
+                free(text);
+                L->error = nomem ? LEX_NOMEM : LEX_SYNTAX;
+                return 1;
+            }
+            count = atol(expanded);
+            free(expanded);
+        }
+        free(text);
+        if (offset < 0)
+            offset += (long)length;
+        if (offset < 0 || (size_t)offset > length) {
+            offset = (long)length;
+        }
+        if (count < 0 || (size_t)count > length - (size_t)offset)
+            count = (long)(length - (size_t)offset);
+        value = malloc((size_t)count + 1);
+        if (value == NULL) {
+            L->error = LEX_NOMEM;
+            return 1;
+        }
+        memcpy(value, current != NULL ? current + offset : "", (size_t)count);
+        value[count] = '\0';
+        lexer_value(L, value);
+        free(value);
+        return 1;
+    }
+
+    {
+        int test = colon ? nonnull : set;       // the variable counts as set
+        char* word = NULL;
+        size_t wordLength;
+        const char* wordStart;
+        int longest = 0;
+
+        wordStart = rest + 1;
+        wordLength = bodyLength - 1;
+        if ((op == '#' || op == '%') && wordLength > 0 && wordStart[0] == op) {
+            longest = 1;
+            wordStart++;
+            wordLength--;
+        }
+        {
+            char* raw = malloc(wordLength + 1);
+            if (raw == NULL) {
+                L->error = LEX_NOMEM;
+                return 1;
+            }
+            memcpy(raw, wordStart, wordLength);
+            raw[wordLength] = '\0';
+            word = raw;
+        }
+
+        if (op == '-' || op == '=' || op == '+' || op == '?') {
+            if ((op == '-' || op == '=') && test) {
+                lexer_value(L, current);
+            } else if (op == '+' && !test) {
+                // nothing
+            } else if (op == '?' && test) {
+                lexer_value(L, current);
+            } else if (op == '?') {
+                char* expanded = word[0] != '\0' ? expand_text(word, &nomem) : NULL;
+
+                fprintf(stderr, "Error: %s: %s\n", name,
+                        expanded != NULL ? expanded : (colon ? "parameter null or not set" : "parameter not set"));
+                free(expanded);
+                L->error = LEX_SYNTAX;
+            } else {
+                // - and = with the word, + with the word
+                char* expanded = expand_text(word, &nomem);
+
+                if (expanded == NULL) {
+                    L->error = nomem ? LEX_NOMEM : LEX_SYNTAX;
+                } else {
+                    if (op == '=' && var_set(name, expanded) != 0)
+                        L->error = LEX_NOMEM;
+                    lexer_value(L, expanded);
+                    free(expanded);
+                }
+            }
+        } else if (op == '#' || op == '%') {
+            char* pattern = expand_text(word, &nomem);
+
+            if (pattern == NULL) {
+                L->error = nomem ? LEX_NOMEM : LEX_SYNTAX;
+            } else {
+                value = _strdup(current != NULL ? current : "");
+                if (value == NULL) {
+                    L->error = LEX_NOMEM;
+                } else {
+                    remove_pattern(value, pattern, op == '%', longest);
+                    lexer_value(L, value);
+                    free(value);
+                }
+                free(pattern);
+            }
+        } else {
+            lexer_syntax_error(L, "Syntax error: bad substitution");
+        }
+        free(word);
+    }
+    return 1;
+}
+
+/** $NAME, $? and the parameters of a script ($0 $1..$9, $#, $@, $*); ${...} goes to lex_braced. */
 static int lex_variable(Lexer* L) {
     const CHAR* r = L->read;
     char name[256];
     const char* start;
-    size_t length, i;
+    size_t length;
     const char* after;
     const char* value;
     char scratch[VPATH_MAX];
-    int valid = 1;
 
-    if (r[0] != '$' || !(is_name_start(r[1]) || r[1] == '{' || isdigit((unsigned char)r[1]) ||
-                         r[1] == '?' || r[1] == '#' || r[1] == '@' || r[1] == '*'))
+    if (r[0] == '$' && r[1] == '{') {
+        if (piece_length(r) > 0)
+            return lex_braced(L);
+        lexer_char(L, '$', L->quote != '\0');       // not closed: an ordinary character
+        L->read++;
+        return 1;
+    }
+    if (r[0] != '$' || !(is_name_start(r[1]) || isdigit((unsigned char)r[1]) || r[1] == '?' || r[1] == '#' ||
+                         r[1] == '@' || r[1] == '*'))
         return 0;
 
-    if (r[1] == '{') {
-        const char* close = strchr(r + 2, '}');
-        int digits = 1;
-
-        start = r + 2;
-        length = close != NULL ? (size_t)(close - start) : 0;
-        after = close != NULL ? close + 1 : r + 1;
-        for (i = 0; i < length; i++)
-            if (!isdigit((unsigned char)start[i]))
-                digits = 0;
-        valid = close != NULL && length > 0 && (digits || is_name_start(start[0]));
-        for (i = 0; valid && !digits && i < length; i++)
-            if (!is_name_char(start[i]))
-                valid = 0;
-    } else if (r[1] == '?' || r[1] == '#' || r[1] == '@' || r[1] == '*' || isdigit((unsigned char)r[1])) {
+    if (r[1] == '?' || r[1] == '#' || r[1] == '@' || r[1] == '*' || isdigit((unsigned char)r[1])) {
         start = r + 1;
         length = 1;
         after = r + 2;
@@ -556,12 +962,11 @@ static int lex_variable(Lexer* L) {
         after = start + length;
     }
 
-    if (!valid || length >= sizeof name) {
-        lexer_char(L, '$', L->quote != '\0');       // not a variable after all
+    if (length >= sizeof name) {
+        lexer_char(L, '$', L->quote != '\0');
         L->read++;
         return 1;
     }
-
     memcpy(name, start, length);
     name[length] = '\0';
     value = variable_value(name, scratch, sizeof scratch);

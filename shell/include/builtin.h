@@ -16,6 +16,9 @@
  *   exit [N], quit    leave the shell, with status N (default: that of the last command)
  */
 
+/** Whether the name is a builtin (the NAME=value words in front of it then hold for it only). */
+int builtin_exists(const char* name);
+
 /**
  * Runs the command when it is a builtin.
  * Returns non-zero when it was one, and zero when it has to be started as a program.

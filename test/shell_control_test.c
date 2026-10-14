@@ -177,11 +177,60 @@ static void test_syntax(void) {
     run_result_free(&r);
 }
 
+static void test_input(void) {
+    printf("read, redirections of compound commands, pipes into loops\n");
+    write_text(workDir, "data.txt", "alpha 1\nbeta 2\ngamma 3\n");
+
+    expect("r1.sh", "while read name num; do echo \"$name=$num\"; done < data.txt\n", "", "alpha=1\nbeta=2\ngamma=3\n", 0);
+    expect("r2.sh", "total=0\nwhile read name num; do total=$((total+num)); done < data.txt\necho $total\n", "", "6\n", 0);
+    expect("r3.sh", "cat data.txt | while read line; do echo \"<$line>\"; done\n", "", "<alpha 1>\n<beta 2>\n<gamma 3>\n", 0);
+    expect("r4.sh", "echo \"a b c d\" | while read p q; do echo \"$p|$q\"; done\n", "", "a|b c d\n", 0);
+    expect("r5.sh", "echo \"  x  \" | while read v; do echo \"[$v]\"; done\n", "", "[x]\n", 0);
+    expect("r6.sh", "echo k:v:w | while IFS=: read a b c; do echo \"$a $b $c\"; done\necho \"IFS is $IFS|\"\n", "",
+           "k v w\nIFS is |\n", 0);
+    expect("r7.sh", "echo whole line | while read; do echo \"[$REPLY]\"; done\n", "", "[whole line]\n", 0);
+    expect("r8.sh", "echo one | while read -r first second; do echo \"$first/$second\"; done\n", "", "one/\n", 0);
+
+    // the status of read: 1 at the end of the input
+    // the status of a loop is that of its body (the read that ended it is the condition)
+    expect("r9.sh", "while read l; do :; done < data.txt\necho $?\n", "", "0\n", 0);
+    expect("r9b.sh", "read a < data.txt\necho $?\nread z < nosuch.txt 2> nul\necho $?\n", "", "0\n1\n", 0);
+    expect("r10.sh", "read x < data.txt\necho \"$x\"\n", "", "alpha 1\n", 0);
+
+    // a loop that ends early leaves the rest of the input unread
+    expect("r11.sh", "cat data.txt | while read l w; do if [ $w -eq 2 ]; then break; fi; echo $l; done\necho end\n", "",
+           "alpha\nend\n", 0);
+
+    // redirections after the end of a compound command
+    expect("o1.sh", "for i in 1 2 3; do echo item $i; done > loop.txt\ncat loop.txt\n", "", "item 1\nitem 2\nitem 3\n", 0);
+    expect("o2.sh", "for i in 1 2; do echo a$i; done > append.txt\nfor i in 3; do echo a$i; done >> append.txt\ncat append.txt\n",
+           "", "a1\na2\na3\n", 0);
+    expect("o3.sh", "if true; then echo out; echo err 1>&2; fi > both.txt 2>&1\ncat both.txt\n", "", "out\nerr\n", 0);
+    expect("o4.sh", "while true; do echo no; break; done > nul\necho visible\n", "", "visible\n", 0);
+    expect("o5.sh", "n=0\nwhile read l; do n=$((n+1)); done < data.txt > count.txt\ncat count.txt\necho $n\n", "", "3\n", 0);
+
+    // programs started in a redirected loop read the same input
+    expect("o6.sh", "while read l w; do echo \"$l\"; done < data.txt | cat\n", "", "", 2);
+
+    // a file that cannot be opened: a message, status 1, the loop does not run
+    {
+        RunResult r;
+
+        write_text(workDir, "o7.sh", "while read l; do echo never; done < nosuch.txt\necho \"status $?\"\n");
+        run_shell("o7.sh", "", &r);
+        lf_only(r.out);
+        CHECK_STR(r.out, "status 1\n");
+        CHECK(strstr(r.err, "Cannot open 'nosuch.txt'") != NULL);
+        run_result_free(&r);
+    }
+}
+
 int main(void) {
     tools_init("shell_control_test");
     test_if();
     test_loops();
     test_break_continue();
+    test_input();
     test_syntax();
     return test_summary("shell_control_test");
 }

@@ -239,6 +239,7 @@ int main(int argc, char* argv[]) {
 
     winshell_terminalInit();
     interp_init();
+    interp_set_line_reader(read_line);
 
     if (argc >= 3 && strcmp(argv[1], "-c") == 0) {
         // shell -c COMMAND [NAME [ARGUMENT]...]
