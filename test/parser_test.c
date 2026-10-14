@@ -393,10 +393,10 @@ static void test_variables(void) {
     winshell_freePipeline(&p);
 
     // a $ that starts no name is a $
-    CHECK_INT(parse("echo $ a$ $1 \"$\" ${ ${} $-", &p), 0);
+    CHECK_INT(parse("echo $ a$ $+ \"$\" ${ ${} $-", &p), 0);
     CHECK_STR(p.commands[0].argv[1], "$");
     CHECK_STR(p.commands[0].argv[2], "a$");
-    CHECK_STR(p.commands[0].argv[3], "$1");
+    CHECK_STR(p.commands[0].argv[3], "$+");
     CHECK_STR(p.commands[0].argv[4], "$");
     CHECK_STR(p.commands[0].argv[5], "${");
     CHECK_STR(p.commands[0].argv[6], "${}");
@@ -461,6 +461,38 @@ static void test_lists(void) {
     CHECK_INT(list.items[1].op, LIST_SEQ);
     CHECK_STR(list.items[0].text, "echo a");
     CHECK_STR(list.items[1].text, " echo b");
+    winshell_freeList(&list);
+
+    // a substitution is one piece whatever is in it; a # at the start of a word starts a comment
+    CHECK_INT(winshell_parse_list("echo $(a; b && c) x ; d", &list), 0);
+    CHECK_INT(list.count, 2);
+    CHECK_STR(list.items[0].text, "echo $(a; b && c) x ");
+    winshell_freeList(&list);
+    CHECK_INT(winshell_parse_list("echo `a; b` ; d", &list), 0);
+    CHECK_INT(list.count, 2);
+    winshell_freeList(&list);
+    CHECK_INT(winshell_parse_list("echo \"$(a ; \"b;c\")\" ; d", &list), 0);
+    CHECK_INT(list.count, 2);
+    winshell_freeList(&list);
+    CHECK_INT(winshell_parse_list("echo '$(a; b' ; d", &list), 0);
+    CHECK_INT(list.count, 2);
+    winshell_freeList(&list);
+
+    CHECK_INT(winshell_parse_list("echo a # b; c", &list), 0);
+    CHECK_INT(list.count, 1);
+    CHECK_STR(list.items[0].text, "echo a ");
+    winshell_freeList(&list);
+    CHECK_INT(winshell_parse_list("# only a comment; echo x", &list), 0);
+    CHECK_INT(list.count, 0);
+    winshell_freeList(&list);
+    CHECK_INT(winshell_parse_list("echo a;#b", &list), 0);
+    CHECK_INT(list.count, 1);
+    winshell_freeList(&list);
+    CHECK_INT(winshell_parse_list("echo a#b \"# c\" '#d'; e", &list), 0);   // not at the start of a word, or quoted
+    CHECK_INT(list.count, 2);
+    winshell_freeList(&list);
+    CHECK_INT(winshell_parse_list("echo a # b && ", &list), 0);
+    CHECK_INT(list.count, 1);
     winshell_freeList(&list);
 
     CHECK_INT(winshell_parse_list("a && b || c ; d", &list), 0);

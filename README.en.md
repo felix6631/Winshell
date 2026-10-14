@@ -12,7 +12,7 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 
 | Command | Status |
 | --- | --- |
-| `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion, wildcards, `cd` `export` `unset` `exit` |
+| `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion (`$? $0 $1..$9 $# $@ $*`), command substitution (`$(...)`, backticks), comments (`#`), wildcards, running scripts (`shell FILE [ARG...]`, `shell -c`, `source`/`.`), `cd` `export` `unset` `exit` `source` |
 | `arch` | Done |
 | `basename` | Done (`-a -s -z`; both `/` and `\` separate; the suffix is removed unless it is the whole name) |
 | `date` | Done (`-d -u -r -I -R --rfc-3339`, the format letters `%a %A %b %B %c %C %d %D %e %F %g %G %H %I %j %k %l %m %M %N %p %P %q %r %R %s %S %T %u %U %V %w %W %x %X %y %Y %z %:z %Z` with the flags `- _ 0 ^ #` and a width; `-d` reads `@SECONDS`, ISO dates and times, month names, `now yesterday tomorrow`, `+2 days`, `3 weeks ago`, `next month`, weekdays; years before 1970 and after 3000 work; `-s` (setting the clock) is not supported) |
@@ -105,6 +105,18 @@ See [Planned](#planned) for what is still to come.
   - Redirections of standard output and error are applied in the order written: `a > f 2>&1` sends both to f, `a 2>&1 > f` sends the error to the old output and only the output to f.
   - A redirection takes precedence over a pipe. The exit code of the last command is the result.
   - `&` (background jobs) is not supported yet; a lone `&` is a syntax error.
+- **Scripts and command substitution**
+  - `shell FILE [argument...]` runs the lines of the file one after the other (`$0` is FILE, `$1`..`$9`, `$#`, `$@`, `$*` are the
+    arguments); so does `shell -c 'command' [name [argument...]]`. `source FILE [argument...]` and `. FILE` run a file in the
+    same shell; without arguments it sees the `$1`.. of the caller. In a file `exit [N]` ends the shell, and the status of a script
+    is that of its last command (or of `exit`). A line that is a syntax error is reported and the next one runs. LF and CR LF line
+    ends and a leading UTF-8 BOM are accepted.
+  - `$(command)` and `` `command` `` are replaced by the standard output of the command, without the line ends at its end.
+    Outside of quotes it is cut at blanks into words, inside of quotes it is one word. They nest, and may hold `;`, `&&` and
+    quotes. Inside single quotes they are text. As in a subshell, the current directory and the variables (the environment as
+    well) are what they were when the substitution has ended, and an `exit` inside ends only the substitution. For a line that is
+    only `x=$(command)`, `$?` is the status of the command; otherwise `$?` around a substitution is not changed.
+  - A `#` at the start of a word (outside of quotes) makes the rest of the line a comment.
 - **Ctrl+C / Ctrl+Break**
   - While a program is running, only that program is interrupted and the shell keeps running.
   - At the prompt the shell does not exit; it discards the line being typed.
@@ -173,6 +185,7 @@ The test programs are divided by feature (`test\`).
 | `grep_test` | `grep`: CR LF, UTF-8, binary files, `-r`, context, exit status, input that comes as it is written |
 | `shell_utf8_test` | shell: Korean names and directories, wildcards that match a character, variables, redirection (Windows 10 1903 or later) |
 | `shell_run_test` | shell: running commands, quoting, pipes, redirection |
+| `shell_script_test` | shell scripts: file/`-c`/`source`, `$0 $1.. $# $@`, command substitution (`$(...)`, backticks), comments, exit status |
 | `shell_cd_test` | shell: `cd`, the virtual file system, wildcards |
 | `shell_lists_test` | shell: `; && \|\|`, exit status, variables, `exit` |
 | `shell_pipeline_test` | shell: the commands together with pipes, redirection and wildcards |
@@ -272,7 +285,7 @@ the build structure in line with the directories.
 
 ## Planned
 
-**Shell features**: background jobs (`&`), brace expansion, command substitution (`$(...)`), `if`/`for`/`while`
+**Shell features**: background jobs (`&`), brace expansion, `if`/`for`/`while`
 
 **coreutils**
 

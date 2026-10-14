@@ -3,8 +3,7 @@
 #include <string.h>
 #include <windows.h>
 #include "parser.h"
-#include "executer.h"
-#include "builtin.h"
+#include "interp.h"
 #include "cwd.h"
 #include "variables.h"
 #include "vec.h"
@@ -154,71 +153,30 @@ static char* read_line(void) {
     return line;
 }
 
-/**
- * Runs one pipeline: variables and wildcards are expanded, then the command is
- * run, as a builtin or as the programs of the pipeline. Returns its status.
- * *exitShell is set when the shell has to end.
- */
-static int run_item(const char* text, int* exitShell, int status) {
-    Pipeline pipeline;
-
-    // the parser and the executer report their own errors
-    if (winshell_parse(text, &pipeline) != 0)
-        return 2;
-
-    if (pipeline.count > 0 && winshell_glob(&pipeline) == 0) {
-        int builtinStatus = status;
-
-        // NAME=value alone sets variables of the shell; only that command does, not one inside a pipeline
-        if (pipeline.count == 1 && pipeline.commands[0].argv == NULL) {
-            const Command* command = &pipeline.commands[0];
-            size_t i;
-
-            for (i = 0; i < command->assignmentCount; i++) {
-                const char* assignment = command->assignments[i];
-                size_t length = strcspn(assignment, "=");
-                char name[256];
-
-                if (length < sizeof name) {
-                    memcpy(name, assignment, length);
-                    name[length] = '\0';
-                    if (var_set(name, assignment + length + 1) != 0)
-                        fprintf(stderr, "Error: Out of memory\n");
-                } else {
-                    fprintf(stderr, "Error: Variable name too long\n");
-                }
-            }
-            // redirections still take effect (> file empties it)
-            status = execute_pipeline(&pipeline) == 0 ? 0 : 1;
-        // a builtin only makes sense as a command of its own, not inside a pipeline
-        } else if (pipeline.count == 1 && builtin_run(&pipeline.commands[0], &builtinStatus, exitShell)) {
-            status = builtinStatus;
-        } else {
-            int result = execute_pipeline(&pipeline);
-            // a program that could not be started is a command that was not found
-            status = result == -1 ? 127 : result;
-        }
-    } else if (pipeline.count > 0) {
-        status = 1;
-    }
-
-    winshell_freePipeline(&pipeline);
-    return status;
+static void print_usage(void) {
+    puts("Usage: shell                         read commands from the terminal or from standard input\n"
+         "       shell FILE [ARGUMENT]...      run the commands of FILE; $0 is FILE, $1.. its arguments\n"
+         "       shell -c COMMAND [NAME [ARGUMENT]...]   run COMMAND ($0 is NAME)\n"
+         "\n"
+         "  --help      display this help and exit\n"
+         "  --version   output version information and exit\n"
+         "\n"
+         "Inside a script `source FILE [ARGUMENT]...` runs another file in the same shell. $(command) and\n"
+         "`command` are replaced by the output of the command, # starts a comment.");
 }
 
-int main(void) {
+/** Runs the commands of the terminal or of standard input, one line at a time. */
+static int interactive_loop(void) {
     int status = 0, exitShell = 0;
 
-    winshell_terminalInit();
-    while(!exitShell) {
-        CommandList list;
-        size_t i;
+    while (!exitShell) {
+        char* input;
 
         printf(" > ");
         fflush(stdout);
 
         InterlockedExchange(&interrupted, 0);
-        char* input = read_line();
+        input = read_line();
         if (input == NULL) {
             // Ctrl+C at the prompt abandons the line, it does not end the shell
             if (interrupted) {
@@ -233,31 +191,67 @@ int main(void) {
 
         // strip linefeed
         input[strcspn(input, "\r\n")] = '\0';
-
-        if (winshell_parse_list(input, &list) != 0) {
-            status = 2;
-            winshell_setLastStatus(status);
-            free(input);
-            continue;
-        }
-
-        // The commands of the line are run one after the other, each one parsed when its
-        // turn has come: it sees the directory and the variables the one before left.
-        for (i = 0; i < list.count && !exitShell; i++) {
-            int op = list.items[i].op;
-            int run = op == LIST_FIRST || op == LIST_SEQ ||
-                      (op == LIST_AND && status == 0) || (op == LIST_OR && status != 0);
-
-            if (!run)
-                continue;           // the status stays that of the last command that ran
-
-            winshell_setLastStatus(status);
-            status = run_item(list.items[i].text, &exitShell, status);
-            winshell_setLastStatus(status);
-        }
-
-        winshell_freeList(&list);
+        status = interp_run_line(input, &exitShell, status);
         free(input);
     }
+    return status;
+}
+
+int main(int argc, char* argv[]) {
+    int status = 0, exitShell = 0;
+
+    if (argc >= 2 && strcmp(argv[1], "--help") == 0) {
+        print_usage();
+        return 0;
+    }
+    if (argc >= 2 && strcmp(argv[1], "--version") == 0) {
+        puts("shell 0.1");
+        return 0;
+    }
+
+    winshell_terminalInit();
+    interp_init();
+
+    if (argc >= 3 && strcmp(argv[1], "-c") == 0) {
+        // shell -c COMMAND [NAME [ARGUMENT]...]
+        const char* name = argc >= 4 ? argv[3] : "shell";
+        const char* const* arguments = (const char* const*)(argc >= 5 ? argv + 4 : argv + argc);
+        int count = argc >= 5 ? argc - 4 : 0;
+        char number[16];
+        char* joined = NULL;
+        int i;
+
+        var_set("0", name);
+        for (i = 0; i < count && i < 9; i++) {
+            snprintf(number, sizeof number, "%d", i + 1);
+            var_set(number, arguments[i]);
+        }
+        snprintf(number, sizeof number, "%d", count);
+        var_set("#", number);
+        if (count > 0) {
+            size_t total = 1;
+            for (i = 0; i < count; i++)
+                total += strlen(arguments[i]) + 1;
+            joined = malloc(total);
+            if (joined != NULL) {
+                size_t used = 0;
+                for (i = 0; i < count; i++)
+                    used += (size_t)sprintf(joined + used, "%s%s", i > 0 ? " " : "", arguments[i]);
+                var_set("@", joined);
+                var_set("*", joined);
+                free(joined);
+            }
+        }
+        status = interp_run_line(argv[2], &exitShell, 0);
+    } else if (argc >= 2 && strcmp(argv[1], "-c") != 0 && argv[1][0] != '-') {
+        // shell FILE [ARGUMENT]...
+        status = interp_run_file(argv[1], (const char* const*)argv + 2, argc - 2, 1, &exitShell, 0);
+    } else if (argc >= 2) {
+        fprintf(stderr, "shell: %s: invalid option\n", argv[1]);
+        return 2;
+    } else {
+        status = interactive_loop();
+    }
+    fflush(stdout);
     return status;
 }

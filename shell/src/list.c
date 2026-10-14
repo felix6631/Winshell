@@ -121,13 +121,36 @@ int winshell_parse_list(const CHAR* line, CommandList* list) {
     memset(list, 0, sizeof *list);
 
     for (;; i++) {
-        size_t passed = pass_quoted(line, i, &quote);
-        size_t operatorLength, skip;
+        size_t passed, operatorLength, skip;
         int op;
 
+        // $( ) and ` ` are one piece, whatever is inside of them (outside of single quotes)
+        if (quote != '\'' && ((line[i] == '$' && line[i + 1] == '(') || line[i] == '`')) {
+            size_t length = winshell_substitution_length(line + i);
+            if (length > 0) {
+                i += length - 1;
+                continue;
+            }
+        }
+
+        passed = pass_quoted(line, i, &quote);
         if (passed > 0) {
             i += passed - 1;
             continue;
+        }
+
+        // a # at the start of a word (outside of quotes) starts a comment: the line ends there
+        if (line[i] == '#' && (i == 0 || is_blank(line[i - 1]) || strchr(";|&", line[i - 1]) != NULL)) {
+            if (is_blank_text(line + segmentStart, i - segmentStart)) {
+                if (pending == LIST_AND || pending == LIST_OR) {
+                    fprintf(stderr, "Error: Syntax error: missing command after '%s'\n", list_operator_name(pending));
+                    goto err;
+                }
+                break;
+            }
+            if (list_add(list, line + segmentStart, i - segmentStart, pending) != 0)
+                goto err_memory;
+            break;
         }
 
         if (line[i] == '\0') {

@@ -128,3 +128,130 @@ void var_unset(const char* name) {
     _putenv_s(name, "");        // an empty value removes the variable
     SetEnvironmentVariableA(name, NULL);
 }
+
+/* ---- the state of the variables, for what runs in a subshell ------------------------------ */
+
+struct VarSnapshot {
+    char*  environment;     // the block of "NAME=value" strings of the process, ended by an empty one
+    size_t environmentSize;
+    Entry* entries;
+    size_t entryCount;
+};
+
+static size_t block_size(const char* block) {
+    const char* p = block;
+    while (*p != '\0')
+        p += strlen(p) + 1;
+    return (size_t)(p - block) + 1;
+}
+
+/** The value of NAME in an environment block of the process, or NULL; case does not matter on Windows. */
+static const char* block_get(const char* block, const char* name) {
+    size_t length = strlen(name);
+    const char* p;
+
+    for (p = block; *p != '\0'; p += strlen(p) + 1)
+        if (_strnicmp(p, name, length) == 0 && p[length] == '=')
+            return p + length + 1;
+    return NULL;
+}
+
+VarSnapshot* var_save(void) {
+    VarSnapshot* s = calloc(1, sizeof *s);
+    char* current;
+    size_t i;
+
+    if (s == NULL)
+        return NULL;
+    current = GetEnvironmentStringsA();
+    if (current == NULL) {
+        free(s);
+        return NULL;
+    }
+    s->environmentSize = block_size(current);
+    s->environment = malloc(s->environmentSize);
+    if (s->environment != NULL)
+        memcpy(s->environment, current, s->environmentSize);
+    FreeEnvironmentStringsA(current);
+
+    // the array is grown by VEC_GROW_BY_COUNT, which takes its capacity from the count (4, then powers of two)
+    if (entryCount > 0) {
+        size_t capacity = 4;
+        while (capacity < entryCount)
+            capacity *= 2;
+        s->entries = calloc(capacity, sizeof *s->entries);
+    }
+    if (s->environment == NULL || (entryCount > 0 && s->entries == NULL)) {
+        free(s->environment);
+        free(s->entries);
+        free(s);
+        return NULL;
+    }
+    for (i = 0; i < entryCount; i++) {
+        s->entries[i].name = _strdup(entries[i].name);
+        s->entries[i].value = entries[i].value != NULL ? _strdup(entries[i].value) : NULL;
+        s->entries[i].exported = entries[i].exported;
+    }
+    s->entryCount = entryCount;
+    return s;
+}
+
+void var_restore(VarSnapshot* s) {
+    char* current;
+    const char* p;
+    size_t i;
+
+    if (s == NULL)
+        return;
+
+    // what the subshell added to the environment goes, what it changed is put back
+    current = GetEnvironmentStringsA();
+    if (current != NULL) {
+        for (p = current; *p != '\0'; p += strlen(p) + 1) {
+            const char* equals = strchr(p + (*p == '=' ? 1 : 0), '=');
+            char name[512];
+            size_t length;
+
+            if (*p == '=' || equals == NULL)
+                continue;                   // the per-drive directories of Windows are not variables
+            length = (size_t)(equals - p);
+            if (length >= sizeof name)
+                continue;
+            memcpy(name, p, length);
+            name[length] = '\0';
+            if (block_get(s->environment, name) == NULL) {
+                _putenv_s(name, "");
+                SetEnvironmentVariableA(name, NULL);
+            }
+        }
+        FreeEnvironmentStringsA(current);
+    }
+    for (p = s->environment; *p != '\0'; p += strlen(p) + 1) {
+        const char* equals = strchr(p + (*p == '=' ? 1 : 0), '=');
+        char name[512];
+        size_t length;
+        char* now;
+
+        if (*p == '=' || equals == NULL)
+            continue;
+        length = (size_t)(equals - p);
+        if (length >= sizeof name)
+            continue;
+        memcpy(name, p, length);
+        name[length] = '\0';
+        now = getenv(name);
+        if (now == NULL || strcmp(now, equals + 1) != 0 || equals[1] == '\0')
+            env_put(name, equals + 1);
+    }
+
+    for (i = 0; i < entryCount; i++) {
+        free(entries[i].name);
+        free(entries[i].value);
+    }
+    free(entries);
+    entries = s->entries;
+    entryCount = s->entryCount;
+
+    free(s->environment);
+    free(s);
+}

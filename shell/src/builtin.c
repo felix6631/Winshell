@@ -1,4 +1,5 @@
 #include "builtin.h"
+#include "interp.h"
 #include "cwd.h"
 #include "vpath.h"
 #include "variables.h"
@@ -138,6 +139,20 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
     }
     if (strcmp(name, "unset") == 0) {
         *status = builtin_unset(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "source") == 0 || strcmp(name, ".") == 0) {
+        if (command->argv[1] == NULL) {
+            fprintf(stderr, "%s: filename argument required\n", name);
+            *status = 2;
+        } else {
+            // the arguments after the file become its parameters; without any, it sees those of the caller
+            int count = 0;
+            while (command->argv[2 + count] != NULL)
+                count++;
+            *status = interp_run_file(command->argv[1], (const char* const*)command->argv + 2, count, count > 0,
+                                      exitShell, *status);
+        }
         return 1;
     }
     if (strcmp(name, "exit") == 0 || strcmp(name, "quit") == 0) {

@@ -48,6 +48,25 @@ typedef struct {
  */
 void winshell_setLastStatus(int status);
 
+/** The status last given to winshell_setLastStatus. */
+int winshell_lastStatus(void);
+
+/**
+ * Command substitution: $(command) and `command` are replaced by what the command wrote to standard
+ * output, without the line ends at its end. The parser does not know how to run a command; the shell
+ * gives it a function that does: it runs the line and returns its output (malloc'ed) in *output.
+ * Returns 0, or -1 when out of memory. Without one, a substitution is an error.
+ */
+typedef int (*SubstitutionHandler)(const char* command, char** output);
+void winshell_setSubstitution(SubstitutionHandler handler);
+
+/**
+ * text points at "$(" or at a backtick: the length of the substitution up to and including its
+ * closing parenthesis or backtick (quotes and nested substitutions inside are passed), or 0 when it
+ * is not closed.
+ */
+size_t winshell_substitution_length(const CHAR* text);
+
 /** How a command of a list depends on the one before it. */
 #define LIST_FIRST 0    // the first command of the line
 #define LIST_SEQ   1    // ;   always runs
@@ -107,7 +126,10 @@ void winshell_freeList(CommandList* list);
  *   Backslashes are only special in front of a double quote (as in
  *   CommandLineToArgvW), so Windows paths such as C:\bin\echo work as typed.
  *
- * Variables: $NAME, ${NAME} and $? are replaced by their values, in double
+ * Comments: a # at the start of a word, outside of quotes, ends the line.
+ *
+ * Variables: $NAME, ${NAME}, $? and the parameters of a script ($0 $1..$9 $# $@ $*, kept as
+ * variables of those names) are replaced by their values, in double
  * quotes as well, but not in single quotes. In double quotes the value stays
  * one word, as it does in the quotes of "$HOME"; outside of them it is cut at
  * blanks into words, which are then subject to wildcards. A variable that is

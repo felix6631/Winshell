@@ -15,6 +15,10 @@ void winshell_setLastStatus(int status) {
     lastStatus = status;
 }
 
+int winshell_lastStatus(void) {
+    return lastStatus;
+}
+
 typedef enum {
     LEX_WORD,
     LEX_PIPE,
@@ -373,7 +377,145 @@ static int lex_quote_mark(Lexer* L) {
     return 1;
 }
 
-/** $NAME, ${NAME} and $?: the value goes into the word, cut at blanks unless quoted or assigned. */
+/* ---- command substitution ------------------------------------------------------------- */
+
+static SubstitutionHandler substitutionHandler;
+
+void winshell_setSubstitution(SubstitutionHandler handler) {
+    substitutionHandler = handler;
+}
+
+/** Length of a double-quoted piece that starts at text[0] == '"', closing quote included; 0 when not closed. */
+static size_t quoted_length(const CHAR* text) {
+    size_t i = 1;
+
+    while (text[i] != '\0' && text[i] != '"') {
+        if (text[i] == '\\' && text[i + 1] == '"') {
+            i += 2;
+        } else if ((text[i] == '$' && text[i + 1] == '(') || text[i] == '`') {
+            size_t n = winshell_substitution_length(text + i);
+            if (n == 0)
+                return 0;
+            i += n;
+        } else {
+            i++;
+        }
+    }
+    return text[i] == '"' ? i + 1 : 0;
+}
+
+size_t winshell_substitution_length(const CHAR* text) {
+    size_t i;
+    int depth = 1;
+
+    if (text[0] == '`') {
+        for (i = 1; text[i] != '\0'; i++) {
+            if (text[i] == '\\' && text[i + 1] != '\0')
+                i++;
+            else if (text[i] == '`')
+                return i + 1;
+        }
+        return 0;
+    }
+    if (text[0] != '$' || text[1] != '(')
+        return 0;
+
+    for (i = 2; text[i] != '\0';) {
+        CHAR c = text[i];
+
+        if (c == '\\' && text[i + 1] == '"') {
+            i += 2;
+        } else if (c == '\'') {
+            const CHAR* close = strchr(text + i + 1, '\'');
+            if (close == NULL)
+                return 0;
+            i = (size_t)(close - text) + 1;
+        } else if (c == '"') {
+            size_t n = quoted_length(text + i);
+            if (n == 0)
+                return 0;
+            i += n;
+        } else if (c == '$' && text[i + 1] == '(') {
+            depth++;
+            i += 2;
+        } else if (c == ')') {
+            i++;
+            if (--depth == 0)
+                return i;
+        } else {
+            i++;
+        }
+    }
+    return 0;
+}
+
+/* ---- the value of a variable or of a substitution goes into the word ---------------------- */
+
+/** Puts a value into the word: one piece in quotes or in an assignment, else cut at blanks into words. */
+static void lexer_value(Lexer* L, const char* value) {
+    L->dirty = 1;
+    for (; value != NULL && *value != '\0'; value++) {
+        if (L->quote == '"' || L->isAssign)
+            lexer_char(L, *value, 1);               // one piece, and no wildcards
+        else if (*value == ' ' || *value == '\t' || *value == '\n' || *value == '\r')
+            lexer_word(L);                          // split at blanks
+        else
+            lexer_char(L, *value, 0);
+    }
+}
+
+/** $(command) and `command`: the standard output of the command, without the line ends at its end. */
+static int lex_substitution(Lexer* L) {
+    const CHAR* r = L->read;
+    size_t total, skip, innerLength;
+    char* inner;
+    char* output = NULL;
+
+    if (!((r[0] == '$' && r[1] == '(') || r[0] == '`'))
+        return 0;
+
+    total = winshell_substitution_length(r);
+    if (total == 0) {
+        lexer_syntax_error(L, "Syntax error: unterminated command substitution");
+        return 1;
+    }
+    if (substitutionHandler == NULL) {
+        lexer_syntax_error(L, "Command substitution is not available here");
+        return 1;
+    }
+    skip = r[0] == '$' ? 2 : 1;
+    innerLength = total - skip - 1;
+    inner = malloc(innerLength + 1);
+    if (inner == NULL) {
+        L->error = LEX_NOMEM;
+        return 1;
+    }
+    memcpy(inner, r + skip, innerLength);
+    inner[innerLength] = '\0';
+
+    L->read = r + total;
+    if (substitutionHandler(inner, &output) != 0 || output == NULL) {
+        free(inner);
+        free(output);
+        L->error = LEX_NOMEM;
+        return 1;
+    }
+    free(inner);
+    {
+        size_t length = strlen(output);
+        while (length > 0 && (output[length - 1] == '\n' || output[length - 1] == '\r'))
+            output[--length] = '\0';
+    }
+    lexer_value(L, output);
+    L->quoted = L->quote != '\0' || L->quoted;      // "$(true)" is an empty word
+    free(output);
+    return 1;
+}
+
+/**
+ * $NAME, ${NAME}, $? and the parameters of a script ($0 $1..$9, $#, $@, $*): the value goes into
+ * the word, cut at blanks unless quoted or assigned.
+ */
 static int lex_variable(Lexer* L) {
     const CHAR* r = L->read;
     char name[256];
@@ -384,19 +526,25 @@ static int lex_variable(Lexer* L) {
     char scratch[VPATH_MAX];
     int valid = 1;
 
-    if (r[0] != '$' || !(is_name_start(r[1]) || r[1] == '?' || r[1] == '{'))
+    if (r[0] != '$' || !(is_name_start(r[1]) || r[1] == '{' || isdigit((unsigned char)r[1]) ||
+                         r[1] == '?' || r[1] == '#' || r[1] == '@' || r[1] == '*'))
         return 0;
 
     if (r[1] == '{') {
         const char* close = strchr(r + 2, '}');
+        int digits = 1;
+
         start = r + 2;
         length = close != NULL ? (size_t)(close - start) : 0;
         after = close != NULL ? close + 1 : r + 1;
-        valid = close != NULL && length > 0 && is_name_start(start[0]);
-        for (i = 0; valid && i < length; i++)
+        for (i = 0; i < length; i++)
+            if (!isdigit((unsigned char)start[i]))
+                digits = 0;
+        valid = close != NULL && length > 0 && (digits || is_name_start(start[0]));
+        for (i = 0; valid && !digits && i < length; i++)
             if (!is_name_char(start[i]))
                 valid = 0;
-    } else if (r[1] == '?') {
+    } else if (r[1] == '?' || r[1] == '#' || r[1] == '@' || r[1] == '*' || isdigit((unsigned char)r[1])) {
         start = r + 1;
         length = 1;
         after = r + 2;
@@ -418,15 +566,7 @@ static int lex_variable(Lexer* L) {
     name[length] = '\0';
     value = variable_value(name, scratch, sizeof scratch);
     L->read = after;
-    L->dirty = 1;
-    for (; value != NULL && *value != '\0'; value++) {
-        if (L->quote == '"' || L->isAssign)
-            lexer_char(L, *value, 1);               // one piece, and no wildcards
-        else if (*value == ' ' || *value == '\t' || *value == '\n' || *value == '\r')
-            lexer_word(L);                          // split at blanks
-        else
-            lexer_char(L, *value, 0);
-    }
+    lexer_value(L, value);
     return 1;
 }
 
@@ -503,7 +643,7 @@ static void lex_word_characters(Lexer* L) {
     while (*L->read != '\0' && !L->operatorDone && !L->error) {
         CHAR c = *L->read;
 
-        if (lex_single_quoted(L) || lex_backslash(L) || lex_quote_mark(L) || lex_variable(L) || lex_tilde(L) ||
+        if (lex_single_quoted(L) || lex_backslash(L) || lex_quote_mark(L) || lex_substitution(L) || lex_variable(L) || lex_tilde(L) ||
             lex_quoted_char(L) || lex_fd_redirect(L) || lex_assignment(L))
             continue;
 
@@ -536,6 +676,9 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, CHAR** patternsOut, Lexe
             L.read++;
             continue;
         }
+
+        if (*L.read == '#')             // a comment: the rest of the line
+            break;
 
         L.wordStart = L.text.length;
         L.patStart = L.pat.length;

@@ -28,4 +28,13 @@ int var_export(const char* name, const char* value);
 /** unset NAME: removes the variable, whichever kind it is. */
 void var_unset(const char* name);
 
+/**
+ * The state of the variables at one moment: the environment and the variables of the shell. What runs in
+ * a subshell (a command substitution) changes variables that the shell around it has to see unchanged:
+ * var_save before, var_restore after (it also frees the snapshot). var_save returns NULL when out of memory.
+ */
+typedef struct VarSnapshot VarSnapshot;
+VarSnapshot* var_save(void);
+void var_restore(VarSnapshot* snapshot);
+
 #endif //VARIABLES_H
