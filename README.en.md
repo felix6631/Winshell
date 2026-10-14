@@ -243,10 +243,18 @@ Winshell/
 
 ## Adding a new command
 
-1. Create a directory named after the command at the top level and write `main.c` in it. Handle the options with
-   `args_parse` of `common/args.h` (`tee/main.c` is the smallest example: a table of options, a handler, one call).
-2. Copy `tee/Makefile` and change `NAME`, `SRCS` and `HDRS` (and `INCLUDES`, `LIBS` if needed); the rules come from `common.mk`.
-3. Add `build-<name>` to the `BUILD` list in the top-level `Makefile` (`clean-<name>` follows by itself).
+1. Run `nmake new NAME=<name>`. It creates a working skeleton (`<name>\main.c`, `Makefile`), `test\<name>_test.c` and
+   `test\gnu\<name>.sh`, and adds entries to the command table, the test table and the directory tree of both READMEs.
+2. Write `main.c`. Handle the options with `args_parse` of `common/args.h` (`tee/main.c` is the smallest example). The
+   `Makefile` of a tool only sets `NAME`, `SRCS` and `HDRS` (and `INCLUDES`, `LIBS` if needed); the rules come from `common.mk`.
+3. Fill in the row of the command table, and write the tests and the GNU comparison (`test\gnu\<name>.sh`).
+   `nmake check-registry` points at a tool that is missing from a README or from the tests.
+
+The build list, the test list and the GNU comparison list are made from the files, so nothing has to be added to them: every
+directory with a `Makefile` is a tool (`scripts\list-tools.bat`), every `test\*_test.c` is a test program
+(`scripts\list-tests.bat`; only the unit tests that link other sources have a rule in `test\Makefile`), and every
+`test\gnu\*.sh` is a section of the GNU comparison. `nmake sync-readme` brings the directory tree and the sentence about
+the build structure in line with the directories.
 
 `common.mk` provides the `all` and `clean` rules, and takes the output location through the `BINDIR` macro and extra compiler options through `EXTRA_CFLAGS`.
 

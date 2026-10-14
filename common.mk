@@ -12,7 +12,7 @@
 BINDIR = ..\bin
 OBJDIR = obj
 TARGET = $(BINDIR)\$(NAME).exe
-CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common $(INCLUDES) $(EXTRA_CFLAGS)
+CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common /Fd$(OBJDIR)\ /FS $(INCLUDES) $(EXTRA_CFLAGS)
 
 all: $(TARGET)
 

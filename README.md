@@ -243,11 +243,17 @@ Winshell/
 
 ## 새 명령어 추가하기
 
-1. 최상위에 명령 이름의 디렉터리를 만들고 `main.c` 를 작성합니다. 옵션은 `common/args.h` 의 `args_parse` 로 처리합니다
-   (`tee/main.c` 가 가장 작은 예입니다: 옵션 표, 처리 함수, `args_parse` 호출).
-2. `tee/Makefile` 을 복사하여 `NAME`, `SRCS`, `HDRS` 를 수정합니다. 도구의 `Makefile` 은 이 셋(필요하면 `INCLUDES`, `LIBS`)만 정하고
-   규칙은 `common.mk` 를 포함해서 얻습니다.
-3. 최상위 `Makefile` 의 `BUILD` 목록에 `build-<이름>` 을 추가합니다(`clean-<이름>` 은 자동으로 따라옵니다).
+1. `nmake new NAME=<이름>` 을 실행합니다. 동작하는 뼈대(`<이름>\main.c`, `Makefile`), `test\<이름>_test.c`, `test\gnu\<이름>.sh`
+   를 만들고 두 README 의 명령 표, 테스트 표, 디렉터리 구조에 항목을 넣습니다.
+2. `main.c` 를 작성합니다. 옵션은 `common/args.h` 의 `args_parse` 로 처리합니다(`tee/main.c` 가 가장 작은 예입니다).
+   도구의 `Makefile` 은 `NAME`, `SRCS`, `HDRS`(필요하면 `INCLUDES`, `LIBS`)만 정하고 규칙은 `common.mk` 를 포함해서 얻습니다.
+3. README 의 명령 표 행을 채우고 테스트와 GNU 대조(`test\gnu\<이름>.sh`)를 작성합니다.
+   `nmake check-registry` 가 README 나 테스트에 빠진 도구를 알려 줍니다.
+
+빌드 목록, 테스트 목록, GNU 대조 목록은 파일에서 만들어지므로 따로 적지 않습니다: `Makefile` 이 있는 디렉터리는 모두 도구이고
+(`scripts\list-tools.bat`), `test\*_test.c` 는 모두 테스트 프로그램이며(`scripts\list-tests.bat`; 다른 소스를 링크하는 단위
+테스트만 `test\Makefile` 에 규칙이 있습니다), `test\gnu\*.sh` 는 모두 GNU 대조 구간입니다. 디렉터리 구조와 빌드 구조 문장은
+`nmake sync-readme` 가 디렉터리에 맞춥니다.
 
 `common.mk` 는 `all`, `clean` 규칙을 제공하고 `BINDIR` 매크로로 출력 위치를, `EXTRA_CFLAGS` 로 추가 컴파일 옵션을 받습니다.
 

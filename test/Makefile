@@ -42,19 +42,24 @@
 ##   nmake check-asan    AddressSanitizer 로 빌드한 프로그램과 테스트로 모두 실행
 ##                       (먼저 루트에서 nmake asan 으로 bin-asan\ 을 만들어야 합니다; nmake asan 이 둘 다 합니다)
 ##
+## 새 테스트 프로그램은 이 디렉터리에 <이름>_test.c 를 만들면 됩니다(목록은 scripts\list-tests.bat 가 만듭니다).
+## 다른 소스를 링크해야 하는 단위 테스트만 아래에 규칙을 따로 적고, 위 TESTS 와 scripts\list-tests.bat 의 제외 목록에 넣습니다.
+##
 ## 결과물은 test\out\ (asan 은 test\out-asan\) 에 만들어지고(git 추적 제외),
 ## 작업 파일은 그 아래 work\ 에 만들어집니다.
 
 OUT    = out
 EXTRA  =
-CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common /I..\shell\include $(EXTRA)
+CFLAGS = /nologo /utf-8 /W3 /O2 /D_CRT_SECURE_NO_WARNINGS /I..\common /I..\shell\include /Fd$(OUT)\ /FS $(EXTRA)
 
-TESTS = $(OUT)\vpath_test.exe $(OUT)\parser_test.exe $(OUT)\args_test.exe $(OUT)\regex_test.exe \
-        $(OUT)\basic_test.exe $(OUT)\cat_test.exe $(OUT)\ls_test.exe $(OUT)\fileops_test.exe \
-        $(OUT)\dirs_test.exe $(OUT)\text_test.exe $(OUT)\filter_test.exe \
-        $(OUT)\shell_run_test.exe $(OUT)\shell_cd_test.exe $(OUT)\shell_lists_test.exe \
-        $(OUT)\shell_pipeline_test.exe $(OUT)\env_test.exe $(OUT)\lines_test.exe $(OUT)\grep_test.exe $(OUT)\shell_utf8_test.exe $(OUT)\sed_test.exe $(OUT)\expr_test.exe $(OUT)\find_test.exe $(OUT)\xargs_test.exe $(OUT)\names_test.exe $(OUT)\clock_test.exe $(OUT)\realpath_test.exe $(OUT)\which_test.exe $(OUT)\proc_test.exe $(OUT)\diff_test.exe $(OUT)\comm_test.exe \
-        $(OUT)\equiv_test.exe $(OUT)\limits_test.exe $(OUT)\sharing_test.exe $(OUT)\async_test.exe
+# The unit tests that link a part of the project have a rule of their own below; every other
+# *_test.c here is found by scripts\list-tests.bat (a new test file needs no entry in a list).
+!IF [..\scripts\list-tests.bat > tests.inc] != 0
+!ERROR ..\scripts\list-tests.bat could not be run
+!ENDIF
+!INCLUDE tests.inc
+
+TESTS = $(OUT)\vpath_test.exe $(OUT)\parser_test.exe $(OUT)\args_test.exe $(OUT)\regex_test.exe $(GENERIC_TESTS)
 
 all: $(TESTS)
 
@@ -80,10 +85,7 @@ check-asan:
 	@if not exist $(OUT) mkdir $(OUT)
 	cl $(CFLAGS) /Fo$(OUT)\ /Fe$@ $< /link /MANIFEST:EMBED /MANIFESTINPUT:..\common\utf8.manifest
 
-$(OUT)\basic_test.exe $(OUT)\cat_test.exe $(OUT)\ls_test.exe $(OUT)\fileops_test.exe $(OUT)\dirs_test.exe \
-$(OUT)\text_test.exe $(OUT)\filter_test.exe $(OUT)\shell_run_test.exe $(OUT)\shell_cd_test.exe \
-$(OUT)\shell_lists_test.exe $(OUT)\shell_pipeline_test.exe $(OUT)\equiv_test.exe $(OUT)\limits_test.exe \
-$(OUT)\sharing_test.exe $(OUT)\async_test.exe $(OUT)\env_test.exe $(OUT)\lines_test.exe $(OUT)\grep_test.exe $(OUT)\shell_utf8_test.exe $(OUT)\sed_test.exe $(OUT)\expr_test.exe $(OUT)\find_test.exe $(OUT)\xargs_test.exe $(OUT)\names_test.exe $(OUT)\clock_test.exe $(OUT)\realpath_test.exe $(OUT)\which_test.exe $(OUT)\proc_test.exe $(OUT)\diff_test.exe $(OUT)\comm_test.exe: testlib.h testtools.h
+$(GENERIC_TESTS): testlib.h testtools.h
 
 $(OUT)\vpath_test.exe: vpath_test.c testlib.h ..\common\vpath.c ..\common\vpath.h
 	@if not exist $(OUT) mkdir $(OUT)
