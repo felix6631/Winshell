@@ -40,9 +40,14 @@ int main(void) {
     write_text(workDir, "tools\\plain.txt", "x");
     make_directory("tools\\adir.exe");
 
+    // PATH keeps the old directories after the new ones (the runtime of AddressSanitizer is found there)
     {
-        char pathValue[MAX_PATH * 3];
-        snprintf(pathValue, sizeof pathValue, "PATH=%s\\tools", workDir);
+        const char* old = getenv("PATH");
+        static char original[32768];
+        static char pathValue[32768 + MAX_PATH * 4];
+
+        snprintf(original, sizeof original, "%s", old != NULL ? old : "");
+        snprintf(pathValue, sizeof pathValue, "PATH=%s\\tools;%s", workDir, original);
         _putenv(pathValue);
         _putenv("PATHEXT=.EXE;.CMD");
     }
@@ -72,9 +77,14 @@ int main(void) {
     make_directory("tools2");
     write_text(workDir, "tools2\\mytool.exe", "x");
     {
-        char pathValue[MAX_PATH * 4];
-        snprintf(pathValue, sizeof pathValue, "PATH=%s\\tools;%s\\tools2", workDir, workDir);
-        _putenv(pathValue);
+        static char original2[32768];
+        static char pathValue2[32768 + MAX_PATH * 4];
+        const char* current = getenv("PATH");
+        const char* rest = current != NULL ? strchr(current, ';') : NULL;     // after the directory of tools
+
+        snprintf(original2, sizeof original2, "%s", rest != NULL ? rest + 1 : "");
+        snprintf(pathValue2, sizeof pathValue2, "PATH=%s\\tools;%s\\tools2;%s", workDir, workDir, original2);
+        _putenv(pathValue2);
     }
     run_tool(workDir, "which", "-a mytool", "", &r);
     snprintf(expected, sizeof expected, "%s/tools/mytool.exe\n%s/tools2/mytool.exe\n", virtualWorkDir, virtualWorkDir);
