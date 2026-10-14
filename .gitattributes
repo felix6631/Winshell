@@ -1,0 +1,10 @@
+# Sources are LF in the repository and in the working tree, so Git has no line endings to convert and no warnings.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.exe binary
+*.obj binary
+*.pdb binary
+*.png binary
