@@ -16,6 +16,7 @@ Winshell은 리눅스 스타일의 쉘과 coreutils를 Windows에서 사용하�
 | `arch` | 완료 |
 | `basename` | 완료 (`-a -s -z`; 구분자는 `/` 와 `\`, 접미사는 이름 전체가 아닐 때만 제거) |
 | `date` | 완료 (`-d -u -r -I -R --rfc-3339`, `+FORMAT` 의 `%a %A %b %B %c %C %d %D %e %F %g %G %H %I %j %k %l %m %M %N %p %P %q %r %R %s %S %T %u %U %V %w %W %x %X %y %Y %z %:z %Z` 와 플래그 `- _ 0 ^ #` 및 너비; `-d` 는 `@초`, ISO 날짜와 시각, 월 이름, `now yesterday tomorrow`, `+2 days`, `3 weeks ago`, `next month`, 요일을 읽음; 1970 이전과 3000년 이후도 계산; 시계 설정 `-s` 는 미지원) |
+| `diff` | 완료 (일반 / `-u -U N` / `-c -C N` / `-NUM`, `-q -s -i -w -b -B -a -r -N -x --label --strip-trailing-cr`; GNU diff 와 같은 알고리즘(Myers, 중간 스네이크; 끝의 공통 줄, 이동, 큰 입력의 휴리스틱)이라 같은 결과를 고름; 디렉터리 비교; 종료 상태 0/1/2; 빠진 것: `-y -e -p --color` 등) |
 | `dirname` | 완료 (`-z`; 여러 이름) |
 | `cat` | 완료 (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `cp` | 완료 (`-a -f -i -n -p -r -R -t -v`) |
@@ -128,7 +129,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `date`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `which`, `xargs`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `which`, `xargs`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -160,6 +161,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `clock_test` | `sleep`, `date`: 대기 시간, 형식, `-d` 해석, ISO 주, 종료 상태 |
 | `which_test` | `which`: 프로젝트 `bin`, `PATH`, `PATHEXT`, 디렉터리, 경로가 있는 이름, `-a`, 종료 상태 |
 | `proc_test` | `kill`, `ps`: 실제 프로세스(sleep)에 대한 선택, 형식, 정렬, 시그널(종료 상태 128+번호, 중지/재개), 오류 |
+| `diff_test` | `diff`: 세 형식, 무시 옵션, 줄 끝, 마지막 줄바꿈 없음, 표준 입력, 디렉터리, 큰 입력, 종료 상태 |
 | `realpath_test` | `realpath`: 가상 경로, 존재 규칙, 상대 경로, 정션 |
 | `names_test` | `basename`, `dirname`: 구분자(`\` 포함), 접미사, NUL 끝, 루트 |
 | `xargs_test` | `xargs`: 묶음, 항목 해석, 파일, 종료 상태, 병렬 실행 |
@@ -181,7 +183,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
 - 테스트 프로그램은 `test\out\runall.exe` 가 여러 개씩 동시에 실행합니다(각자 작업 디렉터리가 달라 겹치지 않습니다). 통과한 프로그램은 요약 한 줄만, 실패한 프로그램은 전체 출력을 보여 줍니다. `WS_JOBS=N` 동시 실행 수(기본: 프로세서의 절반), `WS_VERBOSE=1` 모든 출력.
 - **AddressSanitizer:** `nmake asan` 은 모든 도구와 테스트를 `/fsanitize=address` 로 다시 빌드해서(`bin-asan\`, `test\out-asan\`) 실행합니다. 메모리 오류는 위치와 함께 보고되고 테스트가 실패합니다. 환경 변수 `WINSHELL_BIN` 으로 테스트가 쓰는 도구 디렉터리를 바꿀 수 있습니다.
-- **GNU 대조:** `test\gnu_compare.sh` 는 `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `tac`, `nl`, `paste`, `tee`, `grep`, `sed`, `expr`, `find`, `xargs`, `basename`, `dirname`, `date`, `realpath` 를 3천여 가지 옵션/입력 조합으로 GNU 도구와 비교합니다(`LC_ALL=C`, grep 은 `C.UTF-8`). 조합은 스크립트가 모으고 `test\out\gnu_batch.exe` 가 여러 개씩 동시에 실행합니다(MSYS bash 에서 프로그램을 띄우는 것보다 훨씬 빠르며 약 30초). `GNU_ONLY=grep` 으로 한 섹션만, `GNU_IMMEDIATE=1` 이면 스크립트가 직접 하나씩 실행합니다. 의도적으로 다른 부분(CRLF 줄 끝은 줄 내용이 아님, `sort -z/-h/-M/-V` 거부, UTF-8 문자 수)은 비교에서 빠져 있습니다.
+- **GNU 대조:** `test\gnu_compare.sh` 는 `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `tac`, `nl`, `paste`, `tee`, `grep`, `sed`, `expr`, `find`, `xargs`, `basename`, `dirname`, `date`, `realpath`, `diff` 를 3천여 가지 옵션/입력 조합으로 GNU 도구와 비교합니다(`LC_ALL=C`, grep 은 `C.UTF-8`). 조합은 스크립트가 모으고 `test\out\gnu_batch.exe` 가 여러 개씩 동시에 실행합니다(MSYS bash 에서 프로그램을 띄우는 것보다 훨씬 빠르며 약 30초). `GNU_ONLY=grep` 으로 한 섹션만, `GNU_IMMEDIATE=1` 이면 스크립트가 직접 하나씩 실행합니다. 의도적으로 다른 부분(CRLF 줄 끝은 줄 내용이 아님, `sort -z/-h/-M/-V` 거부, UTF-8 문자 수)은 비교에서 빠져 있습니다.
 - **다른 드라이브로의 `mv`:** 환경 변수 `WINSHELL_TEST_CROSS_DEVICE` 가 설정되면 `mv` 는 이름 변경을 시도하지 않고 복사 후 삭제 경로를 탑니다. 테스트는 이것으로 한 볼륨에서도 같은 코드를 실행하고, 쓸 수 있는 고정 드라이브가 하나 더 있으면 실제로도 시험합니다.
 - 새 명령을 추가하면 해당 기능의 `*_test.c` 에 항목을 추가하세요. 공통 도구는 `testlib.h`(검사, 프로세스 실행), `testtools.h`(작업 디렉터리, 도구 실행, 픽스처) 에 있습니다. 줄 끝은 LF 와 CRLF 를 구별하지 않고 비교합니다(`lf_only`).
 - Ctrl+C 처리는 실제 콘솔이 필요해서 자동 테스트에 포함하지 않았습니다.
@@ -200,6 +202,7 @@ Winshell/
 ├─ cut/            cut 명령
 ├─ echo/           echo 명령
 ├─ date/           date 명령
+├─ diff/           diff 명령
 ├─ dirname/        dirname 명령
 ├─ env/            env 명령
 ├─ expr/           expr 명령
