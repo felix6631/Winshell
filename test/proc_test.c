@@ -56,7 +56,9 @@ static void test_ps(void) {
     // the full format has the command line
     format_number(arguments, sizeof arguments, "-f -p ", pid, "");
     run_tool(workDir, "ps", arguments, "", &r);
-    CHECK(strncmp(r.out, "UID          PID    PPID  C STIME TTY          TIME CMD\n", 53) == 0);
+    // the UID column is as wide as the longest user name (a CI account has a long one)
+    CHECK(strncmp(r.out, "UID ", 4) == 0);
+    CHECK(strstr(r.out, " PID    PPID  C STIME TTY          TIME CMD\n") != NULL);
     CHECK(line_with(r.out, "sleep") != NULL);
     CHECK(line_with(r.out, " 60") != NULL);
     run_result_free(&r);
