@@ -43,10 +43,6 @@ static void print_usage(void) {
          "  [=CHAR=]        all characters which are equivalent to CHAR");
 }
 
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
-}
-
 typedef struct {
     unsigned char* bytes;
     size_t         length;
@@ -301,7 +297,7 @@ static int check_operands(const char** operands, int operandCount, int deleteMod
     } else {
         return 0;
     }
-    try_help();
+    args_usage_error(&spec);
     return 1;
 }
 

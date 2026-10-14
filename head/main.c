@@ -177,8 +177,7 @@ int main(int argc, char* argv[]) {
 
     text_binary_streams();
 
-    if (files == 0)
-        operands[files++] = "-";
+    files = (int)text_default_operands(operands, (size_t)files);
 
     for (i = 0; i < files; i++) {
         FILE* in;

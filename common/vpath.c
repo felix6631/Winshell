@@ -5,10 +5,6 @@
 #include <string.h>
 #include <windows.h>
 
-static int is_separator(char c) {
-    return c == '/' || c == '\\';
-}
-
 static int has_drive(const char* path) {
     return isalpha((unsigned char)path[0]) && path[1] == ':';
 }
@@ -51,7 +47,7 @@ static int apply_path(char* out, size_t size, const char* path) {
 
     for (;;) {
         const char* end = start;
-        while (*end != '\0' && !is_separator(*end))
+        while (*end != '\0' && !vpath_is_separator(*end))
             end++;
         if (push_component(out, size, start, (size_t)(end - start)) != 0)
             return -1;
@@ -211,7 +207,7 @@ int vpath_to_native(const char* path, char* out, size_t size) {
         return 0;
     }
 
-    if (has_drive(path) && !(path[2] == '\0' || is_separator(path[2]))) {
+    if (has_drive(path) && !(path[2] == '\0' || vpath_is_separator(path[2]))) {
         // "C:file" is relative to the current directory of that drive
         if (strlen(path) + 1 > size) {
             errno = ENAMETOOLONG;

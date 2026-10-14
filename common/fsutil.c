@@ -60,17 +60,13 @@ int fs_attributes(const char* native, DWORD* attributes) {
     return 0;
 }
 
-static int is_separator(char c) {
-    return c == '/' || c == '\\';
-}
-
 void fs_basename(const char* path, char* out, size_t size) {
     size_t length = strlen(path), end = length, start;
 
-    while (end > 1 && is_separator(path[end - 1]))
+    while (end > 1 && vpath_is_separator(path[end - 1]))
         end--;
     start = end;
-    while (start > 0 && !is_separator(path[start - 1]))
+    while (start > 0 && !vpath_is_separator(path[start - 1]))
         start--;
     // "C:" is a drive, not a name
     if (end - start == 2 && path[start + 1] == ':')
@@ -87,7 +83,7 @@ void fs_join(const char* directory, const char* name, char* out, size_t size) {
     size_t length = strlen(directory);
     if (length == 0)
         snprintf(out, size, "%s", name);
-    else if (is_separator(directory[length - 1]))
+    else if (vpath_is_separator(directory[length - 1]))
         snprintf(out, size, "%s%s", directory, name);
     else
         snprintf(out, size, "%s/%s", directory, name);
@@ -96,7 +92,7 @@ void fs_join(const char* directory, const char* name, char* out, size_t size) {
 /** Like fs_join, but with the Windows separator, for paths handed to Windows. */
 static void join_native(const char* directory, const char* name, char* out, size_t size) {
     size_t length = strlen(directory);
-    if (length == 0 || is_separator(directory[length - 1]))
+    if (length == 0 || vpath_is_separator(directory[length - 1]))
         snprintf(out, size, "%s%s", directory, name);
     else
         snprintf(out, size, "%s\\%s", directory, name);
@@ -156,13 +152,13 @@ int fs_is_inside(const char* nativeParent, const char* nativeChild) {
         return 0;
 
     length = strlen(parent);
-    while (length > 3 && is_separator(parent[length - 1]))
+    while (length > 3 && vpath_is_separator(parent[length - 1]))
         parent[--length] = '\0';
 
     if (_strnicmp(parent, child, length) != 0)
         return 0;
     // the match has to end at a component boundary
-    return child[length] == '\0' || is_separator(child[length]) || is_separator(parent[length - 1]);
+    return child[length] == '\0' || vpath_is_separator(child[length]) || vpath_is_separator(parent[length - 1]);
 }
 
 static void report(const FsOptions* o, const char* what, const char* path, const char* reason) {

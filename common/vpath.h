@@ -26,6 +26,11 @@
 
 #define VPATH_MAX 1024
 
+/** True for a path separator: Windows takes the slash and the backslash alike. */
+static __inline int vpath_is_separator(char c) {
+    return c == '/' || c == '\\';
+}
+
 /** Result of vpath_to_native: the path is the virtual root "/", which has no Windows path. */
 #define VPATH_ROOT 1
 

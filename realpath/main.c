@@ -86,10 +86,6 @@ static int on_option(int id, const char* value, void* context) {
 
 typedef enum { R_OK_, R_NOT_FOUND, R_NOT_DIRECTORY, R_TOO_LONG } Resolve;
 
-static int is_separator(char c) {
-    return c == '/' || c == '\\';
-}
-
 /** The attributes of an absolute virtual path (the root has none: it is a directory). */
 static int attributes_of(const char* absolute, DWORD* attributes) {
     char native[VPATH_MAX];
@@ -161,12 +157,12 @@ static Resolve resolve(const char* input, const Options* o, char* out, size_t si
     char start[VPATH_MAX], work[VPATH_MAX * 2];
     const char* p;
     size_t length = strlen(input);
-    int trailingSeparator = length > 1 && is_separator(input[length - 1]);
+    int trailingSeparator = length > 1 && vpath_is_separator(input[length - 1]);
 
     if (length == 0 || length >= VPATH_MAX)
         return length == 0 ? R_NOT_FOUND : R_TOO_LONG;
 
-    if (is_separator(input[0]) && !(length > 1 && is_separator(input[1]) && 0)) {
+    if (vpath_is_separator(input[0]) && !(length > 1 && vpath_is_separator(input[1]) && 0)) {
         strcpy(out, "/");
     } else if (length >= 2 && input[1] == ':') {
         // C:\dir: a Windows path with a drive
@@ -186,17 +182,17 @@ static Resolve resolve(const char* input, const Options* o, char* out, size_t si
         size_t n;
         int lastComponent;
 
-        while (is_separator(*p))
+        while (vpath_is_separator(*p))
             p++;
         if (*p == '\0')
             break;
         end = p;
-        while (*end != '\0' && !is_separator(*end))
+        while (*end != '\0' && !vpath_is_separator(*end))
             end++;
         n = (size_t)(end - p);
         {
             const char* q = end;
-            while (is_separator(*q))
+            while (vpath_is_separator(*q))
                 q++;
             lastComponent = *q == '\0';
         }

@@ -32,10 +32,6 @@ static void print_usage(void) {
          "A CR in front of the line feed belongs to the line ending, not to the line.");
 }
 
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
-}
-
 static int count_option, repeated, all_repeated, unique_only, ignore_case;
 static unsigned long skip_fields, skip_chars, check_chars = (unsigned long)-1;
 
@@ -177,7 +173,7 @@ int main(int argc, char* argv[]) {
 
     if (all_repeated && count_option) {
         fprintf(stderr, PROGRAM ": printing all duplicated lines and repeat counts is meaningless\n");
-        try_help();
+        args_usage_error(&spec);
         return 1;
     }
 

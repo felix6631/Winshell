@@ -23,10 +23,6 @@ static void print_usage(void) {
          "drives only: new directories are made below them, not beside them.");
 }
 
-static int is_separator(char c) {
-    return c == '/' || c == '\\';
-}
-
 /** The reason to show for a failed CreateDirectory. */
 static const char* create_error(DWORD error) {
     switch (error) {
@@ -48,12 +44,12 @@ static const char* create_error(DWORD error) {
 static void display_prefix(const char* display, size_t remaining, char* out, size_t size) {
     size_t length = strlen(display);
 
-    while (length > 1 && is_separator(display[length - 1]))
+    while (length > 1 && vpath_is_separator(display[length - 1]))
         length--;
     while (remaining > 0 && length > 0) {
-        while (length > 0 && !is_separator(display[length - 1]))
+        while (length > 0 && !vpath_is_separator(display[length - 1]))
             length--;
-        while (length > 1 && is_separator(display[length - 1]))
+        while (length > 1 && vpath_is_separator(display[length - 1]))
             length--;
         remaining--;
     }
@@ -72,12 +68,12 @@ static int directory_exists(const char* native) {
 static size_t root_length(const char* path, size_t length) {
     size_t start = 0;
 
-    if (length >= 3 && path[1] == ':' && is_separator(path[2])) {
+    if (length >= 3 && path[1] == ':' && vpath_is_separator(path[2])) {
         start = 3;
     } else if (path[0] == '\\' && path[1] == '\\') {
         size_t slashes = 0;
         for (start = 2; path[start] != '\0' && slashes < 2; start++)
-            if (is_separator(path[start]))
+            if (vpath_is_separator(path[start]))
                 slashes++;
     }
     return start;
@@ -104,13 +100,13 @@ static int make_directory(const char* display, const char* native, int parents, 
 
     // with -p: every missing component, from the top
     memcpy(path, native, length + 1);
-    while (length > 3 && is_separator(path[length - 1]))
+    while (length > 3 && vpath_is_separator(path[length - 1]))
         path[--length] = '\0';
 
     start = root_length(path, length);
 
     for (i = start; i < length; i++)
-        if (is_separator(path[i]) && i > start && !is_separator(path[i - 1]))
+        if (vpath_is_separator(path[i]) && i > start && !vpath_is_separator(path[i - 1]))
             components++;
     components++;       // the last one
 
@@ -118,9 +114,9 @@ static int make_directory(const char* display, const char* native, int parents, 
     for (i = start; i <= length; i++) {
         char saved;
 
-        if (i < length && !is_separator(path[i]))
+        if (i < length && !vpath_is_separator(path[i]))
             continue;
-        if (i == start || (i > 0 && is_separator(path[i - 1])))
+        if (i == start || (i > 0 && vpath_is_separator(path[i - 1])))
             continue;
 
         saved = path[i];

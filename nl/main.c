@@ -237,8 +237,7 @@ int main(int argc, char* argv[]) {
     operandCount = (size_t)count;
 
     text_binary_streams();
-    if (operandCount == 0)
-        operands[operandCount++] = "-";
+    operandCount = text_default_operands(operands, operandCount);
 
     state.style = o->bodyStyle;
     state.number = o->startNumber;

@@ -468,8 +468,9 @@ int main(int argc, char* argv[]) {
     if (result != ARGS_OK)
         return ARGS_STATUS(spec, result);
     if (count != 2) {
-        fprintf(stderr, "%s: %s operand%s\nTry '%s --help' for more information.\n", PROGRAM,
-                count < 2 ? "missing" : "extra", count < 2 ? "" : " after the second", PROGRAM);
+        fprintf(stderr, "%s: %s operand%s\n", PROGRAM, count < 2 ? "missing" : "extra",
+                count < 2 ? "" : " after the second");
+        args_usage_error(&spec);
         return 2;
     }
     text_binary_streams();

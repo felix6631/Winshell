@@ -50,10 +50,6 @@ static void print_usage(void) {
          "OPTS is one or more of bdfgin and r, which override global ordering options.");
 }
 
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
-}
-
 typedef struct {
     size_t startField, startChar;       // 0 based
     size_t endField, endChar;           // endField 0 based; endChar 0: to the end of the field
@@ -662,8 +658,7 @@ int main(int argc, char* argv[]) {
     o.order.reverse = o.global.reverse;
 
     text_binary_streams();
-    if (operandCount == 0)
-        operands[operandCount++] = "-";
+    operandCount = (int)text_default_operands(operands, (size_t)operandCount);
 
     status = load_lines(operands, operandCount, &entries, &entryCount);
     if (status < 0) {

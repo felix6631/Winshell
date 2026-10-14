@@ -26,23 +26,19 @@ static void print_usage(void) {
          "permissions do not on UNIX.");
 }
 
-static int is_separator(char c) {
-    return c == '/' || c == '\\';
-}
-
 /** Cuts the last component off a path. Returns 0 when nothing is left to cut. */
 static int strip_last_component(char* path, int keepRoot) {
     size_t length = strlen(path);
 
-    while (length > 1 && is_separator(path[length - 1]))
+    while (length > 1 && vpath_is_separator(path[length - 1]))
         path[--length] = '\0';
-    while (length > 0 && !is_separator(path[length - 1]))
+    while (length > 0 && !vpath_is_separator(path[length - 1]))
         length--;
     if (length == 0)
         return 0;
-    while (length > 1 && is_separator(path[length - 1]))
+    while (length > 1 && vpath_is_separator(path[length - 1]))
         length--;
-    if (keepRoot && length == 1 && is_separator(path[0])) {
+    if (keepRoot && length == 1 && vpath_is_separator(path[0])) {
         path[1] = '\0';
         return 1;
     }
@@ -53,7 +49,7 @@ static int strip_last_component(char* path, int keepRoot) {
 static int is_drive_root(const char* native) {
     size_t length = strlen(native);
     return (length == 2 && native[1] == ':') ||
-           (length == 3 && native[1] == ':' && is_separator(native[2]));
+           (length == 3 && native[1] == ':' && vpath_is_separator(native[2]));
 }
 
 /** Removes one directory. Returns 0, or 1 after reporting. */

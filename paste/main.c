@@ -260,8 +260,7 @@ int main(int argc, char* argv[]) {
         return 1;
 
     text_binary_streams();
-    if (count == 0)
-        operands[count++] = "-";
+    count = (int)text_default_operands(operands, (size_t)count);
 
     if (open_inputs(&inputs, operands, (size_t)count, o.zero ? '\0' : '\n') != 0)
         return 1;

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "args.h"
+#include "vpath.h"
 
 #define VERSION "0.1"
 #define PROGRAM "dirname"
@@ -41,25 +42,21 @@ static int on_option(int id, const char* value, void* context) {
     return 0;
 }
 
-static int is_separator(char c) {
-    return c == '/' || c == '\\';
-}
-
 /** The directory part of name: everything before the last component, without the separators in front of it. */
 static void write_dirname(const char* name, int terminator) {
     size_t length = strlen(name), i;
 
-    while (length > 1 && is_separator(name[length - 1]))
+    while (length > 1 && vpath_is_separator(name[length - 1]))
         length--;
 
     i = length;
-    while (i > 0 && !is_separator(name[i - 1]))
+    while (i > 0 && !vpath_is_separator(name[i - 1]))
         i--;
 
     if (i == 0) {
         fputs(".", stdout);             // no directory part
     } else {
-        while (i > 1 && is_separator(name[i - 1]))
+        while (i > 1 && vpath_is_separator(name[i - 1]))
             i--;
         fwrite(name, 1, i, stdout);
     }

@@ -35,10 +35,6 @@ static void print_usage(void) {
          "last field, and it is written back at the end of the line.");
 }
 
-static void try_help(void) {
-    fprintf(stderr, "Try '" PROGRAM " --help' for more information.\n");
-}
-
 typedef struct {
     size_t from, to;        // 1 based, inclusive; to == (size_t)-1 means to the end
 } Range;
@@ -273,7 +269,7 @@ static int on_option(int id, const char* value, void* context) {
                 o->delimiter = '\0';
             } else if (value[1] != '\0') {
                 fprintf(stderr, PROGRAM ": the delimiter must be a single character\n");
-                try_help();
+                args_usage_error(&spec);
                 return -1;
             } else {
                 o->delimiter = (unsigned char)value[0];
@@ -287,7 +283,7 @@ static int on_option(int id, const char* value, void* context) {
 
     if (o->mode != 0 && o->mode != newMode) {
         fprintf(stderr, PROGRAM ": only one type of list may be specified\n");
-        try_help();
+        args_usage_error(&spec);
         return -1;
     }
     o->mode = newMode;
@@ -318,13 +314,13 @@ int main(int argc, char* argv[]) {
 
     if (mode == 0) {
         fprintf(stderr, PROGRAM ": you must specify a list of bytes, characters, or fields\n");
-        try_help();
+        args_usage_error(&spec);
         return 1;
     }
     if (onlyDelimited && mode != 'f') {
         fprintf(stderr, PROGRAM ": suppressing non-delimited lines makes sense\n"
                         "\tonly when operating on fields\n");
-        try_help();
+        args_usage_error(&spec);
         return 1;
     }
     if (parse_list(&o.selection, list) != 0)
@@ -341,8 +337,7 @@ int main(int argc, char* argv[]) {
     }
 
     text_binary_streams();
-    if (operandCount == 0)
-        operands[operandCount++] = "-";
+    operandCount = (int)text_default_operands(operands, (size_t)operandCount);
 
     for (i = 0; i < operandCount; i++) {
         FILE* in;

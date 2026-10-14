@@ -60,14 +60,10 @@ static int compare_names(const void* left, const void* right) {
 
 /* ---- matching ------------------------------------------------------------ */
 
-static int is_separator(char c) {
-    return c == '/' || c == '\\';
-}
-
 /** Length of the pattern segment that starts at p, up to a separator or the end. */
 static size_t segment_length(const char* p) {
     size_t length = 0;
-    while (p[length] != '\0' && !is_separator(p[length])) {
+    while (p[length] != '\0' && !vpath_is_separator(p[length])) {
         if (p[length] == GLOB_ESCAPE && p[length + 1] != '\0')
             length++;
         length++;
@@ -259,7 +255,7 @@ static int matching_names(const char* directory, const char* segment, size_t len
         WIN32_FIND_DATAA data;
         HANDLE find;
         size_t n = strlen(native);
-        int needSeparator = n > 0 && !is_separator(native[n - 1]);
+        int needSeparator = n > 0 && !vpath_is_separator(native[n - 1]);
 
         snprintf(pattern, sizeof pattern, "%s%s*", native, needSeparator ? "\\" : "");
         find = FindFirstFileA(pattern, &data);

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "args.h"
+#include "vpath.h"
 
 #define VERSION "0.1"
 #define PROGRAM "basename"
@@ -58,10 +59,6 @@ static int on_option(int id, const char* value, void* context) {
     return 0;
 }
 
-static int is_separator(char c) {
-    return c == '/' || c == '\\';
-}
-
 /**
  * Writes the last component of name: trailing separators are not part of it, and a name of separators
  * only is "/". The suffix is removed when it is not the whole of the component.
@@ -69,13 +66,13 @@ static int is_separator(char c) {
 static void write_basename(const char* name, const char* suffix, int terminator) {
     size_t length = strlen(name), start, suffixLength = suffix != NULL ? strlen(suffix) : 0;
 
-    while (length > 1 && is_separator(name[length - 1]))
+    while (length > 1 && vpath_is_separator(name[length - 1]))
         length--;
-    if (length == 1 && is_separator(name[0])) {
+    if (length == 1 && vpath_is_separator(name[0])) {
         fputs("/", stdout);
     } else {
         start = length;
-        while (start > 0 && !is_separator(name[start - 1]))
+        while (start > 0 && !vpath_is_separator(name[start - 1]))
             start--;
         if (suffixLength > 0 && length - start > suffixLength &&
             memcmp(name + length - suffixLength, suffix, suffixLength) == 0)

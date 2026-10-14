@@ -130,8 +130,7 @@ int main(int argc, char* argv[]) {
     }
 
     text_binary_streams();
-    if (operandCount == 0)
-        operands[operandCount++] = "-";
+    operandCount = text_default_operands(operands, operandCount);
 
     {
         size_t i;

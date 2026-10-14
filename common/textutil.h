@@ -35,6 +35,18 @@ int text_parse_count(const char* text, TextCount* out);
  */
 int text_open(const char* program, const char* path, int plainMessage, FILE** out);
 
+/**
+ * The operands of a tool that reads files: with none, the one operand "-" (standard input). operands is
+ * the array args_parse gave, which has room for one more. Returns the number of operands.
+ */
+static __inline size_t text_default_operands(const char** operands, size_t count) {
+    if (count == 0) {
+        operands[0] = "-";
+        return 1;
+    }
+    return count;
+}
+
 /** Puts standard input and standard output into binary mode. */
 void text_binary_streams(void);
 

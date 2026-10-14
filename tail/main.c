@@ -304,8 +304,7 @@ int main(int argc, char* argv[]) {
 
     text_binary_streams();
 
-    if (operandCount == 0)
-        operands[operandCount++] = "-";
+    operandCount = (int)text_default_operands(operands, (size_t)operandCount);
 
     streams = calloc((size_t)operandCount, sizeof *streams);
     if (streams == NULL)

@@ -52,6 +52,9 @@ typedef int (*ArgsHandler)(int id, const char* value, void* context);
 #define ARGS_EXIT   1           /* --help or --version was answered: exit with status 0 */
 #define ARGS_FAILED (-1)        /* a message was printed: exit with spec->usageStatus */
 
+/** Writes "Try 'tool --help' for more information." to standard error: the line that ends a usage error. */
+void args_usage_error(const ArgsSpec* spec);
+
 /** The exit status of a tool whose args_parse did not return ARGS_OK. */
 #define ARGS_STATUS(spec, result) ((result) == ARGS_EXIT ? 0 : (spec).usageStatus)
 

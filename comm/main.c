@@ -200,7 +200,8 @@ int main(int argc, char* argv[]) {
             fprintf(stderr, "%s: missing operand after '%s'", PROGRAM, operands[0]);
         else
             fprintf(stderr, "%s: extra operand '%s'", PROGRAM, operands[2]);
-        fprintf(stderr, "\nTry '%s --help' for more information.\n", PROGRAM);
+        fputc('\n', stderr);
+        args_usage_error(&spec);
         return 1;
     }
     if (o.delimiter == NULL)

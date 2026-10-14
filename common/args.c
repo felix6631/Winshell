@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void try_help(const ArgsSpec* spec) {
+void args_usage_error(const ArgsSpec* spec) {
     fprintf(stderr, "Try '%s --help' for more information.\n", spec->program);
 }
 
@@ -59,19 +59,19 @@ static int parse_long(const ArgsSpec* spec, int argc, char* argv[], int* a, Args
             fprintf(stderr, "%s: option '%.*s' is ambiguous\n", spec->program, (int)(nameLength + 2), arg);
         else
             fprintf(stderr, "%s: unrecognized option '%.*s'\n", spec->program, (int)(nameLength + 2), arg);
-        try_help(spec);
+        args_usage_error(spec);
         return ARGS_FAILED;
     }
 
     if (option->argument == ARGS_NONE && value != NULL) {
         fprintf(stderr, "%s: option '--%s' doesn't allow an argument\n", spec->program, option->longName);
-        try_help(spec);
+        args_usage_error(spec);
         return ARGS_FAILED;
     }
     if (option->argument == ARGS_REQUIRED && value == NULL) {
         if (*a + 1 >= argc) {
             fprintf(stderr, "%s: option '--%s' requires an argument\n", spec->program, option->longName);
-            try_help(spec);
+            args_usage_error(spec);
             return ARGS_FAILED;
         }
         value = argv[++*a];
@@ -89,7 +89,7 @@ static int parse_short(const ArgsSpec* spec, int argc, char* argv[], int* a, Arg
 
         if (option == NULL) {
             fprintf(stderr, "%s: invalid option -- '%c'\n", spec->program, *p);
-            try_help(spec);
+            args_usage_error(spec);
             return ARGS_FAILED;
         }
         if (option->argument == ARGS_REQUIRED) {
@@ -99,7 +99,7 @@ static int parse_short(const ArgsSpec* spec, int argc, char* argv[], int* a, Arg
                 value = argv[++*a];
             } else {
                 fprintf(stderr, "%s: option requires an argument -- '%c'\n", spec->program, *p);
-                try_help(spec);
+                args_usage_error(spec);
                 return ARGS_FAILED;
             }
         }
