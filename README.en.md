@@ -15,12 +15,14 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion, wildcards, `cd` `export` `unset` `exit` |
 | `arch` | Done |
 | `basename` | Done (`-a -s -z`; both `/` and `\` separate; the suffix is removed unless it is the whole name) |
+| `date` | Done (`-d -u -r -I -R --rfc-3339`, the format letters `%a %A %b %B %c %C %d %D %e %F %g %G %H %I %j %k %l %m %M %N %p %P %q %r %R %s %S %T %u %U %V %w %W %x %X %y %Y %z %:z %Z` with the flags `- _ 0 ^ #` and a width; `-d` reads `@SECONDS`, ISO dates and times, month names, `now yesterday tomorrow`, `+2 days`, `3 weeks ago`, `next month`, weekdays; years before 1970 and after 3000 work; `-s` (setting the clock) is not supported) |
 | `dirname` | Done (`-z`; several names) |
 | `cat` | Done (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `cp` | Done (`-a -f -i -n -p -r -R -t -v`) |
 | `cut` | Done (`-b -c -f -d -s --complement --output-delimiter`) |
 | `echo` | Done (`-n`, `-e`, `-E`, `--help`, `--version`) |
 | `expr` | Done (`| & < <= = == != >= > + - * / % :`, `match substr index length +`, `( )`; integers of any size, numeric comparison when both are integers, UTF-8 characters, exit status 0/1/2/3) |
+| `realpath` | Done (`-e -m -s -q -z --relative-to --relative-base`; by default only the last component may be missing, junctions and symbolic links are followed, results are virtual paths `/c/...`) |
 | `sed` | Done (`-n -e -f -E -r -i[SUFFIX] -s -z -l -u --sandbox`; commands `s y p P d D n N g G h H x l = a i c r R w W q Q b t T z F : { }`, addresses `N $ /re/ first~step addr,+N addr,~N 0,/re/ !`, flags of `s` `g p N I w`, `\1`..`\9 & \U \L \u \l \E`; CR LF endings and a last line without an ending are kept, UTF-8 characters; the `e` command and the `M` flag are not supported) |
 | `find` | Done (`-H -L -P`, operators `( ) ! -a -o ,`, options `-maxdepth -mindepth -depth -follow`, tests `-name -iname -path -ipath -regex -iregex -regextype -type -xtype -size -empty -newer -mtime -atime -ctime -mmin -amin -cmin -readable -writable -executable`, actions `-print -print0 -printf -delete -prune -quit -exec -execdir -ok` (with `;` and `+`); `-perm -user -group -links -inum -ls -fprint` are not supported) |
 | `xargs` | Done (`-0 -a -d -E -e -I -i -L -l -n -P -p -r -s -t -x --show-limits`; quotes and backslashes, lines continued by a trailing blank, a command line limit of 30000 characters, parallel runs with `-P`; exit status 0/123/124/126/127/1) |
@@ -34,6 +36,7 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | `pwd` | Done (`-L`, `-P`, prints the virtual path) |
 | `rm` | Done (`-f -i -r -R -d -v`, `/` and the roots of drives and shares are never removed, not even with `--no-preserve-root`) |
 | `rmdir` | Done (`-p -v --ignore-fail-on-non-empty`) |
+| `sleep` | Done (`NUMBER[s|m|h|d]...` added up, fractions allowed) |
 | `sort` | Done (`-b -d -f -g -i -n -r -s -u -c -C -k -t -o`; byte order as in the C locale; `-h -M -V -z` are not supported) |
 | `tac` | Done (`-b -s`, CR LF kept; `-r` is not supported) |
 | `tail` | Done (`-n -c -f -s -q -v -NUM`, `-n +K`) |
@@ -122,7 +125,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `rm`, `rmdir`, `sed`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `xargs`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `date`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `xargs`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -151,6 +154,8 @@ The test programs are divided by feature (`test\`).
 | `lines_test` | `tee`, `tac`, `nl`, `paste`: line endings, separators, sections, standard input taken in turn |
 | `env_test` | `env`, `printenv`: changing the environment, `-i`/`-u`, running a command and its status, `-C` |
 | `regex_test` | unit tests of `common/regex.c`: basic and extended syntax, longest match, sets and classes, word boundaries, back references, UTF-8, error messages |
+| `clock_test` | `sleep`, `date`: waiting, formats, how `-d` reads, ISO weeks, exit status |
+| `realpath_test` | `realpath`: virtual paths, what has to exist, relative paths, junctions |
 | `names_test` | `basename`, `dirname`: separators (also `\`), suffixes, NUL endings, the root |
 | `xargs_test` | `xargs`: batches, how items are read, files, exit status, parallel runs |
 | `find_test` | `find`: order of the walk, depth, `-prune`, `-exec`/`-execdir`/`-ok`, `-delete`, virtual paths, Korean names, exit status |
@@ -171,7 +176,7 @@ The test programs are divided by feature (`test\`).
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
 - The test programs are run by `test\out\runall.exe`, several at a time (each has its own work directory, so they do not collide). A program that passed shows one summary line, a failed one all of its output. `WS_JOBS=N` sets how many run at once (default: half of the processors), `WS_VERBOSE=1` shows all output.
 - **AddressSanitizer:** `nmake asan` rebuilds all tools and tests with `/fsanitize=address` (`bin-asan\`, `test\out-asan\`) and runs them. Memory errors are reported with their location and fail the test. The environment variable `WINSHELL_BIN` selects the directory of tools the tests use.
-- **Comparison with GNU:** `test\gnu_compare.sh` compares `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `tac`, `nl`, `paste`, `tee`, `grep`, `sed`, `expr`, `find`, `xargs`, `basename` and `dirname` with the GNU tools in over three thousand combinations of options and inputs (`LC_ALL=C`, `C.UTF-8` for grep). The script collects the combinations and `test\out\gnu_batch.exe` runs them several at a time (much faster than starting the programs from the MSYS bash: about 30 seconds). `GNU_ONLY=grep` runs one section, `GNU_IMMEDIATE=1` makes the script run them itself, one by one. What is meant to differ (a CR LF ending is not part of the line, `sort -z/-h/-M/-V` are refused, characters are UTF-8) is not compared.
+- **Comparison with GNU:** `test\gnu_compare.sh` compares `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `tac`, `nl`, `paste`, `tee`, `grep`, `sed`, `expr`, `find`, `xargs`, `basename`, `dirname`, `date` and `realpath` with the GNU tools in over three thousand combinations of options and inputs (`LC_ALL=C`, `C.UTF-8` for grep). The script collects the combinations and `test\out\gnu_batch.exe` runs them several at a time (much faster than starting the programs from the MSYS bash: about 30 seconds). `GNU_ONLY=grep` runs one section, `GNU_IMMEDIATE=1` makes the script run them itself, one by one. What is meant to differ (a CR LF ending is not part of the line, `sort -z/-h/-M/-V` are refused, characters are UTF-8) is not compared.
 - **`mv` to another drive:** with the environment variable `WINSHELL_TEST_CROSS_DEVICE` set, `mv` does not try the rename and takes the copy-and-remove path. The tests run that code on one volume with it, and for real when a second fixed drive that can be written to exists.
 - When adding a command, add its cases to the `*_test.c` of its feature. The shared parts are `testlib.h` (checks, running programs) and `testtools.h` (work directory, running tools, fixtures). Output is compared without telling LF and CRLF apart (`lf_only`).
 - Ctrl+C handling is not part of the automatic tests because it needs a real console.
@@ -189,12 +194,15 @@ Winshell/
 ├─ cp/             cp command
 ├─ cut/            cut command
 ├─ echo/           echo command
+├─ date/           date command
 ├─ dirname/        dirname command
 ├─ env/            env command
 ├─ expr/           expr command
 ├─ find/           find command (parse.c parses the expression, eval.c walks and evaluates)
 ├─ grep/           grep command
+├─ realpath/       realpath command
 ├─ sed/            sed command (script.c parses the script, exec.c runs it)
+├─ sleep/          sleep command
 ├─ head/           head command
 ├─ ls/             ls command
 ├─ mkdir/          mkdir command
