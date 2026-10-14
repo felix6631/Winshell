@@ -3,7 +3,7 @@
 #   <name>\main.c, <name>\Makefile       a runnable placeholder (copies its files), built by nmake at once
 #   test\<name>_test.c                   the test file (found by test\Makefile without an entry)
 #   test\gnu\<name>.sh                   the comparison with GNU (found by gnu_compare.sh without an entry)
-#   README.md, README.en.md              the rows of the command table, test table and directory tree
+#   docs\REFERENCE.md, .en.md           the rows of the command table, test table and directory tree
 #
 # Nothing else has to be edited: the build list and the test list are made from the directories.
 # Usage:  nmake new NAME=<name>   (or: powershell -File scripts\new-command.ps1 <name>)
@@ -147,7 +147,7 @@ Write-Lf "$Name\Makefile"      $makefile.Replace('@NAME@', $Name)
 Write-Lf "test\${Name}_test.c" $test.Replace('@NAME@', $Name)
 Write-Lf "test\gnu\$Name.sh"   $gnu.Replace('@NAME@', $Name)
 
-# the README rows: the command table and the test table (after their last rows), the directory tree
+# the rows of the references: the command table and the test table (after their last rows), the directory tree
 function Add-After([string]$Path, [string]$LinePattern, [string]$NewLine) {
     $lines = [System.IO.File]::ReadAllLines((Join-Path $root $Path), [System.Text.Encoding]::UTF8)
     $last = -1
@@ -156,9 +156,9 @@ function Add-After([string]$Path, [string]$LinePattern, [string]$NewLine) {
     $out = @($lines[0..$last]) + $NewLine + @($lines[($last + 1)..($lines.Length - 1)])
     Write-Lf $Path (($out -join "`n") + "`n")
 }
-foreach ($readme in 'README.md', 'README.en.md') {
-    $state = if ($readme -eq 'README.md') { '구현 중 (뼈대)' } else { 'In progress (skeleton)' }
-    $testText = if ($readme -eq 'README.md') { 'TODO' } else { 'TODO' }
+foreach ($readme in 'docs\REFERENCE.md', 'docs\REFERENCE.en.md') {
+    $state = if ($readme -notmatch '\.en\.md$') { '구현 중 (뼈대)' } else { 'In progress (skeleton)' }
+    $testText = 'TODO'
     Add-After $readme '^\| `[a-z0-9_]+` \| (완료|Done|입력 루프|Input loop)' "| ``$Name`` | $state |"
     Add-After $readme '^\| `[a-z0-9_]+_test` \|' "| ``${Name}_test`` | ``$Name``: $testText |"
 }

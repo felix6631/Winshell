@@ -1,5 +1,5 @@
 ﻿# Looks for what a tool has not got yet. The build list, the test list and the GNU comparison are made from
-# the files, so what can be forgotten is the text: a row in the command tables of README.md and README.en.md,
+# the files, so what can be forgotten is the text: a row in the command tables of docs\REFERENCE.md and docs\REFERENCE.en.md,
 # a line of the directory tree, a test that runs the tool.
 #
 # Exit status 1 when something is missing (a hint is printed), 0 otherwise. Missing GNU comparisons are
@@ -12,7 +12,7 @@ Set-Location $root
 $tools = @(Get-ChildItem -Directory | Where-Object { (Test-Path (Join-Path $_.FullName 'Makefile')) -and ($_.Name -ne 'test') } |
            ForEach-Object { $_.Name } | Sort-Object)
 $readmes = @{}
-foreach ($r in 'README.md', 'README.en.md') {
+foreach ($r in 'docs\REFERENCE.md', 'docs\REFERENCE.en.md') {
     $readmes[$r] = [System.IO.File]::ReadAllText((Join-Path $root $r), [System.Text.Encoding]::UTF8)
 }
 $testSources = (Get-ChildItem test -Filter *.c | ForEach-Object { [System.IO.File]::ReadAllText($_.FullName) }) -join "`n"

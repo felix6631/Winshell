@@ -1,4 +1,4 @@
-﻿# Brings the parts of the READMEs that only list the tools in line with the directories:
+﻿# Brings the parts of the references (docs\REFERENCE.md, docs\REFERENCE.en.md) that only list the tools in line with the directories:
 #   - the sentence of the build structure that names the sub-projects
 #   - the directory tree (a missing tool gets a line "<name>/  <name> command" in front of common/)
 # What describes a tool (the command table) is written by hand; nmake check-registry looks for gaps.
@@ -13,7 +13,7 @@ $ordered = @('shell') + @($tools | Where-Object { $_ -ne 'shell' })
 $names = ($ordered | ForEach-Object { '`' + $_ + '`' }) -join ', '
 
 $utf8 = New-Object System.Text.UTF8Encoding($false)
-foreach ($readme in 'README.md', 'README.en.md') {
+foreach ($readme in 'docs\REFERENCE.md', 'docs\REFERENCE.en.md') {
     $path = Join-Path $root $readme
     $text = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8) -replace "`r`n", "`n"
     $text = [regex]::Replace($text, '\(`shell`(, `[a-z0-9_]+`)+\)', "($names)", 1)
@@ -26,7 +26,7 @@ foreach ($readme in 'README.md', 'README.en.md') {
         if ($lines[$i] -match '^├─ ([a-z0-9_]+)/ ') { $treeLines[$Matches[1]] = $true }
     }
     if ($commonAt -ge 0) {
-        $word = if ($readme -eq 'README.md') { '명령' } else { 'command' }
+        $word = if ($readme -notmatch '\.en\.md$') { '명령' } else { 'command' }
         foreach ($tool in $ordered) {
             if ($tool -eq 'shell' -or $treeLines.ContainsKey($tool)) { continue }
             $entry = ('├─ ' + $tool + '/').PadRight(17) + $tool + ' ' + $word

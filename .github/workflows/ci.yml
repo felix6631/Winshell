@@ -1,0 +1,35 @@
+name: Winshell CI
+
+# main 브랜치에 push되거나 pull request가 생성될 때 실행
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    # MSVC와 nmake를 사용해야 하므로 Windows 러너를 지정합니다.
+    runs-on: windows-latest
+
+    steps:
+      # 1. 리포지토리 코드 체크아웃
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. MSVC(cl.exe) 컴파일러 환경 설정
+      # x64 Native Tools Command Prompt 환경을 자동으로 만들어줍니다.
+      - name: Setup MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # 3. 프로젝트 전체 빌드 (Makefile 기반)
+      - name: Build Project
+        run: |
+          nmake
+
+      # 4. 자동화된 테스트 세트 실행
+      - name: Run Tests
+        run: |
+          nmake test

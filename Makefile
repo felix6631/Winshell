@@ -10,8 +10,8 @@
 ##   nmake gnu      GNU 도구와 출력 대조 (bash 와 GNU coreutils 필요)
 ##   nmake clean    모든 빌드 결과물 삭제
 ##
-##   nmake new NAME=이름   새 명령의 뼈대(소스, Makefile, 테스트, GNU 대조, README 항목)를 만듭니다
-##   nmake check-registry  모든 도구가 README 와 테스트에 있는지 확인합니다
+##   nmake new NAME=이름   새 명령의 뼈대(소스, Makefile, 테스트, GNU 대조, 레퍼런스 항목)를 만듭니다
+##   nmake check-registry  모든 도구가 레퍼런스(docs\)와 테스트에 있는지 확인합니다
 ##
 ## 새 명령어는 디렉터리와 Makefile 만 있으면 빌드 목록에 들어갑니다(nmake new 가 만들어 줍니다).
 
@@ -49,16 +49,16 @@ gnu: all
 	@cd test && $(MAKE) /nologo gnu
 	@bash test/gnu_compare.sh
 
-## 새 명령의 뼈대: nmake new NAME=이름 (소스, Makefile, 테스트, GNU 대조, README 항목)
+## 새 명령의 뼈대: nmake new NAME=이름 (소스, Makefile, 테스트, GNU 대조, 레퍼런스 항목)
 new:
 	@if "$(NAME)"=="" (echo usage: nmake new NAME=이름 & exit /b 1)
 	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts\new-command.ps1 $(NAME)
 
-## README 의 도구 목록(빌드 구조 문장, 디렉터리 구조)을 디렉터리에 맞춥니다.
+## 레퍼런스(docs\REFERENCE*.md)의 도구 목록(빌드 구조 문장, 디렉터리 구조)을 디렉터리에 맞춥니다.
 sync-readme:
 	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sync-readme.ps1
 
-## 모든 도구가 README 와 테스트에 있는지 확인합니다.
+## 모든 도구가 레퍼런스와 테스트에 있는지 확인합니다.
 check-registry:
 	@powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-registry.ps1
 
