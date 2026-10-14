@@ -1,4 +1,5 @@
 #include "builtin.h"
+#include "cwd.h"
 #include "vpath.h"
 #include "variables.h"
 #include <ctype.h>
@@ -7,21 +8,15 @@
 #include <string.h>
 #include <windows.h>
 
-void builtin_init(void) {
-    char cwd[VPATH_MAX];
-    if (vpath_getcwd(cwd, sizeof cwd) == 0)
-        _putenv_s("PWD", cwd);
-}
-
 static void cd_error(const char* target, const char* reason) {
     fprintf(stderr, "cd: %s: %s\n", target, reason);
 }
 
 /** Returns 0 when the directory was changed, 1 otherwise. */
 static int builtin_cd(char* const argv[]) {
-    char current[VPATH_MAX], absolute[VPATH_MAX], native[VPATH_MAX];
+    char absolute[VPATH_MAX];
     const char* target;
-    int argc = 0, kind, printTarget = 0;
+    int argc = 0, printTarget = 0;
 
     while (argv[argc] != NULL)
         argc++;
@@ -32,14 +27,14 @@ static int builtin_cd(char* const argv[]) {
     }
 
     if (argc == 1) {
-        target = getenv("USERPROFILE");
+        target = var_get("USERPROFILE");
         if (target == NULL || target[0] == '\0') {
             fprintf(stderr, "cd: home directory is not set\n");
             return 1;
         }
     } else if (strcmp(argv[1], "-") == 0) {
-        target = getenv("OLDPWD");
-        if (target == NULL || target[0] == '\0') {
+        target = cwd_previous();
+        if (target == NULL) {
             fprintf(stderr, "cd: OLDPWD not set\n");
             return 1;
         }
@@ -48,46 +43,21 @@ static int builtin_cd(char* const argv[]) {
         target = argv[1];
     }
 
-    if (vpath_getcwd(current, sizeof current) != 0)
-        strcpy(current, "/");
-
-    if (vpath_resolve(current, target, absolute, sizeof absolute) != 0) {
-        cd_error(target, "No such file or directory");
-        return 1;
-    }
-
-    kind = vpath_absolute_to_native(absolute, native, sizeof native);
-    if (kind == VPATH_ROOT) {
-        // the root has no directory of its own; the process waits on the system drive
-        if (vpath_root_native(native, sizeof native) != 0) {
-            cd_error(target, "No such file or directory");
-            return 1;
-        }
-    } else if (kind != 0) {
-        cd_error(target, "No such file or directory");
-        return 1;
-    } else {
-        DWORD attributes = GetFileAttributesA(native);
-        if (attributes == INVALID_FILE_ATTRIBUTES) {
-            cd_error(target, "No such file or directory");
-            return 1;
-        }
-        if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+    switch (cwd_change(target, absolute, sizeof absolute)) {
+        case CWD_OK:
+            if (printTarget)
+                puts(absolute);
+            return 0;
+        case CWD_NOT_DIRECTORY:
             cd_error(target, "Not a directory");
             return 1;
-        }
+        case CWD_DENIED:
+            cd_error(target, "Permission denied");
+            return 1;
+        default:
+            cd_error(target, "No such file or directory");
+            return 1;
     }
-
-    if (!SetCurrentDirectoryA(native)) {
-        cd_error(target, "Permission denied");
-        return 1;
-    }
-
-    _putenv_s("OLDPWD", current);
-    _putenv_s("PWD", absolute);
-    if (printTarget)
-        puts(absolute);
-    return 0;
 }
 
 static int valid_name(const char* name, size_t length) {

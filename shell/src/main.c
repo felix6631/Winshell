@@ -5,6 +5,7 @@
 #include "parser.h"
 #include "executer.h"
 #include "builtin.h"
+#include "cwd.h"
 #include "variables.h"
 #include "vec.h"
 
@@ -60,7 +61,7 @@ static void use_utf8_console(void) {
 static void winshell_terminalInit(void) {
     SetConsoleCtrlHandler(winshell_ctrlHandler, TRUE);
     use_utf8_console();
-    builtin_init();
+    cwd_init();
 }
 
 /**

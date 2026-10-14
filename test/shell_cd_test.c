@@ -215,10 +215,38 @@ static void test_glob(void) {
     SCRIPT_OUT(line, expected);
 }
 
+static void test_pwd_variables(void) {
+    char expected[MAX_PATH * 4];
+
+    printf("PWD and OLDPWD\n");
+    make_directory("sub");
+
+    // PWD is exported: the programs the shell starts find the directory by it
+    snprintf(expected, sizeof expected, "%s/sub\n", virtualWorkDir);
+    SCRIPT_OUT("cd sub\nprintenv PWD\n", expected);
+    SCRIPT_OUT("cd /\nprintenv PWD\n", "/\n");
+
+    // OLDPWD is the directory before the last change; cd - goes back and says where
+    snprintf(expected, sizeof expected, "%s/sub\n", virtualWorkDir);
+    SCRIPT_OUT("cd sub\ncd ..\nprintenv OLDPWD\n", expected);
+    snprintf(expected, sizeof expected, "%s\n%s\n", virtualWorkDir, virtualWorkDir);
+    SCRIPT_OUT("cd sub\ncd -\nprintenv PWD\n", expected);
+
+    // a cd that fails changes neither
+    snprintf(expected, sizeof expected, "%s\n", virtualWorkDir);
+    SCRIPT_OUT("cd nosuch\nprintenv PWD\n", expected);
+    SCRIPT_OUT("cd nosuch\nprintenv OLDPWD\n", "");
+
+    // an assignment cannot make the shell believe it is somewhere else
+    snprintf(expected, sizeof expected, "%s\n", virtualWorkDir);
+    SCRIPT_OUT("PWD=/bogus\npwd\n", expected);
+}
+
 int main(void) {
     tools_init("shell_cd_test");
 
     test_cd();
+    test_pwd_variables();
     test_glob();
     return test_summary("shell_cd_test");
 }

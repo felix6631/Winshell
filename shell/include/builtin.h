@@ -16,9 +16,6 @@
  *   exit [N], quit    leave the shell, with status N (default: that of the last command)
  */
 
-/** Makes the environment variable PWD describe the directory the shell starts in. */
-void builtin_init(void);
-
 /**
  * Runs the command when it is a builtin.
  * Returns non-zero when it was one, and zero when it has to be started as a program.

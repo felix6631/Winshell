@@ -69,7 +69,7 @@ See [Planned](#planned) for what is still to come.
   - In double quotes the value stays one word; outside of quotes it is cut at blanks into words, and wildcards in it act. Inside single quotes nothing is expanded. A variable that is not set makes no word when it stands alone outside of quotes.
   - A `$` that starts no name is just a `$`. Write a literal `$NAME` in single quotes (`\` is the path separator and is no escape).
   - `|`, `>`, `;` and the like in a value are not operators.
-  - `PWD` and `OLDPWD` are kept by `cd` as virtual paths. `HOME` and `USER` come from the Windows profile (`USERPROFILE`, `USERNAME`) when they are not defined; `HOME` is a virtual path.
+  - `PWD` and `OLDPWD` are kept as virtual paths by `shell/src/cwd.c` (only `cd` changes them); they are exported, so the children get them. `HOME` and `USER` come from the Windows profile (`USERPROFILE`, `USERNAME`) when they are not defined; `HOME` is a virtual path.
   - A `~` at the start of a word is `$HOME` (`~`, `~/docs`).
 - **Quoting**
   - `"a b"`: keeps the spaces. `\"` inside is a literal double quote.
