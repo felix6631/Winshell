@@ -3,6 +3,7 @@
 
 *.bat text eol=crlf
 *.cmd text eol=crlf
+*.yml text eol=crlf
 
 *.exe binary
 *.obj binary
