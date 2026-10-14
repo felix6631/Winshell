@@ -43,10 +43,14 @@ typedef struct {
     size_t from, to;        // 1 based, inclusive; to == (size_t)-1 means to the end
 } Range;
 
-static Range* ranges;
-static size_t rangeCount;
+/** The list of ranges that -b, -c or -f gave, and whether the rest is wanted instead (--complement). */
+typedef struct {
+    Range* ranges;
+    size_t rangeCount;
+    int    complement;
+} Selection;
 
-static int parse_list(const char* list) {
+static int parse_list(Selection* selection, const char* list) {
     const char* p = list;
 
     if (*p == '\0') {
@@ -95,9 +99,9 @@ static int parse_list(const char* list) {
             return -1;
         }
 
-        if (VEC_GROW_BY_COUNT(ranges, rangeCount) != 0)
+        if (VEC_GROW_BY_COUNT(selection->ranges, selection->rangeCount) != 0)
             return -1;
-        ranges[rangeCount++] = range;
+        selection->ranges[selection->rangeCount++] = range;
 
         if (*p == ',') {
             p++;
@@ -113,27 +117,28 @@ static int parse_list(const char* list) {
     return 0;
 }
 
-static int complement_option;
-
 /** Whether the item with this number (from 1) is selected. */
-static int selected(size_t number) {
+static int selected(const Selection* selection, size_t number) {
     size_t i;
     int in = 0;
-    for (i = 0; i < rangeCount; i++) {
-        if (number >= ranges[i].from && (ranges[i].to == (size_t)-1 || number <= ranges[i].to)) {
+    for (i = 0; i < selection->rangeCount; i++) {
+        const Range* r = &selection->ranges[i];
+        if (number >= r->from && (r->to == (size_t)-1 || number <= r->to)) {
             in = 1;
             break;
         }
     }
-    return complement_option ? !in : in;
+    return selection->complement ? !in : in;
 }
 
 /** The index of the first range of the list that holds the number, or -1. */
-static long range_of(size_t number) {
+static long range_of(const Selection* selection, size_t number) {
     size_t i;
-    for (i = 0; i < rangeCount; i++)
-        if (number >= ranges[i].from && (ranges[i].to == (size_t)-1 || number <= ranges[i].to))
+    for (i = 0; i < selection->rangeCount; i++) {
+        const Range* r = &selection->ranges[i];
+        if (number >= r->from && (r->to == (size_t)-1 || number <= r->to))
             return (long)i;
+    }
     return -1;
 }
 
@@ -141,8 +146,8 @@ static int is_continuation(unsigned char c) {
     return (c & 0xC0) == 0x80;
 }
 
-static int cut_stream(FILE* in, int mode, int delimiter, int onlyDelimited, const char* outputDelimiter,
-                      size_t delimiterLength) {
+static int cut_stream(const Selection* selection, FILE* in, int mode, int delimiter, int onlyDelimited,
+                      const char* outputDelimiter, size_t delimiterLength) {
     size_t length = 0, offset = 0;
     unsigned char* text = text_slurp(in, &length);
     TextLine line;
@@ -168,7 +173,7 @@ static int cut_stream(FILE* in, int mode, int delimiter, int onlyDelimited, cons
 
             for (i = 0; i <= line.length; i++) {
                 if (i == line.length || line.content[i] == (unsigned char)delimiter) {
-                    if (selected(field)) {
+                    if (selected(selection, field)) {
                         if (!first)
                             fwrite(outputDelimiter, 1, delimiterLength, stdout);
                         fwrite(line.content + fieldStart, 1, i - fieldStart, stdout);
@@ -199,10 +204,10 @@ static int cut_stream(FILE* in, int mode, int delimiter, int onlyDelimited, cons
                 }
                 number++;
 
-                if (selected(number)) {
+                if (selected(selection, number)) {
                     // with an output delimiter, one is written between the ranges of the list
-                    long range = complement_option ? 0 : range_of(number);
-                    int newRange = complement_option ? !previousSelected : range != previousRange;
+                    long range = selection->complement ? 0 : range_of(selection, number);
+                    int newRange = selection->complement ? !previousSelected : range != previousRange;
 
                     if (!first && newRange && delimiterLength > 0)
                         fwrite(outputDelimiter, 1, delimiterLength, stdout);
@@ -240,6 +245,7 @@ static const ArgsOption options[] = {
 static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 0 };
 
 typedef struct {
+    Selection   selection;
     int         mode;               // 'b', 'c' or 'f'
     const char* list;
     int         delimiter;
@@ -267,7 +273,7 @@ static int on_option(int id, const char* value, void* context) {
             }
             return 0;
         case OPT_ONLY_DELIMITED:   o->onlyDelimited = 1; return 0;
-        case OPT_COMPLEMENT:       complement_option = 1; return 0;
+        case OPT_COMPLEMENT:       o->selection.complement = 1; return 0;
         case OPT_OUTPUT_DELIMITER: o->outputDelimiter = value; return 0;
         default:                   return 0;
     }
@@ -283,13 +289,16 @@ static int on_option(int id, const char* value, void* context) {
 }
 
 int main(int argc, char* argv[]) {
-    Options o = { 0, NULL, '\t', 0, NULL };
+    Options o;
     int mode, delimiter, onlyDelimited, operandCount, status = 0, i, result;
     const char* outputDelimiter;
     size_t outputDelimiterLength = 0;
     const char** operands;
     const char* list;
     char single[2];
+
+    memset(&o, 0, sizeof o);
+    o.delimiter = '\t';
 
     result = args_parse(&spec, argc, argv, on_option, &o, &operands, &operandCount);
     if (result != ARGS_OK)
@@ -311,7 +320,7 @@ int main(int argc, char* argv[]) {
         try_help();
         return 1;
     }
-    if (parse_list(list) != 0)
+    if (parse_list(&o.selection, list) != 0)
         return 1;
 
     if (outputDelimiter == NULL) {
@@ -334,7 +343,7 @@ int main(int argc, char* argv[]) {
             status = 1;
             continue;
         }
-        if (cut_stream(in, mode, delimiter, onlyDelimited, outputDelimiter, outputDelimiterLength) != 0)
+        if (cut_stream(&o.selection, in, mode, delimiter, onlyDelimited, outputDelimiter, outputDelimiterLength) != 0)
             status = 1;
         if (in != stdin)
             fclose(in);

@@ -36,12 +36,17 @@ static void print_usage(void) {
          "a line with only a CR LF is empty. Lines keep their endings.");
 }
 
-static char bodyStyle = 't', headerStyle = 'n', footerStyle = 'n';
-static char delimiter[2] = { '\\', ':' };
-static long long increment = 1, startNumber = 1, joinBlank = 1, width = 6;
-static const char* format = "rn";
-static const char* separator = "\t";
-static int renumber = 1;
+/** What the options of nl say. */
+typedef struct {
+    char        bodyStyle, headerStyle, footerStyle;
+    char        delimiter[2];
+    long long   increment, startNumber, joinBlank, width;
+    const char* format;
+    const char* separator;
+    int         renumber;
+} NlOptions;
+
+static const NlOptions defaultOptions = { 't', 'n', 'n', { '\\', ':' }, 1, 1, 1, 6, "rn", "\t", 1 };
 
 static int parse_style(const char* text, char* out, const char* what) {
     if (text[0] != '\0' && text[1] == '\0' && (text[0] == 'a' || text[0] == 't' || text[0] == 'n')) {
@@ -71,33 +76,33 @@ static int parse_number(const char* text, long long* out, long long minimum, con
     return 0;
 }
 
-static int set_option(char option, const char* value) {
+static int set_option(NlOptions* o, char option, const char* value) {
     switch (option) {
-        case 'b': return parse_style(value, &bodyStyle, "body numbering");
-        case 'h': return parse_style(value, &headerStyle, "header numbering");
-        case 'f': return parse_style(value, &footerStyle, "footer numbering");
-        case 'i': return parse_number(value, &increment, 1, "invalid line number increment");
-        case 'l': return parse_number(value, &joinBlank, 1, "invalid line number of blank lines");
-        case 'v': return parse_number(value, &startNumber, -0x7FFFFFFFFFFFFFFFLL, "invalid starting line number");
-        case 'w': return parse_number(value, &width, 1, "invalid line number field width");
-        case 's': separator = value; return 0;
+        case 'b': return parse_style(value, &o->bodyStyle, "body numbering");
+        case 'h': return parse_style(value, &o->headerStyle, "header numbering");
+        case 'f': return parse_style(value, &o->footerStyle, "footer numbering");
+        case 'i': return parse_number(value, &o->increment, 1, "invalid line number increment");
+        case 'l': return parse_number(value, &o->joinBlank, 1, "invalid line number of blank lines");
+        case 'v': return parse_number(value, &o->startNumber, -0x7FFFFFFFFFFFFFFFLL, "invalid starting line number");
+        case 'w': return parse_number(value, &o->width, 1, "invalid line number field width");
+        case 's': o->separator = value; return 0;
         case 'n':
             if (strcmp(value, "ln") != 0 && strcmp(value, "rn") != 0 && strcmp(value, "rz") != 0) {
                 fprintf(stderr, PROGRAM ": invalid line numbering format: '%s'\n", value);
                 return -1;
             }
-            format = value;
+            o->format = value;
             return 0;
         case 'd':
             if (value[0] == '\0') {
                 fprintf(stderr, PROGRAM ": invalid section delimiter: ''\n");
                 return -1;
             }
-            delimiter[0] = value[0];
+            o->delimiter[0] = value[0];
             if (value[1] != '\0')
-                delimiter[1] = value[1];
+                o->delimiter[1] = value[1];
             else
-                delimiter[1] = ':';
+                o->delimiter[1] = ':';
             return 0;
     }
     return -1;
@@ -122,12 +127,12 @@ static const ArgsOption options[] = {
 static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 0 };
 
 static int on_option(int id, const char* value, void* context) {
-    (void)context;
+    NlOptions* o = context;
     if (id == 'p') {
-        renumber = 0;
+        o->renumber = 0;
         return 0;
     }
-    return set_option((char)id, value);
+    return set_option(o, (char)id, value);
 }
 
 /** Where the numbering is: the style of the section being read, the next number and the empty lines seen. */
@@ -141,24 +146,24 @@ typedef struct {
  * 1 for a footer delimiter, 2 for a body one and 3 for a header one: a line that is only the
  * section delimiter once, twice or three times. 0 for any other line.
  */
-static int delimiter_section(const TextLine* line) {
+static int delimiter_section(NlOptions* o, const TextLine* line) {
     size_t k;
 
     if (line->length < 2 || line->length % 2 != 0 || line->length > 6)
         return 0;
     for (k = 0; k < line->length; k++)
-        if (line->content[k] != (unsigned char)delimiter[k % 2])
+        if (line->content[k] != (unsigned char)o->delimiter[k % 2])
             return 0;
     return (int)(line->length / 2);
 }
 
 /** Whether the line gets a number in the section being read; counts the empty lines for -l. */
-static int is_numbered(Numbering* state, const TextLine* line) {
+static int is_numbered(NlOptions* o, Numbering* state, const TextLine* line) {
     int isBlank = line->length == 0;
 
     if (state->style == 'a') {
-        if (isBlank && joinBlank > 1) {
-            if (++state->blankCount < joinBlank)
+        if (isBlank && o->joinBlank > 1) {
+            if (++state->blankCount < o->joinBlank)
                 return 0;
         }
         state->blankCount = 0;
@@ -168,44 +173,44 @@ static int is_numbered(Numbering* state, const TextLine* line) {
 }
 
 /** The number, in its format and width, and the separator; spaces of that width for a line without one. */
-static void print_number(int numbered, long long number) {
-    int columns = (int)(width > 1000000 ? 1000000 : width);
+static void print_number(NlOptions* o, int numbered, long long number) {
+    int columns = (int)(o->width > 1000000 ? 1000000 : o->width);
 
     if (!numbered) {
-        printf("%*s", (int)(columns + (long long)strlen(separator)), "");
+        printf("%*s", (int)(columns + (long long)strlen(o->separator)), "");
         return;
     }
-    if (strcmp(format, "ln") == 0)
+    if (strcmp(o->format, "ln") == 0)
         printf("%-*lld", columns, number);
-    else if (strcmp(format, "rz") == 0)
+    else if (strcmp(o->format, "rz") == 0)
         printf("%0*lld", columns, number);
     else
         printf("%*lld", columns, number);
-    fputs(separator, stdout);
+    fputs(o->separator, stdout);
 }
 
 /** Numbers the lines of one input. Returns 0, or 1 when it could not be read. */
-static int number_lines(LineReader* reader, Numbering* state) {
+static int number_lines(NlOptions* o, LineReader* reader, Numbering* state) {
     TextLine line;
 
     while (text_reader_next(reader, &line)) {
-        int section = delimiter_section(&line);
+        int section = delimiter_section(o, &line);
         int numbered;
 
         // a delimiter starts a section and is written as an empty line
         if (section > 0) {
-            state->style = section == 3 ? headerStyle : (section == 2 ? bodyStyle : footerStyle);
-            if (renumber)
-                state->number = startNumber;
+            state->style = section == 3 ? o->headerStyle : (section == 2 ? o->bodyStyle : o->footerStyle);
+            if (o->renumber)
+                state->number = o->startNumber;
             state->blankCount = 0;
             fputs(line.ending == 2 ? "\r\n" : "\n", stdout);
             continue;
         }
 
-        numbered = is_numbered(state, &line);
-        print_number(numbered, state->number);
+        numbered = is_numbered(o, state, &line);
+        print_number(o, numbered, state->number);
         if (numbered)
-            state->number += increment;
+            state->number += o->increment;
 
         fwrite(line.content, 1, line.length, stdout);
         // a last line without an ending gets one, as GNU nl does
@@ -223,8 +228,10 @@ int main(int argc, char* argv[]) {
     size_t operandCount, i;
     int status = 0, count, result;
     Numbering state;
+    NlOptions options = defaultOptions;
+    NlOptions* o = &options;
 
-    result = args_parse(&spec, argc, argv, on_option, NULL, &operands, &count);
+    result = args_parse(&spec, argc, argv, on_option, o, &operands, &count);
     if (result != ARGS_OK)
         return ARGS_STATUS(spec, result);
     operandCount = (size_t)count;
@@ -233,8 +240,8 @@ int main(int argc, char* argv[]) {
     if (operandCount == 0)
         operands[operandCount++] = "-";
 
-    state.style = bodyStyle;
-    state.number = startNumber;
+    state.style = o->bodyStyle;
+    state.number = o->startNumber;
     state.blankCount = 0;
 
     for (i = 0; i < operandCount; i++) {
@@ -246,7 +253,7 @@ int main(int argc, char* argv[]) {
             continue;
         }
         text_reader_init(&reader, in, '\n');
-        if (number_lines(&reader, &state) != 0) {
+        if (number_lines(o, &reader, &state) != 0) {
             fprintf(stderr, PROGRAM ": %s: read error\n", operands[i]);
             status = 1;
         }

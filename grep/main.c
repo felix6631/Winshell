@@ -155,9 +155,7 @@ typedef struct {
     int         failed;                     /* a message was printed by the option handler */
 } Config;
 
-static Config config;
-
-static int add_pattern_text(const char* text) {
+static int add_pattern_text(Config* config, const char* text) {
     // a pattern with line feeds in it is several patterns
     char* copy = _strdup(text);
     char* part;
@@ -169,12 +167,12 @@ static int add_pattern_text(const char* text) {
         next = strchr(part, '\n');
         if (next != NULL)
             *next++ = '\0';
-        if (VEC_RESERVE(config.patterns, config.patternCapacity, config.patternCount + 1) != 0)
+        if (VEC_RESERVE(config->patterns, config->patternCapacity, config->patternCount + 1) != 0)
             return -1;
-        config.patterns[config.patternCount] = _strdup(part);
-        if (config.patterns[config.patternCount] == NULL)
+        config->patterns[config->patternCount] = _strdup(part);
+        if (config->patterns[config->patternCount] == NULL)
             return -1;
-        config.patternCount++;
+        config->patternCount++;
         if (next == NULL)
             break;
     }
@@ -183,7 +181,7 @@ static int add_pattern_text(const char* text) {
 }
 
 /** -f FILE: one pattern per line; an empty file means no pattern, which matches nothing. */
-static int add_pattern_file(const char* path) {
+static int add_pattern_file(Config* config, const char* path) {
     FILE* in;
     unsigned char* text;
     size_t length, offset = 0;
@@ -201,14 +199,14 @@ static int add_pattern_file(const char* path) {
 
     while (text_next_line(text, length, &offset, &line)) {
         char* one = malloc(line.length + 1);
-        if (one == NULL || VEC_RESERVE(config.patterns, config.patternCapacity, config.patternCount + 1) != 0) {
+        if (one == NULL || VEC_RESERVE(config->patterns, config->patternCapacity, config->patternCount + 1) != 0) {
             free(one);
             free(text);
             return -1;
         }
         memcpy(one, line.content, line.length);
         one[line.length] = '\0';
-        config.patterns[config.patternCount++] = one;
+        config->patterns[config->patternCount++] = one;
     }
     free(text);
     return 0;
@@ -237,67 +235,68 @@ static int add_to_list(const char*** list, size_t* count, size_t* capacity, cons
 }
 
 static int on_option(int id, const char* value, void* context) {
+    Config* config = context;
     (void)context;
 
     switch (id) {
-        case OPT_EXTENDED:   config.extended = 1; config.fixed = 0; return 0;
-        case OPT_FIXED:      config.fixed = 1; config.extended = 0; return 0;
-        case OPT_BASIC:      config.fixed = config.extended = 0; return 0;
+        case OPT_EXTENDED:   config->extended = 1; config->fixed = 0; return 0;
+        case OPT_FIXED:      config->fixed = 1; config->extended = 0; return 0;
+        case OPT_BASIC:      config->fixed = config->extended = 0; return 0;
         case OPT_PERL:
             fprintf(stderr, PROGRAM ": Perl matching is not supported\n");
             return -1;
-        case OPT_REGEXP:     config.patternGiven = 1; return add_pattern_text(value);
-        case OPT_FILE:       config.patternGiven = 1; return add_pattern_file(value);
-        case OPT_ICASE:      config.icase = 1; return 0;
-        case OPT_NO_ICASE:   config.icase = 0; return 0;
-        case OPT_WORD:       config.word = 1; return 0;
-        case OPT_LINE:       config.line = 1; return 0;
-        case OPT_NO_MESSAGES: config.noMessages = 1; return 0;
-        case OPT_INVERT:     config.invert = 1; return 0;
+        case OPT_REGEXP:     config->patternGiven = 1; return add_pattern_text(config, value);
+        case OPT_FILE:       config->patternGiven = 1; return add_pattern_file(config, value);
+        case OPT_ICASE:      config->icase = 1; return 0;
+        case OPT_NO_ICASE:   config->icase = 0; return 0;
+        case OPT_WORD:       config->word = 1; return 0;
+        case OPT_LINE:       config->line = 1; return 0;
+        case OPT_NO_MESSAGES: config->noMessages = 1; return 0;
+        case OPT_INVERT:     config->invert = 1; return 0;
         case OPT_VERSION:
             puts(PROGRAM " (Winshell) " VERSION);
             exit(0);
-        case OPT_MAX_COUNT:  return parse_number(value, &config.maxCount, "max");
-        case OPT_BYTE_OFFSET: config.byteOffset = 1; return 0;
-        case OPT_LINE_NUMBER: config.lineNumber = 1; return 0;
-        case OPT_LABEL:      config.label = value; return 0;
-        case OPT_WITH_FILENAME: config.withFilename = 1; return 0;
-        case OPT_NO_FILENAME: config.withFilename = 0; return 0;
-        case OPT_ONLY_MATCHING: config.onlyMatching = 1; return 0;
-        case OPT_QUIET:      config.quiet = 1; return 0;
+        case OPT_MAX_COUNT:  return parse_number(value, &config->maxCount, "max");
+        case OPT_BYTE_OFFSET: config->byteOffset = 1; return 0;
+        case OPT_LINE_NUMBER: config->lineNumber = 1; return 0;
+        case OPT_LABEL:      config->label = value; return 0;
+        case OPT_WITH_FILENAME: config->withFilename = 1; return 0;
+        case OPT_NO_FILENAME: config->withFilename = 0; return 0;
+        case OPT_ONLY_MATCHING: config->onlyMatching = 1; return 0;
+        case OPT_QUIET:      config->quiet = 1; return 0;
         case OPT_BINARY_FILES:
             if (strcmp(value, "text") == 0) {
-                config.text = 1;
+                config->text = 1;
             } else if (strcmp(value, "without-match") == 0) {
-                config.withoutMatch = 1;
+                config->withoutMatch = 1;
             } else if (strcmp(value, "binary") != 0) {
                 fprintf(stderr, PROGRAM ": unknown binary-files type\n");
                 return -1;
             }
             return 0;
-        case OPT_TEXT:       config.text = 1; return 0;
-        case OPT_NO_BINARY:  config.withoutMatch = 1; return 0;
-        case OPT_RECURSIVE:  config.recursive = 1; return 0;
+        case OPT_TEXT:       config->text = 1; return 0;
+        case OPT_NO_BINARY:  config->withoutMatch = 1; return 0;
+        case OPT_RECURSIVE:  config->recursive = 1; return 0;
         case OPT_INCLUDE:
-            return add_to_list(&config.include, &config.includeCount, &config.includeCapacity, value);
+            return add_to_list(&config->include, &config->includeCount, &config->includeCapacity, value);
         case OPT_EXCLUDE:
-            return add_to_list(&config.exclude, &config.excludeCount, &config.excludeCapacity, value);
+            return add_to_list(&config->exclude, &config->excludeCount, &config->excludeCapacity, value);
         case OPT_EXCLUDE_DIR:
-            return add_to_list(&config.excludeDir, &config.excludeDirCount, &config.excludeDirCapacity, value);
-        case OPT_FILES_WITHOUT: config.listNonMatching = 1; config.listMatching = 0; return 0;
-        case OPT_FILES_WITH:   config.listMatching = 1; config.listNonMatching = 0; return 0;
-        case OPT_COUNT:      config.count = 1; return 0;
-        case OPT_NULL:       config.nullAfterName = 1; return 0;
-        case OPT_NULL_DATA:  config.nullData = 1; return 0;
-        case OPT_BEFORE:     return parse_number(value, &config.before, "context");
-        case OPT_AFTER:      return parse_number(value, &config.after, "context");
+            return add_to_list(&config->excludeDir, &config->excludeDirCount, &config->excludeDirCapacity, value);
+        case OPT_FILES_WITHOUT: config->listNonMatching = 1; config->listMatching = 0; return 0;
+        case OPT_FILES_WITH:   config->listMatching = 1; config->listNonMatching = 0; return 0;
+        case OPT_COUNT:      config->count = 1; return 0;
+        case OPT_NULL:       config->nullAfterName = 1; return 0;
+        case OPT_NULL_DATA:  config->nullData = 1; return 0;
+        case OPT_BEFORE:     return parse_number(value, &config->before, "context");
+        case OPT_AFTER:      return parse_number(value, &config->after, "context");
         case OPT_CONTEXT:
-        case ARGS_NUMBER:    return parse_number(value, &config.context, "context");
+        case ARGS_NUMBER:    return parse_number(value, &config->context, "context");
         case OPT_DIRECTORIES:
             if (strcmp(value, "recurse") == 0) {
-                config.recursive = 1;
+                config->recursive = 1;
             } else if (strcmp(value, "skip") == 0) {
-                config.skipDirectories = 1;
+                config->skipDirectories = 1;
             } else if (strcmp(value, "read") != 0) {
                 fprintf(stderr, PROGRAM ": invalid argument '%s' for '--directories'\n", value);
                 return -1;
@@ -368,13 +367,13 @@ static int matches_any(const char** list, size_t count, const char* name) {
 }
 
 /** Whether a file is to be searched, by its base name and the --include and --exclude lists. */
-static int file_selected(const char* name) {
+static int file_selected(Config* config, const char* name) {
     char base[VPATH_MAX];
 
     fs_basename(name, base, sizeof base);
-    if (config.includeCount > 0 && !matches_any(config.include, config.includeCount, base))
+    if (config->includeCount > 0 && !matches_any(config->include, config->includeCount, base))
         return 0;
-    return !matches_any(config.exclude, config.excludeCount, base);
+    return !matches_any(config->exclude, config->excludeCount, base);
 }
 
 /* ---- the output ---------------------------------------------------------------------- */
@@ -398,22 +397,22 @@ typedef struct {
     char         terminator;
 } Search;
 
-static void print_name(const char* name, char separator, const Search* s) {
+static void print_name(Config* config, const char* name, char separator, const Search* s) {
     (void)s;
     fputs(name, stdout);
-    if (config.nullAfterName)
+    if (config->nullAfterName)
         fputc('\0', stdout);
     else
         fputc(separator, stdout);
 }
 
-static void print_prefix(const Search* s, const char* name, unsigned long long lineNo,
+static void print_prefix(Config* config, const Search* s, const char* name, unsigned long long lineNo,
                          unsigned long long offset, char separator) {
     if (s->prefixName)
-        print_name(name, separator, s);
-    if (config.lineNumber)
+        print_name(config, name, separator, s);
+    if (config->lineNumber)
         printf("%llu%c", lineNo, separator);
-    if (config.byteOffset)
+    if (config->byteOffset)
         printf("%llu%c", offset, separator);
 }
 
@@ -423,9 +422,9 @@ static void write_ending(int ending, const Search* s) {
     fputc(s->terminator, stdout);
 }
 
-static void print_line(const Search* s, const char* name, const unsigned char* content, size_t length, int ending,
+static void print_line(Config* config, const Search* s, const char* name, const unsigned char* content, size_t length, int ending,
                        unsigned long long lineNo, unsigned long long offset, char separator) {
-    print_prefix(s, name, lineNo, offset, separator);
+    print_prefix(config, s, name, lineNo, offset, separator);
     fwrite(content, 1, length, stdout);
     write_ending(ending, s);
 }
@@ -469,14 +468,14 @@ static void print_separator(Search* s, const Context* c, unsigned long long firs
     }
 }
 
-static void flush_before(Search* s, Context* c, const char* name) {
+static void flush_before(Config* config, Search* s, Context* c, const char* name) {
     long k;
 
     for (k = 0; k < c->ringCount; k++) {
         const SavedLine* slot = &c->ring[(c->ringStart + k) % c->ringSize];
         if (k == 0)
             print_separator(s, c, slot->lineNo);
-        print_line(s, name, slot->data, slot->length, slot->ending, slot->lineNo, slot->offset, '-');
+        print_line(config, s, name, slot->data, slot->length, slot->ending, slot->lineNo, slot->offset, '-');
         c->lastPrinted = slot->lineNo;
         s->printedSomething = 1;
     }
@@ -484,7 +483,7 @@ static void flush_before(Search* s, Context* c, const char* name) {
 }
 
 /** -o: each non-empty match of the line on a line of its own. */
-static void print_matches(Search* s, const char* name, const TextLine* line, unsigned long long lineNo,
+static void print_matches(Config* config, Search* s, const char* name, const TextLine* line, unsigned long long lineNo,
                           unsigned long long offset) {
     size_t from = 0, start, end;
 
@@ -495,7 +494,7 @@ static void print_matches(Search* s, const char* name, const TextLine* line, uns
                 break;
             continue;
         }
-        print_prefix(s, name, lineNo, offset + s->input.offset[start], ':');
+        print_prefix(config, s, name, lineNo, offset + s->input.offset[start], ':');
         fwrite(line->content + s->input.offset[start], 1, s->input.offset[end] - s->input.offset[start], stdout);
         write_ending(1, s);
         from = end;
@@ -503,23 +502,23 @@ static void print_matches(Search* s, const char* name, const TextLine* line, uns
 }
 
 /** Whether the line is selected: it matches (or, with -v, does not). */
-static int line_selected(Search* s, const TextLine* line) {
+static int line_selected(Config* config, Search* s, const TextLine* line) {
     size_t start, end;
 
     if (regex_input_set(&s->input, line->content, line->length) != 0) {
         fprintf(stderr, PROGRAM ": memory exhausted\n");
         exit(2);
     }
-    return (regex_search(s->regex, &s->input, 0, &start, &end) != 0) != (config.invert != 0);
+    return (regex_search(s->regex, &s->input, 0, &start, &end) != 0) != (config->invert != 0);
 }
 
 /** A regular file is looked at in its first block: a NUL there makes it a binary file. */
-static int looks_binary(FILE* in) {
+static int looks_binary(Config* config, FILE* in) {
     unsigned char block[32768];
     long where;
     size_t got, k;
 
-    if (in == stdin || config.text || config.nullData)
+    if (in == stdin || config->text || config->nullData)
         return 0;
     where = ftell(in);
     if (where < 0)
@@ -539,20 +538,20 @@ static unsigned long long line_bytes(const TextLine* line) {
 }
 
 /** Writes a selected line (with the context before it). Returns 1 when only "Binary file ... matches" was said. */
-static int print_selected(Search* s, Context* c, const char* name, const TextLine* line, unsigned long long lineNo,
+static int print_selected(Config* config, Search* s, Context* c, const char* name, const TextLine* line, unsigned long long lineNo,
                           unsigned long long offset, long after, int binary) {
-    if (binary && !config.text) {
+    if (binary && !config->text) {
         printf("Binary file %s matches\n", name);
         s->printedSomething = 1;
         return 1;
     }
-    flush_before(s, c, name);
-    if (config.onlyMatching) {
-        if (!config.invert)
-            print_matches(s, name, line, lineNo, offset);
+    flush_before(config, s, c, name);
+    if (config->onlyMatching) {
+        if (!config->invert)
+            print_matches(config, s, name, line, lineNo, offset);
     } else {
         print_separator(s, c, lineNo);
-        print_line(s, name, line->content, line->length, line->ending, lineNo, offset, ':');
+        print_line(config, s, name, line->content, line->length, line->ending, lineNo, offset, ':');
     }
     c->lastPrinted = lineNo;
     s->printedSomething = 1;
@@ -561,12 +560,12 @@ static int print_selected(Search* s, Context* c, const char* name, const TextLin
 }
 
 /** After the last selected line (-m): the lines of trailing context that are still due. */
-static void print_trailing_context(Search* s, Context* c, LineReader* reader, const char* name,
+static void print_trailing_context(Config* config, Search* s, Context* c, LineReader* reader, const char* name,
                                    unsigned long long* lineNo, unsigned long long* offset) {
     TextLine line;
     while (c->afterLeft > 0 && text_reader_next(reader, &line)) {
         (*lineNo)++;
-        print_line(s, name, line.content, line.length, line.ending, *lineNo, *offset, '-');
+        print_line(config, s, name, line.content, line.length, line.ending, *lineNo, *offset, '-');
         *offset += line_bytes(&line);
         c->afterLeft--;
     }
@@ -581,23 +580,23 @@ static void free_context(Context* c) {
     free(c->ring);
 }
 
-static unsigned long long search_stream(Search* s, FILE* in, const char* name) {
+static unsigned long long search_stream(Config* config, Search* s, FILE* in, const char* name) {
     LineReader reader;
     TextLine line;
     Context c;
     unsigned long long selected = 0, lineNo = 0, offset = 0;
-    int binary = looks_binary(in);
-    int quietOutput = config.count || config.listMatching || config.listNonMatching || config.quiet;
-    long after = config.onlyMatching ? 0 : s->after;
+    int binary = looks_binary(config, in);
+    int quietOutput = config->count || config->listMatching || config->listNonMatching || config->quiet;
+    long after = config->onlyMatching ? 0 : s->after;
 
     memset(&c, 0, sizeof c);
-    c.ringSize = config.onlyMatching ? 0 : s->before;
+    c.ringSize = config->onlyMatching ? 0 : s->before;
     if (c.ringSize > 0)
         c.ring = calloc((size_t)c.ringSize, sizeof *c.ring);
     if (c.ringSize > 0 && c.ring == NULL)
         c.ringSize = 0;
 
-    if (binary && config.withoutMatch)
+    if (binary && config->withoutMatch)
         goto done;
 
     text_reader_init(&reader, in, s->terminator);
@@ -609,29 +608,29 @@ static unsigned long long search_stream(Search* s, FILE* in, const char* name) {
         lineNo++;
         offset += line_bytes(&line);
 
-        if (!binary && !config.text && !config.nullData && memchr(line.content, '\0', line.length) != NULL)
+        if (!binary && !config->text && !config->nullData && memchr(line.content, '\0', line.length) != NULL)
             binary = 1;
-        if (binary && config.withoutMatch)
+        if (binary && config->withoutMatch)
             break;
 
-        isSelected = line_selected(s, &line);
+        isSelected = line_selected(config, s, &line);
         if (isSelected) {
             selected++;
             s->matchedAny = 1;
-            if (config.quiet)
+            if (config->quiet)
                 break;
-            if (config.listMatching || config.listNonMatching)
+            if (config->listMatching || config->listNonMatching)
                 break;
-            if (!quietOutput && print_selected(s, &c, name, &line, lineNo, thisOffset, after, binary))
+            if (!quietOutput && print_selected(config, s, &c, name, &line, lineNo, thisOffset, after, binary))
                 break;
-            if (config.maxCount >= 0 && selected >= (unsigned long long)config.maxCount) {
+            if (config->maxCount >= 0 && selected >= (unsigned long long)config->maxCount) {
                 if (!quietOutput)
-                    print_trailing_context(s, &c, &reader, name, &lineNo, &offset);
+                    print_trailing_context(config, s, &c, &reader, name, &lineNo, &offset);
                 break;
             }
         } else if (!quietOutput) {
             if (c.afterLeft > 0) {
-                print_line(s, name, line.content, line.length, line.ending, lineNo, thisOffset, '-');
+                print_line(config, s, name, line.content, line.length, line.ending, lineNo, thisOffset, '-');
                 c.lastPrinted = lineNo;
                 c.afterLeft--;
             } else {
@@ -654,17 +653,17 @@ done:
 }
 
 /** What is written about a file after it was searched: a count, or its name for -l and -L. */
-static void report_file(const Search* s, const char* name, unsigned long long selected) {
-    if (config.quiet)
+static void report_file(Config* config, const Search* s, const char* name, unsigned long long selected) {
+    if (config->quiet)
         return;
-    if (config.count) {
+    if (config->count) {
         if (s->prefixName)
-            print_name(name, ':', s);
+            print_name(config, name, ':', s);
         printf("%llu\n", selected);
     }
-    if ((config.listMatching && selected > 0) || (config.listNonMatching && selected == 0)) {
+    if ((config->listMatching && selected > 0) || (config->listNonMatching && selected == 0)) {
         fputs(name, stdout);
-        fputc(config.nullAfterName ? '\0' : '\n', stdout);
+        fputc(config->nullAfterName ? '\0' : '\n', stdout);
     }
 }
 
@@ -672,27 +671,27 @@ static void report_open_error(Search* s) {
     s->error = 1;
 }
 
-static void search_file(Search* s, const char* path, const char* display) {
+static void search_file(Config* config, Search* s, const char* path, const char* display) {
     FILE* in;
     unsigned long long selected;
 
     if (strcmp(path, "-") == 0) {
         in = stdin;
-        display = config.label != NULL ? config.label : "(standard input)";
+        display = config->label != NULL ? config->label : "(standard input)";
     } else {
         char native[VPATH_MAX];
         DWORD attributes;
 
         if (vpath_to_native(path, native, sizeof native) == 0 && fs_attributes(native, &attributes) == 0 &&
             (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
-            if (!config.skipDirectories) {
-                if (!config.noMessages)
+            if (!config->skipDirectories) {
+                if (!config->noMessages)
                     fprintf(stderr, PROGRAM ": %s: Is a directory\n", display);
                 s->error = 1;       // as GNU grep: the status is 2, whatever -s says
             }
             return;
         }
-        if (config.noMessages) {
+        if (config->noMessages) {
             // the message of text_open is not wanted: open it quietly
             if (vpath_to_native(path, native, sizeof native) != 0 || (in = fopen(native, "rb")) == NULL) {
                 report_open_error(s);
@@ -704,12 +703,12 @@ static void search_file(Search* s, const char* path, const char* display) {
         }
     }
 
-    selected = search_stream(s, in, display);
+    selected = search_stream(config, s, in, display);
     if (in != stdin)
         fclose(in);
     else
         clearerr(stdin);
-    report_file(s, display, selected);
+    report_file(config, s, display, selected);
 }
 
 /* ---- directories ---------------------------------------------------------------------- */
@@ -718,10 +717,10 @@ static int compare_names(const void* left, const void* right) {
     return strcmp(*(const char* const*)left, *(const char* const*)right);
 }
 
-static void search_path(Search* s, const char* path, const char* display, int topLevel);
+static void search_path(Config* config, Search* s, const char* path, const char* display, int topLevel);
 
 /** The files of a directory, in the order of their names. */
-static void search_directory(Search* s, const char* path, const char* display, const char* native) {
+static void search_directory(Config* config, Search* s, const char* path, const char* display, const char* native) {
     char pattern[VPATH_MAX + 4];
     WIN32_FIND_DATAA data;
     HANDLE find;
@@ -755,63 +754,63 @@ static void search_directory(Search* s, const char* path, const char* display, c
             snprintf(childDisplay, sizeof childDisplay, "%s", names[i]);
         else
             fs_join(display, names[i], childDisplay, sizeof childDisplay);
-        search_path(s, childPath, childDisplay, 0);
+        search_path(config, s, childPath, childDisplay, 0);
         free(names[i]);
     }
     free(names);
 }
 
-static void search_path(Search* s, const char* path, const char* display, int topLevel) {
+static void search_path(Config* config, Search* s, const char* path, const char* display, int topLevel) {
     char native[VPATH_MAX];
     DWORD attributes;
 
-    if (config.quiet && s->matchedAny)
+    if (config->quiet && s->matchedAny)
         return;
 
     if (strcmp(path, "-") != 0 && vpath_to_native(path, native, sizeof native) == 0 &&
-        fs_attributes(native, &attributes) == 0 && (attributes & FILE_ATTRIBUTE_DIRECTORY) && config.recursive) {
+        fs_attributes(native, &attributes) == 0 && (attributes & FILE_ATTRIBUTE_DIRECTORY) && config->recursive) {
         char base[VPATH_MAX];
         fs_basename(path, base, sizeof base);
-        if (!topLevel && matches_any(config.excludeDir, config.excludeDirCount, base))
+        if (!topLevel && matches_any(config->excludeDir, config->excludeDirCount, base))
             return;
-        search_directory(s, path, display, native);
+        search_directory(config, s, path, display, native);
         return;
     }
 
-    if (!topLevel || config.includeCount > 0 || config.excludeCount > 0) {
-        if (strcmp(path, "-") != 0 && !file_selected(path))
+    if (!topLevel || config->includeCount > 0 || config->excludeCount > 0) {
+        if (strcmp(path, "-") != 0 && !file_selected(config, path))
             return;
     }
-    search_file(s, path, display);
+    search_file(config, s, path, display);
 }
 
 /* ---- main ------------------------------------------------------------------------------ */
 
 /** The flags of the regular expression engine that the options ask for. */
-static int regex_flags(void) {
+static int regex_flags(Config* config) {
     int flags = 0;
 
-    if (config.extended)
+    if (config->extended)
         flags |= REGEX_EXTENDED;
-    if (config.fixed)
+    if (config->fixed)
         flags |= REGEX_FIXED;
-    if (config.icase)
+    if (config->icase)
         flags |= REGEX_ICASE;
-    if (config.line)
+    if (config->line)
         flags |= REGEX_LINE;
-    else if (config.word)
+    else if (config->word)
         flags |= REGEX_WORD;
     return flags;
 }
 
 /** -A, -B and -C: how many lines of context come after and before a selected line. */
-static void set_context(Search* search) {
-    long context = config.context >= 0 ? config.context : 0;
+static void set_context(Config* config, Search* search) {
+    long context = config->context >= 0 ? config->context : 0;
 
-    search->after = config.after >= 0 ? config.after : context;
-    search->before = config.before >= 0 ? config.before : context;
-    search->context = search->after > 0 || search->before > 0 || config.context >= 0 ||
-                      config.after >= 0 || config.before >= 0;
+    search->after = config->after >= 0 ? config->after : context;
+    search->before = config->before >= 0 ? config->before : context;
+    search->context = search->after > 0 || search->before > 0 || config->context >= 0 ||
+                      config->after >= 0 || config->before >= 0;
 }
 
 int main(int argc, char* argv[]) {
@@ -820,23 +819,26 @@ int main(int argc, char* argv[]) {
     char error[256];
     Search search;
     const char* defaultOperand = "-";
+    Config settings;
+    Config* config = &settings;
 
-    config.withFilename = -1;
-    config.maxCount = -1;
-    config.after = config.before = config.context = -1;
+    memset(config, 0, sizeof *config);
+    config->withFilename = -1;
+    config->maxCount = -1;
+    config->after = config->before = config->context = -1;
 
-    result = args_parse(&spec, argc, argv, on_option, NULL, &operands, &operandCount);
+    result = args_parse(&spec, argc, argv, on_option, config, &operands, &operandCount);
     if (result != ARGS_OK)
         return ARGS_STATUS(spec, result);
 
     // the pattern: -e and -f, or else the first operand
-    if (!config.patternGiven) {
+    if (!config->patternGiven) {
         if (operandCount == 0) {
             fprintf(stderr, "Usage: " PROGRAM " [OPTION]... PATTERNS [FILE]...\n"
                             "Try '" PROGRAM " --help' for more information.\n");
             return 2;
         }
-        if (add_pattern_text(operands[0]) != 0) {
+        if (add_pattern_text(config, operands[0]) != 0) {
             fprintf(stderr, PROGRAM ": memory exhausted\n");
             return 2;
         }
@@ -845,35 +847,35 @@ int main(int argc, char* argv[]) {
     }
 
     memset(&search, 0, sizeof search);
-    search.regex = regex_compile(config.patterns, config.patternCount, regex_flags(), error, sizeof error);
+    search.regex = regex_compile(config->patterns, config->patternCount, regex_flags(config), error, sizeof error);
     if (search.regex == NULL) {
         fprintf(stderr, PROGRAM ": %s\n", error);
         return 2;
     }
 
-    set_context(&search);
-    search.terminator = config.nullData ? '\0' : '\n';
+    set_context(config, &search);
+    search.terminator = config->nullData ? '\0' : '\n';
 
     text_binary_streams();
 
-    if (config.recursive && operandCount == 0)
+    if (config->recursive && operandCount == 0)
         defaultOperand = ".";
 
-    search.prefixName = config.withFilename == 1 ||
-                        (config.withFilename < 0 && (operandCount > 1 || config.recursive));
+    search.prefixName = config->withFilename == 1 ||
+                        (config->withFilename < 0 && (operandCount > 1 || config->recursive));
 
-    if (config.maxCount == 0)
+    if (config->maxCount == 0)
         return 1;
 
     if (operandCount == 0) {
         if (strcmp(defaultOperand, ".") == 0)
-            search_path(&search, ".", "", 1);
+            search_path(config, &search, ".", "", 1);
         else
-            search_path(&search, "-", "-", 1);
+            search_path(config, &search, "-", "-", 1);
     }
     for (i = 0; i < operandCount; i++) {
-        search_path(&search, operands[i], operands[i], 1);
-        if (config.quiet && search.matchedAny)
+        search_path(config, &search, operands[i], operands[i], 1);
+        if (config->quiet && search.matchedAny)
             break;
     }
 
@@ -881,7 +883,7 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, PROGRAM ": write error\n");
         return 2;
     }
-    if (config.quiet && search.matchedAny)
+    if (config->quiet && search.matchedAny)
         return 0;
     if (search.error)
         return 2;

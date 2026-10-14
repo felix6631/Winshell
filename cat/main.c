@@ -30,13 +30,14 @@ typedef struct {
     int showNonprinting;// -v  use ^ and M- notation, except for LFD and TAB
 } Options;
 
-static Options opts;
-
-/* state that continues across files: cat treats its input as one stream */
-static int atLineStart = 1;
-static int pendingCR = 0;       // a CR at the start of a line, undecided whether CRLF follows
-static int blankRun = 0;        // number of empty lines just seen
-static unsigned long long lineNumber = 0;
+/** What cat keeps while it copies: the options, and the state that continues across files (the input is one stream). */
+typedef struct {
+    Options            opts;
+    int                atLineStart;
+    int                pendingCR;       // a CR at the start of a line, undecided whether CRLF follows
+    int                blankRun;        // number of empty lines just seen
+    unsigned long long lineNumber;
+} Cat;
 
 static void print_usage(void) {
     puts("Usage: cat [OPTION]... [FILE]...\n"
@@ -67,9 +68,9 @@ static void emit(int c) {
 }
 
 /** Writes one byte of a line, converting it when -T or -v ask for it. */
-static void emit_char(unsigned char c) {
+static void emit_char(Cat* x, unsigned char c) {
     if (c == '\t') {
-        if (opts.showTabs) {
+        if (x->opts.showTabs) {
             emit('^');
             emit('I');
         } else {
@@ -78,7 +79,7 @@ static void emit_char(unsigned char c) {
         return;
     }
 
-    if (opts.showNonprinting) {
+    if (x->opts.showNonprinting) {
         if (c >= 128) {
             emit('M');
             emit('-');
@@ -98,16 +99,16 @@ static void emit_char(unsigned char c) {
     emit(c);
 }
 
-static void print_number(void) {
-    printf("%6llu\t", ++lineNumber);
+static void print_number(Cat* x) {
+    printf("%6llu\t", ++x->lineNumber);
 }
 
 /** Starts a line that is not empty. */
-static void begin_line(void) {
-    blankRun = 0;
-    atLineStart = 0;
-    if (opts.number || opts.numberNonblank)
-        print_number();
+static void begin_line(Cat* x) {
+    x->blankRun = 0;
+    x->atLineStart = 0;
+    if (x->opts.number || x->opts.numberNonblank)
+        print_number(x);
 }
 
 /**
@@ -118,74 +119,74 @@ static void begin_line(void) {
  * CR is only spelled out as ^M when -v asks for nonprinting characters,
  * which is what GNU cat shows for such a file.
  */
-static void write_eol(int crlf) {
-    if (crlf && opts.showNonprinting) {
+static void write_eol(Cat* x, int crlf) {
+    if (crlf && x->opts.showNonprinting) {
         emit('^');
         emit('M');
     }
-    if (opts.showEnds)
+    if (x->opts.showEnds)
         emit('$');
-    if (crlf && !opts.showNonprinting)
+    if (crlf && !x->opts.showNonprinting)
         emit('\r');
     emit('\n');
 }
 
 /** An empty line. */
-static void blank_line(int crlf) {
-    blankRun++;
-    if (opts.squeeze && blankRun > 1)
+static void blank_line(Cat* x, int crlf) {
+    x->blankRun++;
+    if (x->opts.squeeze && x->blankRun > 1)
         return;
-    if (opts.number && !opts.numberNonblank)
-        print_number();
-    write_eol(crlf);
+    if (x->opts.number && !x->opts.numberNonblank)
+        print_number(x);
+    write_eol(x, crlf);
 }
 
-static void process_char(unsigned char c) {
+static void process_char(Cat* x, unsigned char c) {
     int crlf = 0;
 
-    if (pendingCR) {
-        pendingCR = 0;
+    if (x->pendingCR) {
+        x->pendingCR = 0;
         if (c == '\n') {
             crlf = 1;
         } else {
             // a CR on its own is an ordinary character
-            if (atLineStart)
-                begin_line();
-            emit_char('\r');
+            if (x->atLineStart)
+                begin_line(x);
+            emit_char(x, '\r');
         }
     }
 
     if (c == '\r') {
-        pendingCR = 1;
+        x->pendingCR = 1;
         return;
     }
 
     if (c == '\n') {
-        if (atLineStart) {
-            blank_line(crlf);
+        if (x->atLineStart) {
+            blank_line(x, crlf);
         } else {
-            write_eol(crlf);
-            atLineStart = 1;
+            write_eol(x, crlf);
+            x->atLineStart = 1;
         }
         return;
     }
 
-    if (atLineStart)
-        begin_line();
-    emit_char(c);
+    if (x->atLineStart)
+        begin_line(x);
+    emit_char(x, c);
 }
 
-static void finish(void) {
-    if (pendingCR) {
-        pendingCR = 0;
-        if (atLineStart)
-            begin_line();
-        emit_char('\r');
+static void finish(Cat* x) {
+    if (x->pendingCR) {
+        x->pendingCR = 0;
+        if (x->atLineStart)
+            begin_line(x);
+        emit_char(x, '\r');
     }
 }
 
 /** Copies one stream to standard output. Returns 0, or -1 after a read error. */
-static int copy_stream(FILE* in, int plain) {
+static int copy_stream(Cat* x, FILE* in, int plain) {
     static unsigned char buffer[65536];
     long got;
     size_t length, i;
@@ -198,7 +199,7 @@ static int copy_stream(FILE* in, int plain) {
                 return -1;
         } else {
             for (i = 0; i < length; i++)
-                process_char(buffer[i]);
+                process_char(x, buffer[i]);
         }
         fflush(stdout);
     }
@@ -213,7 +214,7 @@ static const char* open_error(const char* path) {
     return strerror(errno);
 }
 
-static int cat_file(const char* path, int plain) {
+static int cat_file(Cat* x, const char* path, int plain) {
     FILE* in;
     int status;
 
@@ -240,7 +241,7 @@ static int cat_file(const char* path, int plain) {
         }
     }
 
-    status = copy_stream(in, plain);
+    status = copy_stream(x, in, plain);
     if (status != 0)
         fprintf(stderr, PROGRAM ": %s: %s\n", path, strerror(errno));
 
@@ -271,18 +272,18 @@ static const ArgsOption options[] = {
 static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, options, 1, 0, 0 };
 
 static int on_option(int id, const char* value, void* context) {
+    Cat* x = context;
     (void)value;
-    (void)context;
     switch (id) {
-        case OPT_ALL:             opts.showNonprinting = opts.showEnds = opts.showTabs = 1; break;
-        case OPT_NUMBER_NONBLANK: opts.numberNonblank = 1; break;
-        case OPT_E:               opts.showNonprinting = opts.showEnds = 1; break;
-        case OPT_ENDS:            opts.showEnds = 1; break;
-        case OPT_NUMBER:          opts.number = 1; break;
-        case OPT_SQUEEZE:         opts.squeeze = 1; break;
-        case OPT_T:               opts.showNonprinting = opts.showTabs = 1; break;
-        case OPT_TABS:            opts.showTabs = 1; break;
-        case OPT_NONPRINTING:     opts.showNonprinting = 1; break;
+        case OPT_ALL:             x->opts.showNonprinting = x->opts.showEnds = x->opts.showTabs = 1; break;
+        case OPT_NUMBER_NONBLANK: x->opts.numberNonblank = 1; break;
+        case OPT_E:               x->opts.showNonprinting = x->opts.showEnds = 1; break;
+        case OPT_ENDS:            x->opts.showEnds = 1; break;
+        case OPT_NUMBER:          x->opts.number = 1; break;
+        case OPT_SQUEEZE:         x->opts.squeeze = 1; break;
+        case OPT_T:               x->opts.showNonprinting = x->opts.showTabs = 1; break;
+        case OPT_TABS:            x->opts.showTabs = 1; break;
+        case OPT_NONPRINTING:     x->opts.showNonprinting = 1; break;
         default: break;
     }
     return 0;
@@ -291,25 +292,30 @@ static int on_option(int id, const char* value, void* context) {
 int main(int argc, char* argv[]) {
     const char** files;
     int fileCount, status = 0, i, plain, result;
+    Cat state;
+    Cat* x = &state;
 
-    result = args_parse(&spec, argc, argv, on_option, NULL, &files, &fileCount);
+    memset(x, 0, sizeof *x);
+    x->atLineStart = 1;
+
+    result = args_parse(&spec, argc, argv, on_option, x, &files, &fileCount);
     if (result != ARGS_OK)
         return ARGS_STATUS(spec, result);
 
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
 
-    plain = !(opts.number || opts.numberNonblank || opts.squeeze ||
-              opts.showEnds || opts.showTabs || opts.showNonprinting);
+    plain = !(x->opts.number || x->opts.numberNonblank || x->opts.squeeze ||
+              x->opts.showEnds || x->opts.showTabs || x->opts.showNonprinting);
 
     if (fileCount == 0)
         files[fileCount++] = "-";
 
     for (i = 0; i < fileCount; i++) {
-        if (cat_file(files[i], plain) != 0)
+        if (cat_file(x, files[i], plain) != 0)
             status = 1;
     }
-    finish();
+    finish(x);
 
     if (fflush(stdout) != 0) {
         fprintf(stderr, PROGRAM ": write error: %s\n", strerror(errno));

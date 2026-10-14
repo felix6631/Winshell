@@ -523,61 +523,64 @@ static char* index_of(const char* s, const char* chars) {
 
 /* ---- the parser: one function for every level of precedence --------------------------------- */
 
-static char** args;
-static int argCount, position;
+/** Where the parse is in the arguments. */
+typedef struct {
+    char** args;
+    int    argCount, position;
+} Parser;
 
-static const char* peek_arg(void) {
-    return position < argCount ? args[position] : NULL;
+static const char* peek_arg(Parser* st) {
+    return st->position < st->argCount ? st->args[st->position] : NULL;
 }
 
-static int next_is(const char* word) {
-    if (position < argCount && strcmp(args[position], word) == 0) {
-        position++;
+static int next_is(Parser* st, const char* word) {
+    if (st->position < st->argCount && strcmp(st->args[st->position], word) == 0) {
+        st->position++;
         return 1;
     }
     return 0;
 }
 
-static const char* take_arg(void) {
-    if (position >= argCount)
+static const char* take_arg(Parser* st) {
+    if (st->position >= st->argCount)
         die(STATUS_INVALID, "syntax error: missing argument%s", "");
-    return args[position++];
+    return st->args[st->position++];
 }
 
-static char* eval_or(int evaluate);
+static char* eval_or(Parser* st, int evaluate);
 
 /** A parenthesis, a keyword with its arguments, or a plain string. */
-static char* eval_primary(int evaluate) {
-    const char* token = take_arg();
+static char* eval_primary(Parser* st, int evaluate) {
+    const char* token = take_arg(st);
 
     if (strcmp(token, "(") == 0) {
-        char* value = eval_or(evaluate);
-        if (!next_is(")"))
+        char* value = eval_or(st, evaluate);
+        if (!next_is(st, ")"))
             die(STATUS_INVALID, "syntax error: expecting ')'%s", "");
         return value;
     }
     if (strcmp(token, "+") == 0)
-        return copy_string(take_arg());
+        return copy_string(take_arg(st));
 
     if (strcmp(token, "length") == 0) {
-        char* s = eval_primary(evaluate);
+        char* s = eval_primary(st, evaluate);
         char number[32];
         sprintf(number, "%zu", characters(s, NULL));
         free(s);
         return copy_string(number);
     }
     if (strcmp(token, "match") == 0 || strcmp(token, "index") == 0) {
-        char* s = eval_primary(evaluate);
-        char* t = eval_primary(evaluate);
+        char* s = eval_primary(st, evaluate);
+        char* t = eval_primary(st, evaluate);
         char* result = evaluate ? (token[0] == 'm' ? match(s, t) : index_of(s, t)) : copy_string("");
         free(s);
         free(t);
         return result;
     }
     if (strcmp(token, "substr") == 0) {
-        char* s = eval_primary(evaluate);
-        char* pos = eval_primary(evaluate);
-        char* length = eval_primary(evaluate);
+        char* s = eval_primary(st, evaluate);
+        char* pos = eval_primary(st, evaluate);
+        char* length = eval_primary(st, evaluate);
         char* result = evaluate ? substring(s, pos, length) : copy_string("");
         free(s);
         free(pos);
@@ -589,10 +592,10 @@ static char* eval_primary(int evaluate) {
     return copy_string(token);
 }
 
-static char* eval_match(int evaluate) {
-    char* left = eval_primary(evaluate);
-    while (next_is(":")) {
-        char* right = eval_primary(evaluate);
+static char* eval_match(Parser* st, int evaluate) {
+    char* left = eval_primary(st, evaluate);
+    while (next_is(st, ":")) {
+        char* right = eval_primary(st, evaluate);
         char* result = evaluate ? match(left, right) : copy_string("");
         free(left);
         free(right);
@@ -601,10 +604,10 @@ static char* eval_match(int evaluate) {
     return left;
 }
 
-static char* eval_term(int evaluate) {
-    char* left = eval_match(evaluate);
+static char* eval_term(Parser* st, int evaluate) {
+    char* left = eval_match(st, evaluate);
     for (;;) {
-        const char* p = peek_arg();
+        const char* p = peek_arg(st);
         char op;
         char* right;
         char* result;
@@ -612,8 +615,8 @@ static char* eval_term(int evaluate) {
         if (p == NULL || p[1] != '\0' || (p[0] != '*' && p[0] != '/' && p[0] != '%'))
             return left;
         op = p[0];
-        position++;
-        right = eval_match(evaluate);
+        st->position++;
+        right = eval_match(st, evaluate);
         result = evaluate ? arithmetic(op, left, right) : copy_string("");
         free(left);
         free(right);
@@ -621,10 +624,10 @@ static char* eval_term(int evaluate) {
     }
 }
 
-static char* eval_sum(int evaluate) {
-    char* left = eval_term(evaluate);
+static char* eval_sum(Parser* st, int evaluate) {
+    char* left = eval_term(st, evaluate);
     for (;;) {
-        const char* p = peek_arg();
+        const char* p = peek_arg(st);
         char op;
         char* right;
         char* result;
@@ -632,8 +635,8 @@ static char* eval_sum(int evaluate) {
         if (p == NULL || p[1] != '\0' || (p[0] != '+' && p[0] != '-'))
             return left;
         op = p[0];
-        position++;
-        right = eval_term(evaluate);
+        st->position++;
+        right = eval_term(st, evaluate);
         result = evaluate ? arithmetic(op, left, right) : copy_string("");
         free(left);
         free(right);
@@ -652,11 +655,11 @@ static int is_comparison(const char* p) {
     return 0;
 }
 
-static char* eval_comparison(int evaluate) {
-    char* left = eval_sum(evaluate);
-    while (is_comparison(peek_arg())) {
-        const char* op = take_arg();
-        char* right = eval_sum(evaluate);
+static char* eval_comparison(Parser* st, int evaluate) {
+    char* left = eval_sum(st, evaluate);
+    while (is_comparison(peek_arg(st))) {
+        const char* op = take_arg(st);
+        char* right = eval_sum(st, evaluate);
         char* result = evaluate ? compare_values(op, left, right) : copy_string("");
         free(left);
         free(right);
@@ -665,10 +668,10 @@ static char* eval_comparison(int evaluate) {
     return left;
 }
 
-static char* eval_and(int evaluate) {
-    char* left = eval_comparison(evaluate);
-    while (next_is("&")) {
-        char* right = eval_comparison(evaluate && !is_null(left));
+static char* eval_and(Parser* st, int evaluate) {
+    char* left = eval_comparison(st, evaluate);
+    while (next_is(st, "&")) {
+        char* right = eval_comparison(st, evaluate && !is_null(left));
         if (is_null(left) || is_null(right)) {
             free(left);
             left = copy_string("0");
@@ -678,10 +681,10 @@ static char* eval_and(int evaluate) {
     return left;
 }
 
-static char* eval_or(int evaluate) {
-    char* left = eval_and(evaluate);
-    while (next_is("|")) {
-        char* right = eval_and(evaluate && is_null(left));
+static char* eval_or(Parser* st, int evaluate) {
+    char* left = eval_and(st, evaluate);
+    while (next_is(st, "|")) {
+        char* right = eval_and(st, evaluate && is_null(left));
         if (is_null(left)) {
             free(left);
             if (is_null(right)) {
@@ -697,7 +700,11 @@ static char* eval_or(int evaluate) {
 }
 
 int main(int argc, char* argv[]) {
+    Parser state;
+    Parser* st = &state;
     char* value;
+
+    memset(st, 0, sizeof *st);
 
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
         print_usage();
@@ -713,17 +720,17 @@ int main(int argc, char* argv[]) {
     }
 
     _setmode(_fileno(stdout), _O_BINARY);
-    args = argv + 1;
-    argCount = argc - 1;
-    if (strcmp(args[0], "--") == 0 && argCount > 1) {
-        args++;
-        argCount--;
+    st->args = argv + 1;
+    st->argCount = argc - 1;
+    if (strcmp(st->args[0], "--") == 0 && st->argCount > 1) {
+        st->args++;
+        st->argCount--;
     }
-    position = 0;
+    st->position = 0;
 
-    value = eval_or(1);
-    if (position < argCount)
-        die(STATUS_INVALID, "syntax error: unexpected argument '%s'", args[position]);
+    value = eval_or(st, 1);
+    if (st->position < st->argCount)
+        die(STATUS_INVALID, "syntax error: unexpected argument '%s'", st->args[st->position]);
 
     fputs(value, stdout);
     fputc('\n', stdout);
