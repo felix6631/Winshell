@@ -14,6 +14,8 @@ It is written in plain C on top of the Win32 API, and aims to run as far back as
 | --- | --- |
 | `shell` | Input loop, runs commands and waits for them, pipes/redirection, `; && \|\|`, variable expansion, wildcards, `cd` `export` `unset` `exit` |
 | `arch` | Done |
+| `basename` | Done (`-a -s -z`; both `/` and `\` separate; the suffix is removed unless it is the whole name) |
+| `dirname` | Done (`-z`; several names) |
 | `cat` | Done (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `cp` | Done (`-a -f -i -n -p -r -R -t -v`) |
 | `cut` | Done (`-b -c -f -d -s --complement --output-delimiter`) |
@@ -120,7 +122,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `cat`, `cp`, `cut`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `rm`, `rmdir`, `sed`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `xargs`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `cp`, `cut`, `dirname`, `echo`, `env`, `expr`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `pwd`, `rm`, `rmdir`, `sed`, `sort`, `tac`, `tail`, `tee`, `touch`, `tr`, `uniq`, `wc`, `xargs`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -149,6 +151,7 @@ The test programs are divided by feature (`test\`).
 | `lines_test` | `tee`, `tac`, `nl`, `paste`: line endings, separators, sections, standard input taken in turn |
 | `env_test` | `env`, `printenv`: changing the environment, `-i`/`-u`, running a command and its status, `-C` |
 | `regex_test` | unit tests of `common/regex.c`: basic and extended syntax, longest match, sets and classes, word boundaries, back references, UTF-8, error messages |
+| `names_test` | `basename`, `dirname`: separators (also `\`), suffixes, NUL endings, the root |
 | `xargs_test` | `xargs`: batches, how items are read, files, exit status, parallel runs |
 | `find_test` | `find`: order of the walk, depth, `-prune`, `-exec`/`-execdir`/`-ok`, `-delete`, virtual paths, Korean names, exit status |
 | `expr_test` | `expr`: arithmetic, comparison, logic, string functions, big integers, exit status |
@@ -168,7 +171,7 @@ The test programs are divided by feature (`test\`).
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
 - The test programs are run by `test\out\runall.exe`, several at a time (each has its own work directory, so they do not collide). A program that passed shows one summary line, a failed one all of its output. `WS_JOBS=N` sets how many run at once (default: half of the processors), `WS_VERBOSE=1` shows all output.
 - **AddressSanitizer:** `nmake asan` rebuilds all tools and tests with `/fsanitize=address` (`bin-asan\`, `test\out-asan\`) and runs them. Memory errors are reported with their location and fail the test. The environment variable `WINSHELL_BIN` selects the directory of tools the tests use.
-- **Comparison with GNU:** `test\gnu_compare.sh` compares `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `tac`, `nl`, `paste`, `tee`, `grep`, `sed`, `expr`, `find` and `xargs` with the GNU tools in over three thousand combinations of options and inputs (`LC_ALL=C`, `C.UTF-8` for grep). The script collects the combinations and `test\out\gnu_batch.exe` runs them several at a time (much faster than starting the programs from the MSYS bash: about 30 seconds). `GNU_ONLY=grep` runs one section, `GNU_IMMEDIATE=1` makes the script run them itself, one by one. What is meant to differ (a CR LF ending is not part of the line, `sort -z/-h/-M/-V` are refused, characters are UTF-8) is not compared.
+- **Comparison with GNU:** `test\gnu_compare.sh` compares `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `tr`, `cat`, `tac`, `nl`, `paste`, `tee`, `grep`, `sed`, `expr`, `find`, `xargs`, `basename` and `dirname` with the GNU tools in over three thousand combinations of options and inputs (`LC_ALL=C`, `C.UTF-8` for grep). The script collects the combinations and `test\out\gnu_batch.exe` runs them several at a time (much faster than starting the programs from the MSYS bash: about 30 seconds). `GNU_ONLY=grep` runs one section, `GNU_IMMEDIATE=1` makes the script run them itself, one by one. What is meant to differ (a CR LF ending is not part of the line, `sort -z/-h/-M/-V` are refused, characters are UTF-8) is not compared.
 - **`mv` to another drive:** with the environment variable `WINSHELL_TEST_CROSS_DEVICE` set, `mv` does not try the rename and takes the copy-and-remove path. The tests run that code on one volume with it, and for real when a second fixed drive that can be written to exists.
 - When adding a command, add its cases to the `*_test.c` of its feature. The shared parts are `testlib.h` (checks, running programs) and `testtools.h` (work directory, running tools, fixtures). Output is compared without telling LF and CRLF apart (`lf_only`).
 - Ctrl+C handling is not part of the automatic tests because it needs a real console.
@@ -181,10 +184,12 @@ Winshell/
 ├─ common.mk       build rules that every tool includes
 ├─ shell/          the shell itself (include/, src/)
 ├─ arch/           arch command
+├─ basename/       basename command
 ├─ cat/            cat command
 ├─ cp/             cp command
 ├─ cut/            cut command
 ├─ echo/           echo command
+├─ dirname/        dirname command
 ├─ env/            env command
 ├─ expr/           expr command
 ├─ find/           find command (parse.c parses the expression, eval.c walks and evaluates)

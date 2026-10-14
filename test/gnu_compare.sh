@@ -729,6 +729,42 @@ add_case out C xlong.txt xargs --max-args=3 --max-chars=100 echo
 add_case out C xlong.txt xargs --no-run-if-empty --verbose echo
 fi
 
+if want basename; then
+section basename
+# a name of two slashes is a root of its own for Cygwin (//server); here it is "/", as on Linux
+for n in "/usr/bin/sort" "sort" "/" "///" "a/" "a//" "/a" "//a//" "a/b/c" "a/b/c/" "" "." ".." "./a" "a." ".hidden" "a b/c d" "/a/b.txt" "dir/.txt" "x.h.h" "가/나다.txt"; do
+    compare basename -- "$n"
+    compare basename -a -- "$n"
+    compare basename -z -- "$n"
+    for suffix in ".txt" ".h" "txt" "a" "sort" "" "/" ".h.h" "나다.txt"; do
+        compare basename -- "$n" "$suffix"
+        compare basename -s "$suffix" -- "$n"
+    done
+done
+compare basename -a /a/b.c /d/e.c x
+compare basename -s .c /a/b.c /d/e.c x.c
+compare basename -z -a a/b c/d
+compare basename -as .c a/b.c
+compare basename --suffix=.c --multiple a/b.c
+compare basename
+compare basename a b c
+compare basename -a
+compare basename -s
+compare basename --bogus a
+fi
+
+if want dirname; then
+section dirname
+for n in "/usr/bin/sort" "sort" "/" "///" "a/" "a//" "/a" "///a//" "a/b/c" "a/b/c/" "a//b" "a///b//" "" "." ".." "./a" "a/." "a/.." "/a/b" "a b/c d" "가/나다.txt" "/가"; do
+    compare dirname -- "$n"
+    compare dirname -z -- "$n"
+done
+compare dirname /a/b c/d e
+compare dirname -z /a/b c/d
+compare dirname
+compare dirname --bogus a
+fi
+
 # ---- run what was collected ---------------------------------------------------------------
 if [ -n "$BATCH" ] && [ -f "$CASES" ]; then
     # native paths, as the program is not an MSYS program

@@ -16,6 +16,7 @@
 ##   env_test            env, printenv
 ##   lines_test          tee, tac, nl, paste
 ##   shell_utf8_test     쉘: 한글 이름, 와일드카드가 글자 하나에 일치함, 변수
+##   names_test          basename, dirname: 구분자, 접미사, NUL 끝
 ##   xargs_test          xargs: 묶음, 항목 해석, 종료 상태, 병렬 실행
 ##   find_test           find: 걷기, 동작(-exec -delete), 가상 경로, 한글 이름, 종료 상태
 ##   expr_test           expr: 산술, 비교, 문자열 함수, 무제한 크기 정수, 종료 상태
@@ -47,7 +48,7 @@ TESTS = $(OUT)\vpath_test.exe $(OUT)\parser_test.exe $(OUT)\args_test.exe $(OUT)
         $(OUT)\basic_test.exe $(OUT)\cat_test.exe $(OUT)\ls_test.exe $(OUT)\fileops_test.exe \
         $(OUT)\dirs_test.exe $(OUT)\text_test.exe $(OUT)\filter_test.exe \
         $(OUT)\shell_run_test.exe $(OUT)\shell_cd_test.exe $(OUT)\shell_lists_test.exe \
-        $(OUT)\shell_pipeline_test.exe $(OUT)\env_test.exe $(OUT)\lines_test.exe $(OUT)\grep_test.exe $(OUT)\shell_utf8_test.exe $(OUT)\sed_test.exe $(OUT)\expr_test.exe $(OUT)\find_test.exe $(OUT)\xargs_test.exe \
+        $(OUT)\shell_pipeline_test.exe $(OUT)\env_test.exe $(OUT)\lines_test.exe $(OUT)\grep_test.exe $(OUT)\shell_utf8_test.exe $(OUT)\sed_test.exe $(OUT)\expr_test.exe $(OUT)\find_test.exe $(OUT)\xargs_test.exe $(OUT)\names_test.exe \
         $(OUT)\equiv_test.exe $(OUT)\limits_test.exe $(OUT)\sharing_test.exe $(OUT)\async_test.exe
 
 all: $(TESTS)
@@ -77,7 +78,7 @@ check-asan:
 $(OUT)\basic_test.exe $(OUT)\cat_test.exe $(OUT)\ls_test.exe $(OUT)\fileops_test.exe $(OUT)\dirs_test.exe \
 $(OUT)\text_test.exe $(OUT)\filter_test.exe $(OUT)\shell_run_test.exe $(OUT)\shell_cd_test.exe \
 $(OUT)\shell_lists_test.exe $(OUT)\shell_pipeline_test.exe $(OUT)\equiv_test.exe $(OUT)\limits_test.exe \
-$(OUT)\sharing_test.exe $(OUT)\async_test.exe $(OUT)\env_test.exe $(OUT)\lines_test.exe $(OUT)\grep_test.exe $(OUT)\shell_utf8_test.exe $(OUT)\sed_test.exe $(OUT)\expr_test.exe $(OUT)\find_test.exe $(OUT)\xargs_test.exe: testlib.h testtools.h
+$(OUT)\sharing_test.exe $(OUT)\async_test.exe $(OUT)\env_test.exe $(OUT)\lines_test.exe $(OUT)\grep_test.exe $(OUT)\shell_utf8_test.exe $(OUT)\sed_test.exe $(OUT)\expr_test.exe $(OUT)\find_test.exe $(OUT)\xargs_test.exe $(OUT)\names_test.exe: testlib.h testtools.h
 
 $(OUT)\vpath_test.exe: vpath_test.c testlib.h ..\common\vpath.c ..\common\vpath.h
 	@if not exist $(OUT) mkdir $(OUT)
