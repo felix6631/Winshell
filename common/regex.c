@@ -280,6 +280,34 @@ static unsigned class_by_name(const uint32_t* name, size_t length) {
 }
 
 /** After "[": the set up to and including "]". */
+/**
+ * Where the closing of a [:name:], [.x.] or [=x=] is: the index of its kind character, for the text that
+ * starts at k. (size_t)-1 when it is not closed.
+ */
+static size_t find_construct_end(const Parser* p, size_t k, uint32_t kind) {
+    size_t end = k;
+
+    while (end + 1 < p->length && !(p->pat[end] == kind && p->pat[end + 1] == ']'))
+        end++;
+    return end + 1 >= p->length ? (size_t)-1 : end;
+}
+
+/** After the "-" of a range: its last character, which may be written as [.x.]. */
+static uint32_t read_range_end(Parser* p) {
+    uint32_t hi = p->pat[p->i];
+
+    if (hi == '[' && at(p, 1) == '.') {
+        size_t k = p->i + 2, end = find_construct_end(p, k, '.');
+        if (end == (size_t)-1 || end - k != 1)
+            fail(p, "Invalid collation character");
+        hi = p->pat[k];
+        p->i = end + 2;
+    } else {
+        p->i++;
+    }
+    return hi;
+}
+
 static Node* parse_bracket(Parser* p) {
     int set = new_set(p);
     Node* n;
@@ -306,11 +334,9 @@ static Node* parse_bracket(Parser* p) {
 
         if (lo == '[' && (at(p, 1) == ':' || at(p, 1) == '.' || at(p, 1) == '=')) {
             uint32_t kind = at(p, 1);
-            size_t k = p->i + 2, end = k;
+            size_t k = p->i + 2, end = find_construct_end(p, k, kind);
 
-            while (end + 1 < p->length && !(p->pat[end] == kind && p->pat[end + 1] == ']'))
-                end++;
-            if (end + 1 >= p->length)
+            if (end == (size_t)-1)
                 fail(p, "Unmatched [, [^, [:, [., or [=");
 
             if (kind == ':') {
@@ -334,18 +360,7 @@ static Node* parse_bracket(Parser* p) {
         hi = lo;
         if (at(p, 0) == '-' && at(p, 1) != ']' && at(p, 1) != 0xFFFFFFFFu) {
             p->i++;
-            hi = p->pat[p->i];
-            if (hi == '[' && at(p, 1) == '.') {
-                size_t k = p->i + 2, end = k;
-                while (end + 1 < p->length && !(p->pat[end] == '.' && p->pat[end + 1] == ']'))
-                    end++;
-                if (end + 1 >= p->length || end - k != 1)
-                    fail(p, "Invalid collation character");
-                hi = p->pat[k];
-                p->i = end + 2;
-            } else {
-                p->i++;
-            }
+            hi = read_range_end(p);
             if (hi < lo)
                 fail(p, "Invalid range end");
         }

@@ -95,6 +95,57 @@ static int tail_from(FILE* in, const Mode* mode) {
 }
 
 /**
+ * Reads the end of a seekable file: blocks are prepended from the end until there are enough bytes, or
+ * enough line feeds. Returns 0 with *data and *length, or -1 when out of memory.
+ */
+static int read_end_of_file(FILE* in, const Mode* mode, unsigned char** data, size_t* length) {
+    __int64 position, wanted = mode->bytes ? mode->count : 0;
+    const size_t block = 65536;
+
+    _fseeki64(in, 0, SEEK_END);
+    position = _ftelli64(in);
+    *data = malloc(1);
+    *length = 0;
+    if (*data == NULL)
+        return -1;
+
+    while (position > 0) {
+        size_t take = position < (__int64)block ? (size_t)position : block;
+        unsigned char* grown;
+
+        if (mode->bytes && (long long)*length >= wanted)
+            break;
+        position -= (__int64)take;
+        _fseeki64(in, position, SEEK_SET);
+
+        grown = malloc(*length + take + 1);
+        if (grown == NULL) {
+            free(*data);
+            return -1;
+        }
+        if (fread(grown, 1, take, in) != take) {
+            free(grown);
+            break;
+        }
+        memcpy(grown + take, *data, *length);
+        free(*data);
+        *data = grown;
+        *length += take;
+
+        if (!mode->bytes) {
+            long long newlines = 0;
+            size_t i;
+            for (i = 0; i < *length; i++)
+                if ((*data)[i] == '\n')
+                    newlines++;
+            if (newlines > mode->count)
+                break;
+        }
+    }
+    return 0;
+}
+
+/**
  * The last lines or bytes of a stream. A file is read from its end, so that
  * a large file costs only what is shown; other input is read completely.
  */
@@ -104,54 +155,8 @@ static int tail_last(FILE* in, int seekable, const Mode* mode) {
     int result = 0;
 
     if (seekable) {
-        __int64 size, position, wanted;
-        size_t block = 65536;
-
-        _fseeki64(in, 0, SEEK_END);
-        size = _ftelli64(in);
-        position = size;
-        data = malloc(1);
-        if (data == NULL)
+        if (read_end_of_file(in, mode, &data, &length) != 0)
             return -1;
-        wanted = mode->bytes ? mode->count : 0;
-
-        // prepend blocks from the end until enough bytes, or enough line feeds, are there
-        for (;;) {
-            size_t take;
-            unsigned char* grown;
-            long long newlines = 0;
-            size_t i;
-
-            if (position == 0)
-                break;
-            if (mode->bytes ? (long long)length >= wanted : 0)
-                break;
-            take = position < (__int64)block ? (size_t)position : block;
-            position -= (__int64)take;
-            _fseeki64(in, position, SEEK_SET);
-
-            grown = malloc(length + take + 1);
-            if (grown == NULL) {
-                free(data);
-                return -1;
-            }
-            if (fread(grown, 1, take, in) != take) {
-                free(grown);
-                break;
-            }
-            memcpy(grown + take, data, length);
-            free(data);
-            data = grown;
-            length += take;
-
-            if (!mode->bytes) {
-                for (i = 0; i < length; i++)
-                    if (data[i] == '\n')
-                        newlines++;
-                if (newlines > mode->count)
-                    break;
-            }
-        }
     } else {
         data = text_slurp(in, &length);
         if (data == NULL) {

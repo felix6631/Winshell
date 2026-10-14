@@ -178,6 +178,39 @@ static int on_option(int id, const char* value, void* context) {
     }
 }
 
+/** With no command: the variables, one per line (or ended by NUL with -0). Returns the exit status. */
+static int print_environment(const Environment* e, int nullEnd) {
+    size_t k;
+
+    _setmode(_fileno(stdout), _O_BINARY);
+    for (k = 0; k < e->count; k++) {
+        fputs(e->items[k], stdout);
+        putchar(nullEnd ? '\0' : '\n');
+    }
+    return ferror(stdout) ? 125 : 0;
+}
+
+/**
+ * -C: changes the directory, and makes PWD describe the new one for the programs that are started.
+ * Returns 0, 125 after a message, or -1 when out of memory.
+ */
+static int change_directory(Environment* e, const char* directory) {
+    char native[VPATH_MAX], virtualPath[VPATH_MAX], pwd[VPATH_MAX + 8];
+    DWORD length;
+
+    if (vpath_to_native(directory, native, sizeof native) != 0 || !SetCurrentDirectoryA(native)) {
+        fprintf(stderr, "env: cannot change directory to '%s': No such file or directory\n", directory);
+        return 125;
+    }
+    length = GetCurrentDirectoryA(sizeof native, native);
+    if (length > 0 && length < sizeof native && vpath_from_native(native, virtualPath, sizeof virtualPath) == 0) {
+        snprintf(pwd, sizeof pwd, "PWD=%s", virtualPath);
+        if (env_set(e, _strdup(pwd)) != 0)
+            return -1;
+    }
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     Environment e = { NULL, 0, 0 };
     Options o;
@@ -211,17 +244,11 @@ int main(int argc, char* argv[]) {
             goto err_memory;
 
     if (i >= count) {
-        size_t k;
         if (chdirTo != NULL) {
             fprintf(stderr, "env: must specify a command with --chdir (-C)\n");
             return 125;
         }
-        _setmode(_fileno(stdout), _O_BINARY);
-        for (k = 0; k < e.count; k++) {
-            fputs(e.items[k], stdout);
-            putchar(nullEnd ? '\0' : '\n');
-        }
-        return ferror(stdout) ? 125 : 0;
+        return print_environment(&e, nullEnd);
     }
 
     if (nullEnd) {
@@ -230,20 +257,11 @@ int main(int argc, char* argv[]) {
     }
 
     if (chdirTo != NULL) {
-        char native[VPATH_MAX], virtualPath[VPATH_MAX], pwd[VPATH_MAX + 8];
-        DWORD length;
-
-        if (vpath_to_native(chdirTo, native, sizeof native) != 0 || !SetCurrentDirectoryA(native)) {
-            fprintf(stderr, "env: cannot change directory to '%s': No such file or directory\n", chdirTo);
-            return 125;
-        }
-        // the programs find the directory through PWD, which has to describe the new one
-        length = GetCurrentDirectoryA(sizeof native, native);
-        if (length > 0 && length < sizeof native && vpath_from_native(native, virtualPath, sizeof virtualPath) == 0) {
-            snprintf(pwd, sizeof pwd, "PWD=%s", virtualPath);
-            if (env_set(&e, _strdup(pwd)) != 0)
-                goto err_memory;
-        }
+        int changed = change_directory(&e, chdirTo);
+        if (changed > 0)
+            return changed;
+        if (changed < 0)
+            goto err_memory;
     }
 
     return run((char* const*)&operands[i], &e);
