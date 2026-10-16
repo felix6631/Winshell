@@ -48,6 +48,19 @@ typedef struct {
  */
 void winshell_setLastStatus(int status);
 
+/**
+ * The positional parameters $1, $2, ... as a list of their own, so that "$@" can give every one of them as a
+ * word whatever it contains. winshell_positionals_set replaces the list (the arguments are copied, and may be
+ * the strings of the old list). Save and restore are for what has to put the list back (a function call, a
+ * subshell); restore frees the snapshot.
+ */
+void winshell_positionals_set(const char* const* arguments, int count);
+int winshell_positional_count(void);
+const char* winshell_positional(int number);        // 1-based; NULL beyond the count
+typedef struct Positionals Positionals;
+Positionals* winshell_positionals_save(void);
+void winshell_positionals_restore(Positionals* saved);
+
 /** The status last given to winshell_setLastStatus. */
 int winshell_lastStatus(void);
 

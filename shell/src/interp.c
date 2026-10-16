@@ -128,6 +128,7 @@ int interp_run_line(const char* line, int* exitShell, int status) {
 /** The parameters of a script as variables; the previous ones are kept to be put back. */
 typedef struct {
     char* saved[13];            // 0..9, #, @, *
+    Positionals* list;          // the parameters as a list
 } Parameters;
 
 static const char* const parameter_names[13] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "#", "@", "*" };
@@ -141,6 +142,7 @@ static void save_parameters(Parameters* p) {
         const char* value = var_get(parameter_names[i]);
         p->saved[i] = value != NULL ? _strdup(value) : NULL;
     }
+    p->list = winshell_positionals_save();
 }
 
 static void restore_parameters(Parameters* p) {
@@ -153,9 +155,15 @@ static void restore_parameters(Parameters* p) {
             var_unset(parameter_names[i]);
         free(p->saved[i]);
     }
+    winshell_positionals_restore(p->list);
+    p->list = NULL;
 }
 
 static void set_parameters(const char* name, const char* const* arguments, int count) {
+    set_parameter_values(name, arguments, count);
+}
+
+void interp_set_parameters(const char* name, const char* const* arguments, int count) {
     set_parameter_values(name, arguments, count);
 }
 
@@ -210,6 +218,7 @@ static void set_parameter_values(const char* name, const char* const* arguments,
         var_set("*", all);
         free(all);
     }
+    winshell_positionals_set(arguments, count);     // last: the arguments may be the strings of the old list
 }
 
 int interp_run_file(const char* path, const char* const* arguments, int argumentCount, int setParameters,
@@ -311,6 +320,7 @@ int interp_capture_call(int (*run)(void* context), void* context, char** output,
     char directory[VPATH_MAX];
     VarSnapshot* variables;
     void* traps;
+    Positionals* positionals;
 
     *output = NULL;
     memset(&capture, 0, sizeof capture);
@@ -339,9 +349,11 @@ int interp_capture_call(int (*run)(void* context), void* context, char** output,
     cwd_get(directory, sizeof directory);
     variables = var_save();
     traps = command_traps_enter_subshell();
+    positionals = winshell_positionals_save();
     before = winshell_lastStatus();
     status = run(context);
     command_traps_leave_subshell(traps);
+    winshell_positionals_restore(positionals);
     winshell_setLastStatus(before);                 // $? of the line around the substitution is not changed
 
     fflush(stdout);

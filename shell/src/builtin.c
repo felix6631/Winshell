@@ -292,7 +292,7 @@ static int builtin_unset(char* const argv[]) {
 
 int builtin_exists(const char* name) {
     static const char* const names[] = { "cd", "export", "unset", "exit", "quit", "source", ".", ":", "break",
-                                         "continue", "read", "return", "local", "trap", "jobs", "wait" };
+                                         "continue", "read", "return", "local", "trap", "jobs", "wait", "shift" };
     size_t i;
 
     for (i = 0; i < sizeof names / sizeof names[0]; i++)
@@ -388,6 +388,41 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
             *status = interp_run_file(command->argv[1], (const char* const*)command->argv + 2, count, count > 0,
                                       exitShell, *status);
         }
+        return 1;
+    }
+    if (strcmp(name, "shift") == 0) {
+        long n = 1;
+        int count = winshell_positional_count();
+
+        if (command->argv[1] != NULL) {
+            char* end;
+
+            n = strtol(command->argv[1], &end, 10);
+            if (*end != '\0' || command->argv[1][0] == '\0' || n < 0) {
+                fprintf(stderr, "shift: %s: numeric argument required\n", command->argv[1]);
+                *status = 2;
+                return 1;
+            }
+        }
+        if (n > count) {
+            fprintf(stderr, "shift: shift count out of range\n");
+            *status = 1;
+            return 1;
+        }
+        {
+            const char** rest = calloc((size_t)(count - n) + 1, sizeof *rest);
+            int i;
+
+            if (rest == NULL) {
+                *status = 1;
+                return 1;
+            }
+            for (i = (int)n; i < count; i++)
+                rest[i - n] = winshell_positional(i + 1);
+            interp_set_parameters(NULL, rest, count - (int)n);
+            free(rest);
+        }
+        *status = 0;
         return 1;
     }
     if (strcmp(name, "jobs") == 0) {

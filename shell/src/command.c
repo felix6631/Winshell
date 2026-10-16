@@ -1544,16 +1544,19 @@ static int run_subshell(Runner* r, const Node* node, int status) {
     char directory[VPATH_MAX];
     VarSnapshot* variables;
     void* traps;
+    Positionals* positionals;
     int exitInside = 0, result;
     Runner inner;
 
     cwd_get(directory, sizeof directory);
     variables = var_save();
     traps = command_traps_enter_subshell();
+    positionals = winshell_positionals_save();
     inner.exitShell = &exitInside;
     inner.loopDepth = 0;
     result = run_list(&inner, &node->second, status);
     command_traps_leave_subshell(traps);
+    winshell_positionals_restore(positionals);
     if (variables != NULL) {
         char absolute[VPATH_MAX];
 
@@ -2106,12 +2109,7 @@ static int run_node(Runner* r, const Node* node, int status) {
             sprintf(command, "x %s", node->text);
         } else {
             // `for NAME; do` goes over the parameters, each one a word of its own
-            const char* number = var_get("#");
-            int n = number != NULL ? atoi(number) : 0, k;
-            size_t used = (size_t)sprintf(command, "x");
-
-            for (k = 1; k <= n && k <= 9; k++)
-                used += (size_t)sprintf(command + used, " \"$%d\"", k);
+            sprintf(command, "x \"$@\"");
         }
         if (winshell_parse(command, &pipeline) != 0) {
             free(command);

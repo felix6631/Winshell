@@ -436,8 +436,39 @@ static void test_background(void) {
     }
 }
 
+static void test_positionals(void) {
+    const char* show = "show() { echo \"n=$#\"; for a in \"$@\"; do echo \"[$a]\"; done; }\n";
+    char text[512];
+
+    printf("\"$@\" and the positional parameters\n");
+    // every parameter is a word, whatever it contains
+    snprintf(text, sizeof text, "%sshow a \"b c\" \"\" d\n", show);
+    expect("a1.sh", text, "", "n=4\n[a]\n[b c]\n[]\n[d]\n", 0);
+    snprintf(text, sizeof text, "%sshow\nshow \"\"\n", show);
+    expect("a2.sh", text, "", "n=0\nn=1\n[]\n", 0);
+    // "$*" is one word, $@ without quotes is split at blanks
+    expect("a3.sh", "f() { for a in \"$*\"; do echo \"<$a>\"; done; for a in $@; do echo \"[$a]\"; done; }\nf a \"b c\"\n", "",
+           "<a b c>\n[a]\n[b]\n[c]\n", 0);
+    // text around "$@" joins the first and the last
+    expect("a4.sh", "f() { for a in \"x$@y\" \"${@}\"; do echo \"[$a]\"; done; }\nf 1 2 3\nf\n", "",
+           "[x1]\n[2]\n[3y]\n[1]\n[2]\n[3]\n[xy]\n", 0);
+    // passed on to another function, wildcards stay plain
+    expect("a5.sh", "inner() { echo \"$# $1|$2\"; }\nouter() { inner \"$@\"; }\nouter \"one two\" '*'\n", "", "2 one two|*\n", 0);
+    // more than nine, shift
+    expect("a6.sh", "m() { echo \"$# ${10} ${12}\"; shift 2; echo \"$# $1 $@\"; shift 10; echo \"status $?\"; }\nm a b c d e f g h i j k l\n", "",
+           "12 j l\n10 c c d e f g h i j k l\nstatus 0\n", 0);
+    expect("a7.sh", "f() { shift; echo \"status $?\"; }\nf\n", "", "status 1\n", 0);
+    // `for x; do` goes over the parameters
+    expect("a8.sh", "f() { for x; do echo \"<$x>\"; done; }\nf \"a b\" c\n", "", "<a b>\n<c>\n", 0);
+    // a subshell and a substitution do not change the parameters of the caller
+    expect("a9.sh", "f() { (shift; echo \"in $#\"); x=$(shift; echo $#); echo \"out $# $x\"; }\nf 1 2 3\n", "", "in 2\nout 3 2\n", 0);
+    // the arguments of a script and of -c
+    expect("a10.sh", "for a in \"$@\"; do echo \"[$a]\"; done\necho \"$#\"\n", "\"p q\" r \"\"", "[p q]\n[r]\n[]\n3\n", 0);
+}
+
 int main(void) {
     tools_init("shell_control_test");
+    test_positionals();
     test_compound_pipelines();
     test_background();
     test_if();

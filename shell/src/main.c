@@ -250,31 +250,7 @@ int main(int argc, char* argv[]) {
         const char* name = argc >= 4 ? argv[3] : "shell";
         const char* const* arguments = (const char* const*)(argc >= 5 ? argv + 4 : argv + argc);
         int count = argc >= 5 ? argc - 4 : 0;
-        char number[16];
-        char* joined = NULL;
-        int i;
-
-        var_set("0", name);
-        for (i = 0; i < count && i < 9; i++) {
-            snprintf(number, sizeof number, "%d", i + 1);
-            var_set(number, arguments[i]);
-        }
-        snprintf(number, sizeof number, "%d", count);
-        var_set("#", number);
-        if (count > 0) {
-            size_t total = 1;
-            for (i = 0; i < count; i++)
-                total += strlen(arguments[i]) + 1;
-            joined = malloc(total);
-            if (joined != NULL) {
-                size_t used = 0;
-                for (i = 0; i < count; i++)
-                    used += (size_t)sprintf(joined + used, "%s%s", i > 0 ? " " : "", arguments[i]);
-                var_set("@", joined);
-                var_set("*", joined);
-                free(joined);
-            }
-        }
+        interp_set_parameters(name, arguments, count);
         status = interp_run_line(argv[2], &exitShell, 0);
     } else if (argc >= 2 && strcmp(argv[1], "-c") != 0 && argv[1][0] != '-') {
         // shell FILE [ARGUMENT]...

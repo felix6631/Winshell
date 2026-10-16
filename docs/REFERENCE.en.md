@@ -113,7 +113,10 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
     prompt. Jobs go on after the shell has ended. Not there yet: `fg`, `bg`, `kill %N`, `disown`.
 - **Scripts and command substitution**
   - `shell FILE [argument...]` runs the lines of the file one after the other (`$0` is FILE, `$1`..`$9`, `$#`, `$@`, `$*` are the
-    arguments); so does `shell -c 'command' [name [argument...]]`. `source FILE [argument...]` and `. FILE` run a file in the
+    arguments); so does `shell -c 'command' [name [argument...]]`. There may be any number of arguments (`${10}` works). `"$@"` becomes one
+    word per argument (`"x$@y"` joins the text around it to the first and the last, and with no arguments it is no word), `"$*"` is one word
+    joined with spaces, and an unquoted `$@` is split at blanks. `for x; do` goes over `"$@"`. `shift [N]` drops the first N (status 1 when
+    there are fewer). A function, a subshell and `$(...)` put the arguments back when they end. `source FILE [argument...]` and `. FILE` run a file in the
     same shell; without arguments it sees the `$1`.. of the caller. In a file `exit [N]` ends the shell, and the status of a script
     is that of its last command (or of `exit`). A line that is a syntax error is reported and the next one runs. LF and CR LF line
     ends and a leading UTF-8 BOM are accepted.

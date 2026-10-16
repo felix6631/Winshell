@@ -107,8 +107,88 @@ static int pattern_is_active(const CHAR* pattern) {
  * profile when the environment does not have them; HOME is a path of the
  * virtual file system. Returns NULL for a variable that is not set.
  */
+/* ---- the positional parameters ------------------------------------------------------------ */
+
+static char** positionals;
+static int positionalCount;
+
+struct Positionals {
+    char** list;
+    int    count;
+};
+
+static char** copy_list(const char* const* arguments, int count) {
+    char** list = calloc((size_t)count + 1, sizeof *list);
+    int i;
+
+    if (list == NULL)
+        return NULL;
+    for (i = 0; i < count; i++) {
+        list[i] = _strdup(arguments[i]);
+        if (list[i] == NULL) {
+            while (i-- > 0)
+                free(list[i]);
+            free(list);
+            return NULL;
+        }
+    }
+    return list;
+}
+
+static void free_list(char** list, int count) {
+    int i;
+
+    for (i = 0; i < count; i++)
+        free(list[i]);
+    free(list);
+}
+
+void winshell_positionals_set(const char* const* arguments, int count) {
+    char** list = copy_list(arguments, count);
+
+    if (list == NULL && count > 0)
+        return;
+    free_list(positionals, positionalCount);
+    positionals = list;
+    positionalCount = list != NULL ? count : 0;
+}
+
+int winshell_positional_count(void) {
+    return positionalCount;
+}
+
+const char* winshell_positional(int number) {
+    return number >= 1 && number <= positionalCount ? positionals[number - 1] : NULL;
+}
+
+Positionals* winshell_positionals_save(void) {
+    Positionals* saved = calloc(1, sizeof *saved);
+
+    if (saved == NULL)
+        return NULL;
+    saved->list = copy_list((const char* const*)positionals, positionalCount);
+    saved->count = saved->list != NULL ? positionalCount : 0;
+    return saved;
+}
+
+void winshell_positionals_restore(Positionals* saved) {
+    if (saved == NULL)
+        return;
+    free_list(positionals, positionalCount);
+    positionals = saved->list;
+    positionalCount = saved->count;
+    free(saved);
+}
+
 static const char* variable_value(const char* name, char* scratch, size_t size) {
     const char* value;
+
+    if (name[0] >= '1' && name[0] <= '9' && strspn(name, "0123456789") == strlen(name)) {
+        // $1 ... $N, from the list (not only up to $9)
+        unsigned long number = strtoul(name, NULL, 10);
+
+        return number <= (unsigned long)positionalCount ? positionals[number - 1] : NULL;
+    }
 
     if (strcmp(name, "?") == 0) {
         unsigned int status = (unsigned int)lastStatus;
@@ -161,6 +241,7 @@ typedef struct {
     size_t    wordStart, patStart;  // where it begins in text and in pat
     CHAR      quote;            // the quote character we are inside of, if any
     int       quoted;           // the word contains a quote, so that an empty word is still one
+    int       quotedBefore;     // quoted was set before the double quote that is open
     int       operatorDone;     // the word was a redirection operator after all (2>)
     int       isAssign;         // the word is NAME=value
     size_t    assignValue;      // where its value starts in text
@@ -373,6 +454,8 @@ static int lex_quote_mark(Lexer* L) {
     CHAR c = *L->read;
 
     if (c == '"') {
+        if (L->quote != '"')
+            L->quotedBefore = L->quoted;
         L->quote = (L->quote == '"') ? '\0' : '"';
     } else if (c == '\'' && L->quote == '\0') {
         L->quote = '\'';
@@ -382,6 +465,36 @@ static int lex_quote_mark(Lexer* L) {
     L->quoted = 1;
     L->read++;
     return 1;
+}
+
+/**
+ * "$@" (and "${@}"): every positional parameter is a word of its own, joined to what is before and after it
+ * in the quotes. With no parameters it is no word at all when nothing else is in the quotes. L->read is
+ * after the $@.
+ */
+static void lexer_quoted_at(Lexer* L) {
+    int i, count = winshell_positional_count();
+
+    L->dirty = 1;
+    if (count == 0) {
+        if (L->read[0] == '"' && L->text.length == L->wordStart && !L->quotedBefore) {
+            L->read++;
+            L->quote = '\0';
+            L->quoted = 0;
+        }
+        return;
+    }
+    for (i = 1; i <= count; i++) {
+        const char* value = winshell_positional(i);
+
+        if (i > 1) {
+            L->quoted = 1;                          // an empty parameter is still a word
+            lexer_word(L);
+            L->quoted = 1;
+        }
+        for (; *value != '\0'; value++)
+            lexer_char(L, *value, 1);
+    }
 }
 
 /* ---- command substitution, arithmetic and ${...} --------------------------------------------- */
@@ -793,7 +906,10 @@ static int lex_braced(Lexer* L) {
     set = current != NULL;
     nonnull = set && current[0] != '\0';
     if (bodyLength == 0) {
-        lexer_value(L, current);
+        if (strcmp(name, "@") == 0 && L->quote == '"' && !L->isAssign)
+            lexer_quoted_at(L);
+        else
+            lexer_value(L, current);
         return 1;
     }
 
@@ -981,7 +1097,10 @@ static int lex_variable(Lexer* L) {
     name[length] = '\0';
     value = variable_value(name, scratch, sizeof scratch);
     L->read = after;
-    lexer_value(L, value);
+    if (strcmp(name, "@") == 0 && L->quote == '"' && !L->isAssign)
+        lexer_quoted_at(L);
+    else
+        lexer_value(L, value);
     return 1;
 }
 

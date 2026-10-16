@@ -69,6 +69,9 @@ typedef struct ParameterFrame ParameterFrame;
 ParameterFrame* interp_parameters_push(const char* const* arguments, int count);
 void interp_parameters_pop(ParameterFrame* frame);
 
+/** Sets $0 (when name is not NULL), $1.., $#, $@ and $* for the shell (a script, -c, shift). */
+void interp_set_parameters(const char* name, const char* const* arguments, int count);
+
 /** Makes $(...) work in the parser: call once at the start. */
 void interp_init(void);
 
