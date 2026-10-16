@@ -138,6 +138,11 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
   - `${NAME:-w}` `${NAME-w}` `${NAME:=w}` `${NAME:+w}` `${NAME:?w}`, `${#NAME}`, `${NAME#p}` `${NAME##p}` `${NAME%p}` `${NAME%%p}`,
     `${NAME:offset}` and `${NAME:offset:length}`. The word and the pattern are expanded like the arguments of a command, a pattern uses
     `* ? [..]`. With the `:` an empty value counts as not set.
+  - `${NAME/pattern/string}` replaces the first match of the pattern (the one that starts first, the longest of those) with the string;
+    `${NAME//pattern/string}` replaces all of them, `${NAME/#pattern/string}` only a match at the start, `${NAME/%pattern/string}` only
+    one at the end, and without `/string` the match is deleted. A `/` in the pattern is written `\/`. Variables and substitutions are
+    expanded in the pattern and the string, blanks and `| < > ;` are plain characters, braces are not expanded, and a `&` in the string
+    is not special.
   - `read [-r] [-p prompt] [name...]`: a line of the input is cut at `IFS` (blanks by default) into the variables, the last one gets the
     rest; without a name it is `REPLY`. Without `-r` a backslash protects the next character and one at the end joins the next line. Status
     1 at the end of the input. At a terminal the `-p` prompt is shown. `NAME=value` in front of a builtin (`IFS=: read a b`) holds for it only.

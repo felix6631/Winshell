@@ -18,7 +18,7 @@
  */
 int winshell_brace_expand(const char* line, char** result);
 
-/** Switches the expansion off (the patterns of a case are not expanded) and on again. */
-void winshell_brace_enable(int on);
+/** Switches the expansion off (the patterns of a case are not expanded) and on again; returns the setting it had. */
+int winshell_brace_enable(int on);
 
 #endif //BRACE_H

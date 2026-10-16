@@ -1457,18 +1457,19 @@ static char* expand_case_word(const char* text, char** pattern) {
     Pipeline pipeline;
     char* line = malloc(strlen(text) + 8);
     char* word = NULL;
+    int braces;
 
     *pattern = NULL;
     if (line == NULL)
         return NULL;
     sprintf(line, "x \"\" %s", text);
-    winshell_brace_enable(0);
+    braces = winshell_brace_enable(0);
     if (winshell_parse(line, &pipeline) != 0) {
-        winshell_brace_enable(1);
+        winshell_brace_enable(braces);
         free(line);
         return NULL;
     }
-    winshell_brace_enable(1);
+    winshell_brace_enable(braces);
     free(line);
     if (pipeline.count > 0 && pipeline.commands[0].argv != NULL && pipeline.commands[0].argv[2] != NULL) {
         const Command* c = &pipeline.commands[0];

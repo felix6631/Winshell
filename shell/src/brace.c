@@ -343,8 +343,11 @@ static int is_assignment_word(const char* s, size_t length) {
 
 static int enabled = 1;
 
-void winshell_brace_enable(int on) {
+int winshell_brace_enable(int on) {
+    int before = enabled;
+
     enabled = on;
+    return before;
 }
 
 int winshell_brace_expand(const char* line, char** result) {

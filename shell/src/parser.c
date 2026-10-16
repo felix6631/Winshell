@@ -841,6 +841,234 @@ static void remove_pattern(char* value, const char* pattern, int fromEnd, int lo
 }
 
 /**
+ * ${NAME/pattern/string} and its forms: the longest match of the pattern that starts first is replaced (with
+ * `//` every match, with `/#` only one at the start, with `/%` only one at the end); without `/string` the match
+ * is deleted. Returns the new value (malloc'ed), or NULL when out of memory.
+ */
+static char* replace_pattern(const char* value, const char* pattern, const char* replacement, int all, int anchor) {
+    size_t length = strlen(value), patternLength = strlen(pattern), replacementLength = strlen(replacement);
+    size_t used = 0, capacity = length + 1, i = 0, end;
+    char* result = malloc(capacity);
+
+    if (result == NULL)
+        return NULL;
+    while (i <= length) {
+        size_t matched = 0;
+        int found = 0;
+
+        if (patternLength > 0 && i < length && !(anchor == '#' && i > 0)) {
+            if (anchor == '%') {
+                if (pattern_matches(pattern, value + i, length - i)) {
+                    matched = length - i;
+                    found = 1;
+                }
+            } else {
+                for (end = length; end > i; end--) {
+                    if (pattern_matches(pattern, value + i, end - i)) {
+                        matched = end - i;
+                        found = 1;
+                        break;
+                    }
+                }
+            }
+        }
+        if (found) {
+            if (used + replacementLength + length - i + 1 > capacity) {
+                char* grown;
+
+                capacity = used + replacementLength + length - i + 1;
+                grown = realloc(result, capacity);
+                if (grown == NULL) {
+                    free(result);
+                    return NULL;
+                }
+                result = grown;
+            }
+            memcpy(result + used, replacement, replacementLength);
+            used += replacementLength;
+            i += matched;
+            if (!all) {
+                // the rest as it is
+                memcpy(result + used, value + i, length - i);
+                used += length - i;
+                result[used] = '\0';
+                return result;
+            }
+            if (anchor != 0) {
+                memcpy(result + used, value + i, length - i);
+                used += length - i;
+                result[used] = '\0';
+                return result;
+            }
+            continue;
+        }
+        if (i == length)
+            break;
+        if (used + 2 > capacity) {
+            char* grown = realloc(result, capacity *= 2);
+
+            if (grown == NULL) {
+                free(result);
+                return NULL;
+            }
+            result = grown;
+        }
+        result[used++] = value[i++];
+    }
+    result[used] = '\0';
+    return result;
+}
+
+/** The index of the / that ends the pattern in `pattern/string`, or the length when there is none. */
+static size_t replacement_split(const char* spec, size_t length) {
+    size_t i = 0;
+
+    while (i < length) {
+        if (spec[i] == '\\' && i + 1 < length && spec[i + 1] == '/') {
+            i += 2;
+        } else if ((spec[i] == '$' && i + 1 < length && (spec[i + 1] == '{' || spec[i + 1] == '(')) || spec[i] == '`') {
+            size_t n = piece_length(spec + i);
+
+            i += n > 0 ? n : 1;
+        } else if (spec[i] == '\'') {
+            const char* close = memchr(spec + i + 1, '\'', length - i - 1);
+
+            i = close != NULL ? (size_t)(close - spec) + 1 : length;
+        } else if (spec[i] == '"') {
+            size_t n = quoted_length(spec + i);
+
+            i += n > 0 ? n : length - i;
+        } else if (spec[i] == '/') {
+            return i;
+        } else {
+            i++;
+        }
+    }
+    return length;
+}
+
+/**
+ * The text with the characters that would be operators or separators to the lexer (blanks, | < > ; & and
+ * parentheses) put in single quotes, so that expanding it as a word keeps them: `<$p>` and `a b` are plain text.
+ */
+static char* protect_text(const char* text) {
+    size_t length = strlen(text), used = 0, i = 0;
+    char* out = malloc(length * 3 + 1);
+    char quote = '\0';
+
+    if (out == NULL)
+        return NULL;
+    while (text[i] != '\0') {
+        char c = text[i];
+
+        if (quote == '\0' && c == '$' && (text[i + 1] == '(' || text[i + 1] == '{')) {
+            size_t n = piece_length(text + i);
+
+            if (n > 0) {
+                memcpy(out + used, text + i, n);
+                used += n;
+                i += n;
+                continue;
+            }
+        }
+        if (c == '\'' && quote != '"') {
+            quote = quote == '\'' ? '\0' : '\'';
+        } else if (c == '"' && quote != '\'') {
+            quote = quote == '"' ? '\0' : '"';
+        } else if (quote == '\0' && strchr(" \t\n|<>;&()", c) != NULL) {
+            out[used++] = '\'';
+            out[used++] = c;
+            out[used++] = '\'';
+            i++;
+            continue;
+        }
+        out[used++] = c;
+        i++;
+    }
+    out[used] = '\0';
+    return out;
+}
+
+/** ${NAME/pattern/string}: spec is what follows the first slash. */
+static void lex_replace(Lexer* L, const char* current, const char* spec, size_t length) {
+    int all = 0, anchor = 0, nomem = 0;
+    size_t split, i, k = 0;
+    char* patternText;
+    char* replacementText = NULL;
+    char* pattern;
+    char* replacement;
+    char* value;
+
+    if (length > 0 && spec[0] == '/') {
+        all = 1;
+        spec++;
+        length--;
+    } else if (length > 0 && (spec[0] == '#' || spec[0] == '%')) {
+        anchor = spec[0];
+        spec++;
+        length--;
+    }
+    split = replacement_split(spec, length);
+    patternText = malloc(split + 1);
+    if (patternText == NULL) {
+        L->error = LEX_NOMEM;
+        return;
+    }
+    for (i = 0; i < split; i++) {
+        if (spec[i] == '\\' && i + 1 < split && spec[i + 1] == '/')
+            i++;                            // \/ is a slash of the pattern
+        patternText[k++] = spec[i];
+    }
+    patternText[k] = '\0';
+    if (split < length) {
+        replacementText = malloc(length - split);
+        if (replacementText == NULL) {
+            free(patternText);
+            L->error = LEX_NOMEM;
+            return;
+        }
+        memcpy(replacementText, spec + split + 1, length - split - 1);
+        replacementText[length - split - 1] = '\0';
+    }
+
+    {
+        char* safe = protect_text(patternText);
+        int braces = winshell_brace_enable(0);          // no brace expansion inside
+
+        pattern = safe != NULL ? expand_text(safe, &nomem) : NULL;
+        nomem |= safe == NULL;
+        free(safe);
+        free(patternText);
+        if (pattern == NULL) {
+            winshell_brace_enable(braces);
+            free(replacementText);
+            L->error = nomem ? LEX_NOMEM : LEX_SYNTAX;
+            return;
+        }
+        safe = protect_text(replacementText != NULL ? replacementText : "");
+        replacement = safe != NULL ? expand_text(safe, &nomem) : NULL;
+        nomem |= safe == NULL;
+        free(safe);
+        winshell_brace_enable(braces);
+    }
+    free(replacementText);
+    if (replacement == NULL) {
+        free(pattern);
+        L->error = nomem ? LEX_NOMEM : LEX_SYNTAX;
+        return;
+    }
+    value = replace_pattern(current != NULL ? current : "", pattern, replacement, all, anchor);
+    free(pattern);
+    free(replacement);
+    if (value == NULL) {
+        L->error = LEX_NOMEM;
+        return;
+    }
+    lexer_value(L, value);
+    free(value);
+}
+
+/**
  * ${NAME}, ${#NAME}, ${NAME:-w} ${NAME-w} ${NAME:=w} ${NAME=w} ${NAME:+w} ${NAME+w} ${NAME:?w} ${NAME?w},
  * ${NAME#p} ${NAME##p} ${NAME%p} ${NAME%%p}, ${NAME:offset} and ${NAME:offset:length}. The word and the
  * pattern are expanded like the arguments of a command.
@@ -924,6 +1152,11 @@ static int lex_braced(Lexer* L) {
         return 1;
     }
     op = rest[0];
+
+    if (!colon && op == '/') {
+        lex_replace(L, current, rest + 1, bodyLength - 1);
+        return 1;
+    }
 
     if (colon && strchr("-=+?", op) == NULL) {
         // ${NAME:offset} and ${NAME:offset:length}

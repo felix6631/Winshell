@@ -477,8 +477,33 @@ static void test_braces(void) {
     expect("c7.sh", "case b in {a,b}) echo literal;; b) echo plain;; esac\n", "", "plain\n", 0);
 }
 
+static void test_replace(void) {
+    printf("${NAME/pattern/string}\n");
+    expect("r1.sh", "v=\"hello world, hello\"\necho \"${v/hello/bye}\"\necho \"${v//hello/bye}\"\necho \"${v/o/}\" \"${v//o}\"\n", "",
+           "bye world, hello\nbye world, bye\nhell world, hello hell wrld, hell\n", 0);
+    // anchored at the start or at the end
+    expect("r2.sh", "v=\"hello world, hello\"\necho \"${v/#hello/X}\" \"${v/#world/X}\" \"${v/%hello/Z}\" \"${v/%world/Z}\"\n", "",
+           "X world, hello hello world, hello hello world, Z hello world, hello\n", 0);
+    // wildcards: the longest match that starts first
+    expect("r3.sh", "v=\"hello world, hello\"\necho \"${v/h*o/_}\" \"${v//[aeiou]/*}\"\nn=1234\necho \"${n/2*/_}\"\n", "",
+           "_ h*ll* w*rld, h*ll*\n1_\n", 0);
+    // variables in the pattern and in the string; operators and blanks are plain text
+    expect("r4.sh", "v=\"hello world, hello\"\np=hello\nr=ZZ\necho \"${v/world/$r}\" \"${v/$p/<$p>}\"\nf=/usr/local/bin\necho \"${f//\\//|}\"\n",
+           "", "hello ZZ, hello <hello> world, hello\n|usr|local|bin\n", 0);
+    expect("r5.sh", "a=\"a b c\"\necho ${a// /,}\nfor w in ${a// /,}; do echo \"[$w]\"; done\necho \"${a/ /_}\"\n", "",
+           "a,b,c\n[a,b,c]\na_b c\n", 0);
+    // nothing to replace, an empty pattern, an unset variable, UTF-8 text
+    expect("r6.sh", "x=aaa\necho \"${x/b/c}\" \"${x/}\" \"${x//}\" \"${nothing/a/b}|\"\nk=\"가나다라\"\necho \"${k/나/N}\"\n", "",
+           "aaa aaa aaa |\n가N다라\n", 0);
+    expect("r7.sh", "f=report.txt\necho \"${f/.txt/.md}\" \"${f/%.txt/.bak}\" \"${f/#rep/REP}\" ${f//t/T}\n", "",
+           "report.md report.bak REPort.txt repor" "T.TxT\n", 0);
+    // quotes in the pattern; the first } ends the expansion, as in bash
+    expect("r8.sh", "v=\"{a,b}\"\necho \"${v/'{a,b}'/X}\" \"${v/{a,b}/X}\"\n", "", "X }/X}\n", 0);
+}
+
 int main(void) {
     tools_init("shell_control_test");
+    test_replace();
     test_braces();
     test_positionals();
     test_compound_pipelines();
