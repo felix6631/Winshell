@@ -41,6 +41,12 @@ int interp_run_file(const char* path, const char* const* arguments, int argument
 int interp_capture(const char* command, char** output, size_t* length, int* status);
 
 /**
+ * The same for any code: run(context) is called with the standard output going to a pipe, in a subshell
+ * (directory, variables and traps are put back afterwards). Returns its status in *status.
+ */
+int interp_capture_call(int (*run)(void* context), void* context, char** output, size_t* length, int* status);
+
+/**
  * Input for `read`: one line from the standard input of the shell, without its line end. Returns 1, or 0 at
  * the end of the input. The line (to be freed) comes from the function given to interp_set_line_reader
  * (the terminal or the script on standard input) unless standard input was replaced for a compound

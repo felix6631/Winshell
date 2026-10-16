@@ -136,9 +136,11 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
   - A compound command stands where a command stands in a `&&`/`||` list (`if ...; fi && echo`). Redirections may follow its end:
     `while read a b; do ...; done < file`, `for ...; do ...; done > out 2>&1`, `fi >> log`. They are applied to the standard
     input and output of the shell itself, so the builtins and the programs run inside read and write there.
-  - A compound command may stand on the right of a pipe: `cmd | while read x; do ...; done`. The left part runs to its end (in a
-    subshell) and its output is the input of the compound command (it is not streamed, so a left part that never ends does not
-    work). The output of a compound command into a pipe (`done | cmd`), and a call of a function as a stage of a pipe (`f | cat`) are not there yet.
+  - A compound command, a `{ ...; }` or `( ... )` group, a function or a builtin may be a stage of a pipe: `cmd | while read x; do ...; done`,
+    `for ...; done | sort`, `printf 'a\n' | f | tr a-z A-Z`. With such a stage the stages run one after the other: only the last one runs in
+    the current shell (its assignments stay, and `echo v | read w` works); the others run to their end in a subshell and their output is the
+    input of the next stage. It is not streamed, so a stage that never ends (`yes | f`) does not work. The status is that of the last stage.
+    A pipeline of programs only is still streamed.
   - `case WORD in PATTERN[|PATTERN]...) LIST ;; ... esac`: the word and the patterns are expanded like the arguments of a command
     (variables, substitutions, quotes) and a pattern uses `* ? [..]`. A `*` in quotes is plain, and only the first clause that matches runs.
     The status is 0 when none matches; the `;;` of the last clause may be left out.

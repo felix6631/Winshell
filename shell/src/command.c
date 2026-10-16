@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#include "builtin.h"
 #include "command.h"
 #include "cwd.h"
 #include "executer.h"
@@ -113,6 +114,7 @@ typedef struct {
     int         error;
     int         quiet;          // no messages: only the kind of error is wanted
     int         pipeToCompound; // scan_simple stopped at a | that is followed by a compound command
+    int         stopAtPipe;     // scan_simple ends at a | (the redirections after a compound command)
     int         subshellDepth;  // inside ( ... ): a ) ends a command
     char        message[200];
 } Parser;
@@ -296,6 +298,8 @@ static size_t scan_simple(Parser* p, size_t start) {
         }
         if (c == ')' && p->subshellDepth > 0 && quote == '\0')
             return i;
+        if (c == '|' && text[i + 1] != '|' && p->stopAtPipe)
+            return i;
         if (c == '|' && text[i + 1] != '|') {
             // a pipe into a compound command (`cmd | while read x; do ...; done`) ends the simple command
             size_t j = i + 1;
@@ -327,6 +331,7 @@ static Node* new_node(NodeType type) {
 static int parse_andor(Parser* p, List* list, int firstOp);
 static int parse_list(Parser* p, List* list, const char* const* stops);
 static Node* parse_command(Parser* p);
+static Node* parse_single(Parser* p);
 
 static int is_stop(const Parser* p, const char* const* stops) {
     char buffer[16];
@@ -529,10 +534,13 @@ static int parse_trailer(Parser* p, Node* node) {
         (c == ')' && p->subshellDepth > 0))
         return 0;
     if (c == '|')
-        return syntax(p, "Syntax error: the output of a compound command cannot be piped%s", NULL);
+        return 0;                       // the next stage of a pipeline: parse_command goes on
     if (c == '<' || c == '>' || (c == '&' && next == '>') || (isdigit((unsigned char)c) && next == '>')) {
-        size_t start = p->pos, end = scan_simple(p, start);
+        size_t start = p->pos, end;
 
+        p->stopAtPipe = 1;
+        end = scan_simple(p, start);
+        p->stopAtPipe = 0;
         if (end == (size_t)-1)
             return -1;
         node->redirects = malloc(end - start + 1);
@@ -753,7 +761,7 @@ static int parse_subshell(Parser* p, Node* node) {
     return 0;
 }
 
-static Node* parse_command(Parser* p) {
+static Node* parse_single(Parser* p) {
     char buffer[16];
     const char* word;
     Node* node;
@@ -921,45 +929,60 @@ static Node* parse_command(Parser* p) {
         node->text[end - start] = '\0';
         p->pos = end;
 
-        if (p->pipeToCompound) {
-            // left | compound: the left part runs, its output is the input of the compound command
-            Node* pipe;
-            Node* right;
-
-            p->pipeToCompound = 0;
-            p->pos++;                       // the |
-            while (is_blank(p->text[p->pos]) || p->text[p->pos] == '\n')
-                p->pos++;
-            right = parse_command(p);
-            if (right == NULL) {
-                free_node(node);
-                return NULL;
-            }
-            pipe = new_node(NODE_PIPE);
-            if (pipe == NULL) {
-                free_node(node);
-                free_node(right);
-                p->error = ERROR_MEMORY;
-                return NULL;
-            }
-            pipe->type = NODE_PIPE;
-            if (list_add(&pipe->first, node, LIST_FIRST) != 0) {
-                free_node(node);
-                free_node(right);
-                free_node(pipe);
-                p->error = ERROR_MEMORY;
-                return NULL;
-            }
-            if (list_add(&pipe->second, right, LIST_FIRST) != 0) {
-                free_node(right);
-                free_node(pipe);            // frees the left part with it
-                p->error = ERROR_MEMORY;
-                return NULL;
-            }
-            return pipe;
-        }
         return node;
     }
+}
+
+/**
+ * A command and the stages after it when they are joined with | and one of them is a compound command: the
+ * stages are the nodes of a NODE_PIPE. (Stages that are all simple commands stay in one text: a pipeline.)
+ */
+static Node* parse_command(Parser* p) {
+    Node* first = parse_single(p);
+    Node* pipe;
+
+    if (first == NULL)
+        return NULL;
+    skip_blanks(p);
+    if (!p->pipeToCompound && !(p->text[p->pos] == '|' && p->text[p->pos + 1] != '|'))
+        return first;
+
+    pipe = new_node(NODE_PIPE);
+    if (pipe == NULL) {
+        free_node(first);
+        p->error = ERROR_MEMORY;
+        return NULL;
+    }
+    pipe->type = NODE_PIPE;
+    if (list_add(&pipe->first, first, LIST_FIRST) != 0) {
+        free_node(first);
+        free_node(pipe);
+        p->error = ERROR_MEMORY;
+        return NULL;
+    }
+    for (;;) {
+        Node* next;
+
+        skip_blanks(p);
+        if (!p->pipeToCompound && !(p->text[p->pos] == '|' && p->text[p->pos + 1] != '|'))
+            break;
+        p->pipeToCompound = 0;
+        p->pos++;                       // the |
+        while (is_blank(p->text[p->pos]) || p->text[p->pos] == '\n')
+            p->pos++;
+        next = parse_single(p);
+        if (next == NULL) {
+            free_node(pipe);
+            return NULL;
+        }
+        if (list_add(&pipe->first, next, LIST_FIRST) != 0) {
+            free_node(next);
+            free_node(pipe);
+            p->error = ERROR_MEMORY;
+            return NULL;
+        }
+    }
+    return pipe;
 }
 
 /* ---- running ----------------------------------------------------------------------------- */
@@ -1516,25 +1539,277 @@ static int run_redirected(Runner* r, const Node* node, int status) {
     return result;
 }
 
-/** left | compound: the output of the left part (run to the end, in a subshell) is the input of the compound. */
-static int run_pipe_into(Runner* r, const Node* node, int status) {
-    char* output = NULL;
-    size_t length = 0;
-    int leftStatus, result;
-    InputRedirection* input;
+/* ---- pipelines with compound commands or functions --------------------------------------------- */
 
-    if (interp_capture(node->first.nodes[0]->text, &output, &length, &leftStatus) != 0)
-        return 1;
-    input = interp_input_from_bytes(output, length);
-    free(output);
-    if (input == NULL) {
-        fprintf(stderr, "Error: Cannot make the input of the command\n");
-        return 1;
+/*
+ * The stages of such a pipeline run one after the other: every stage but the last runs in a subshell with
+ * its output captured, and the captured bytes are the input of the next stage. The last stage runs in the
+ * current shell. A stage that never ends (`yes | f`) therefore cannot be used, and `head` at the end does
+ * not stop the one in front of it early.
+ */
+
+typedef struct {
+    const Node* node;           // a compound command, or
+    char*       text;           // a pipeline of simple commands (owned when `owned`)
+    int         owned;
+} Stage;
+
+typedef struct {
+    Stage* items;
+    size_t count, capacity;
+} StageList;
+
+static int stages_add(StageList* list, const Node* node, char* text, int owned) {
+    if (list->count == list->capacity) {
+        size_t capacity = list->capacity == 0 ? 4 : list->capacity * 2;
+        Stage* grown = realloc(list->items, capacity * sizeof *grown);
+
+        if (grown == NULL)
+            return -1;
+        list->items = grown;
+        list->capacity = capacity;
     }
-    interp_input_redirected(1);
-    result = run_node(r, node->second.nodes[0], status);
-    interp_input_redirected(-1);
-    interp_input_restore(input);
+    list->items[list->count].node = node;
+    list->items[list->count].text = text;
+    list->items[list->count].owned = owned;
+    list->count++;
+    return 0;
+}
+
+static void stages_free(StageList* list) {
+    size_t i;
+
+    for (i = 0; i < list->count; i++)
+        if (list->items[i].owned)
+            free(list->items[i].text);
+    free(list->items);
+    memset(list, 0, sizeof *list);
+}
+
+/** Cuts the text of a pipeline at its | (not inside quotes and substitutions). The parts are malloc'ed. */
+static int split_pipeline_text(const char* text, char*** parts, size_t* count) {
+    size_t i = 0, start = 0, n = 0, capacity = 0;
+    char quote = '\0';
+    char** list = NULL;
+
+    for (;; ) {
+        char c = text[i];
+        int end = c == '\0';
+
+        if (!end) {
+            size_t passed;
+
+            if (quote != '\'' && ((c == '$' && (text[i + 1] == '(' || text[i + 1] == '{')) || c == '`')) {
+                size_t length = winshell_substitution_length(text + i);
+
+                i += length > 0 ? length : 1;
+                continue;
+            }
+            passed = winshell_pass_quoted(text, i, &quote);
+            if (passed > 0) {
+                i += passed;
+                continue;
+            }
+        }
+        if (end || (c == '|' && text[i + 1] != '|' && (i == 0 || text[i - 1] != '>'))) {
+            char* part = malloc(i - start + 1);
+
+            if (part == NULL || VEC_RESERVE(list, capacity, n + 2) != 0) {
+                free(part);
+                while (n > 0)
+                    free(list[--n]);
+                free(list);
+                return -1;
+            }
+            memcpy(part, text + start, i - start);
+            part[i - start] = '\0';
+            list[n++] = part;
+            if (end)
+                break;
+            start = i + 1;
+        }
+        i++;
+    }
+    *parts = list;
+    *count = n;
+    return 0;
+}
+
+/** A function or a builtin: it has to run in the shell itself, not as a program. */
+static int part_is_function_call(const char* part) {
+    char name[128];
+    size_t n = 0;
+
+    while (is_blank(*part))
+        part++;
+    while (*part != '\0' && !is_blank(*part) && strchr("<>;&()\"'$`\\", *part) == NULL && n < sizeof name - 1)
+        name[n++] = *part++;
+    name[n] = '\0';
+    return n > 0 && (command_has_function(name) || builtin_exists(name));
+}
+
+/** Adds the stages of a pipeline text: the parts that call a function stand alone, the others stay together. */
+static int append_text_stages(StageList* list, const char* text, int* anyFunction) {
+    char** parts;
+    size_t count, i, groupStart = 0;
+    int result = 0;
+
+    if (strchr(text, '|') == NULL || split_pipeline_text(text, &parts, &count) != 0 || count < 2) {
+        char* copy = _strdup(text);
+
+        if (copy == NULL || stages_add(list, NULL, copy, 1) != 0) {
+            free(copy);
+            return -1;
+        }
+        if (strchr(text, '|') == NULL) {
+            char* word = _strdup(text);
+            *anyFunction |= word != NULL && part_is_function_call(word);
+            free(word);
+        }
+        return 0;
+    }
+
+    for (i = 0; i <= count; i++) {
+        int function = i < count && part_is_function_call(parts[i]);
+
+        if (i == count || function) {
+            if (i > groupStart) {
+                size_t total = 1, k;
+                char* joined;
+
+                for (k = groupStart; k < i; k++)
+                    total += strlen(parts[k]) + 1;
+                joined = malloc(total);
+                if (joined == NULL) {
+                    result = -1;
+                    break;
+                }
+                joined[0] = '\0';
+                for (k = groupStart; k < i; k++) {
+                    if (k > groupStart)
+                        strcat(joined, "|");
+                    strcat(joined, parts[k]);
+                }
+                if (stages_add(list, NULL, joined, 1) != 0) {
+                    free(joined);
+                    result = -1;
+                    break;
+                }
+            }
+            if (function) {
+                *anyFunction = 1;
+                if (stages_add(list, NULL, parts[i], 1) != 0) {
+                    result = -1;
+                    break;
+                }
+                parts[i] = NULL;        // the list owns it now
+            }
+            groupStart = i + 1;
+        }
+    }
+    for (i = 0; i < count; i++)
+        free(parts[i]);
+    free(parts);
+    return result;
+}
+
+typedef struct {
+    const Stage* stage;
+    int          status;
+} StageRun;
+
+static int run_stage_here(Runner* r, const Stage* stage, int status) {
+    if (stage->node != NULL)
+        return run_node(r, stage->node, status);
+    return interp_run_line(stage->text, r->exitShell, status);
+}
+
+static int run_stage_captured(void* context) {
+    const StageRun* run = context;
+    Runner inner;
+    int exitInside = 0;
+
+    inner.exitShell = &exitInside;
+    inner.loopDepth = 0;
+    return run_stage_here(&inner, run->stage, run->status);
+}
+
+static int run_stages(Runner* r, const StageList* list, int status) {
+    InputRedirection* input = NULL;
+    int result = 0;
+    size_t i;
+
+    for (i = 0; i < list->count; i++) {
+        if (i + 1 == list->count) {
+            result = run_stage_here(r, &list->items[i], status);
+        } else {
+            StageRun run;
+            char* output = NULL;
+            size_t length = 0;
+            int stageStatus;
+
+            run.stage = &list->items[i];
+            run.status = status;
+            if (interp_capture_call(run_stage_captured, &run, &output, &length, &stageStatus) != 0) {
+                result = 1;
+                break;
+            }
+            if (input != NULL) {
+                interp_input_redirected(-1);
+                interp_input_restore(input);
+            }
+            input = interp_input_from_bytes(output, length);
+            free(output);
+            if (input == NULL) {
+                fprintf(stderr, "Error: Cannot make the input of the command\n");
+                result = 1;
+                break;
+            }
+            interp_input_redirected(1);
+        }
+    }
+    if (input != NULL) {
+        interp_input_redirected(-1);
+        interp_input_restore(input);
+    }
+    return result;
+}
+
+/** A pipeline in which a compound command is a stage. */
+static int run_pipe(Runner* r, const Node* node, int status) {
+    StageList list;
+    size_t i;
+    int ignored = 0, result;
+
+    memset(&list, 0, sizeof list);
+    for (i = 0; i < node->first.count; i++) {
+        const Node* stage = node->first.nodes[i];
+
+        if ((stage->type == NODE_SIMPLE ? append_text_stages(&list, stage->text, &ignored)
+                                        : stages_add(&list, stage, NULL, 0)) != 0) {
+            stages_free(&list);
+            return 1;
+        }
+    }
+    result = run_stages(r, &list, status);
+    stages_free(&list);
+    return result;
+}
+
+/** A simple command whose pipeline calls a function runs as stages; any other goes to the pipeline runner. */
+static int run_simple(Runner* r, const Node* node, int status) {
+    StageList list;
+    int anyFunction = 0, result;
+
+    if (strchr(node->text, '|') == NULL)
+        return interp_run_simple(node->text, r->exitShell, status);
+    memset(&list, 0, sizeof list);
+    if (append_text_stages(&list, node->text, &anyFunction) != 0 || !anyFunction) {
+        stages_free(&list);
+        return interp_run_simple(node->text, r->exitShell, status);
+    }
+    result = run_stages(r, &list, status);
+    stages_free(&list);
     return result;
 }
 
@@ -1542,7 +1817,7 @@ static int run_node(Runner* r, const Node* node, int status) {
     if (node->redirects != NULL)
         return run_redirected(r, node, status);
     if (node->type == NODE_PIPE)
-        return run_pipe_into(r, node, status);
+        return run_pipe(r, node, status);
 
     switch (node->type) {
     case NODE_PIPE:
@@ -1560,7 +1835,7 @@ static int run_node(Runner* r, const Node* node, int status) {
     case NODE_FUNCTION:
         return define_function((Node*)node) == 0 ? 0 : 1;
     case NODE_SIMPLE:
-        return interp_run_simple(node->text, r->exitShell, status);
+        return run_simple(r, node, status);
 
     case NODE_IF: {
         int condition;

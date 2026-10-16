@@ -210,7 +210,7 @@ static void test_input(void) {
     expect("o5.sh", "n=0\nwhile read l; do n=$((n+1)); done < data.txt > count.txt\ncat count.txt\necho $n\n", "", "3\n", 0);
 
     // programs started in a redirected loop read the same input
-    expect("o6.sh", "while read l w; do echo \"$l\"; done < data.txt | cat\n", "", "", 2);
+    expect("o6.sh", "while read l w; do echo \"$l\"; done < data.txt | cat\n", "", "alpha\nbeta\ngamma\n", 0);
 
     // a file that cannot be opened: a message, status 1, the loop does not run
     {
@@ -357,8 +357,43 @@ static void test_trap(void) {
     expect("t15.sh", "n=5\ntrap 'echo n=$n' EXIT\nn=6\n", "", "n=6\n", 0);
 }
 
+static void test_compound_pipelines(void) {
+    printf("functions and compound commands as stages of a pipeline\n");
+    const char* up = "up() { while read l; do echo \"[$l]\"; done; }\n";
+    char text[512];
+
+    // a function at the end, in the middle and at the start
+    snprintf(text, sizeof text, "%sprintf 'a\\nb\\n' | up\n", up);
+    expect("p1.sh", text, "", "[a]\n[b]\n", 0);
+    snprintf(text, sizeof text, "%sprintf 'x\\ny\\n' | up | tr a-z A-Z\n", up);
+    expect("p2.sh", text, "", "[X]\n[Y]\n", 0);
+    snprintf(text, sizeof text, "%sgen() { echo one; echo two; }\ngen | grep tw | up\n", up);
+    expect("p3.sh", text, "", "[two]\n", 0);
+
+    // a loop, a group, a subshell and an if as stages; a redirection before the pipe
+    snprintf(text, sizeof text, "%sfor i in 3 1 2; do echo $i; done | sort | up\n", up);
+    expect("p4.sh", text, "", "[1]\n[2]\n[3]\n", 0);
+    snprintf(text, sizeof text, "%s{ echo g1; echo g2; } | up\n(echo s1; echo s2) | up\n", up);
+    expect("p5.sh", text, "", "[g1]\n[g2]\n[s1]\n[s2]\n", 0);
+    snprintf(text, sizeof text, "%sprintf 'l1\\nl2\\n' > in.txt\nwhile read x; do echo \"got $x\"; done < in.txt | up\n", up);
+    expect("p6.sh", text, "", "[got l1]\n[got l2]\n", 0);
+    expect("p7.sh", "echo hello | if read x; then echo \"read $x\"; fi\n", "", "read hello\n", 0);
+    expect("p8.sh", "printf 'a\\nb\\n' | while read x; do echo \"<$x>\"; done | tr a-z A-Z\n", "", "<A>\n<B>\n", 0);
+
+    // the status is that of the last stage; the stages but the last run in subshells
+    expect("p9.sh", "f() { cat > nul; return 3; }\necho x | f\necho $?\necho x | f | cat\necho $?\n", "", "3\n0\n", 0);
+    expect("p10.sh", "(echo q; exit 5) | cat\nv=1\n(v=2; echo $v) | cat\necho $v\n", "", "q\n2\n1\n", 0);
+    // the last stage runs in the shell itself: its assignments stay, and a builtin can be a stage
+    expect("p11.sh", "echo val | { read v; }\necho \"v=$v\"\necho val2 | read w\necho \"w=$w\"\n", "", "v=val\nw=val2\n", 0);
+    // arguments, quotes and a function that is called with the input of the previous stage
+    expect("p12.sh", "tag() { while read l; do echo \"$1:$l\"; done; }\necho z | tag T\necho 'a|b' | tag Q\n", "", "T:z\nQ:a|b\n", 0);
+    // a pipe at the end of a line goes on in the next one
+    expect("p13.sh", "for i in 1 2; do echo $i; done |\n  tr 12 ab\n", "", "a\nb\n", 0);
+}
+
 int main(void) {
     tools_init("shell_control_test");
+    test_compound_pipelines();
     test_if();
     test_loops();
     test_break_continue();

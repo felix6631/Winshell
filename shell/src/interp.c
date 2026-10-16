@@ -303,11 +303,11 @@ static DWORD WINAPI capture_thread(LPVOID parameter) {
  * subshell as far as that can be done in the process: the directory and the variables are what they were
  * before when it has ended, and an `exit` ends only the substitution.
  */
-int interp_capture(const char* command, char** output, size_t* outputLength, int* statusOut) {
+int interp_capture_call(int (*run)(void* context), void* context, char** output, size_t* outputLength, int* statusOut) {
     HANDLE read = NULL, write = NULL;
     Capture capture;
     HANDLE thread;
-    int pipeFd, savedOut, exitSub = 0, status, before;
+    int pipeFd, savedOut, status, before;
     char directory[VPATH_MAX];
     VarSnapshot* variables;
     void* traps;
@@ -340,7 +340,7 @@ int interp_capture(const char* command, char** output, size_t* outputLength, int
     variables = var_save();
     traps = command_traps_enter_subshell();
     before = winshell_lastStatus();
-    status = interp_run_line(command, &exitSub, before);
+    status = run(context);
     command_traps_leave_subshell(traps);
     winshell_setLastStatus(before);                 // $? of the line around the substitution is not changed
 
@@ -370,6 +370,16 @@ int interp_capture(const char* command, char** output, size_t* outputLength, int
     if (statusOut != NULL)
         *statusOut = status;
     return 0;
+}
+
+static int run_captured_line(void* context) {
+    int exitSub = 0;
+
+    return interp_run_line((const char*)context, &exitSub, winshell_lastStatus());
+}
+
+int interp_capture(const char* command, char** output, size_t* outputLength, int* statusOut) {
+    return interp_capture_call(run_captured_line, (void*)command, output, outputLength, statusOut);
 }
 
 static int substitute(const char* command, char** output) {

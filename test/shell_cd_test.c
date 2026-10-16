@@ -95,9 +95,9 @@ static void test_cd(void) {
     // the programs started by the shell see the virtual directory too
     SCRIPT_OUT("cd /\npwd\ncd c\npwd\n", "/\n/c\n");
 
-    // cd inside a pipeline is not a builtin: nothing changes
+    // cd in front of a pipe runs in a subshell: nothing changes
     script("cd / | cat\npwd\n", &r);
-    CHECK(strstr(r.err, "Failed to execute command 'cd'") != NULL);
+    CHECK_STR(r.err, "");
     snprintf(expected, sizeof expected, "%s\n", virtualWorkDir);
     CHECK_STR(r.out, expected);
     run_result_free(&r);

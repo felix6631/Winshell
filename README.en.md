@@ -122,7 +122,7 @@ Besides the unit tests there are **property tests** (LF, CRLF and mixed line end
 
 Winshell is under active development.
 
-- **Shell**: background jobs (`&`), brace expansion, `${NAME/pattern/value}`, `$$`, arrays, functions and control structures inside pipelines, `select`, more signals for `trap`
+- **Shell**: background jobs (`&`), brace expansion, `${NAME/pattern/value}`, `$$`, arrays, `select`, more signals for `trap`
 - **Compatibility**: the goal is to run as far back as Windows XP (not verified yet). UTF-8 behaviour needs Windows 10 version 1903 or later.
 - **coreutils**
 
