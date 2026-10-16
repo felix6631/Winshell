@@ -569,8 +569,41 @@ static void test_arrays(void) {
     }
 }
 
+static void test_select(void) {
+    printf("select\n");
+    expect("q1.sh", "printf '2\\n' | select x in a b c; do echo \"x=$x r=$REPLY\"; break; done\n", "", "x=b r=2\n", 0);
+    // a wrong choice sets the variable to nothing, an empty line shows the menu again, the end of the input ends the loop
+    expect("q2.sh", "printf '2\\nzz\\n\\n3\\n9\\n' | select x in a b c; do echo \"[$x][$REPLY]\"; done\necho $?\n", "",
+           "[b][2]\n[][zz]\n[c][3]\n[][9]\n0\n", 0);
+    // the words are expanded like those of for; without `in` they are the parameters
+    expect("q3.sh", "w=\"p q\"\nf() { printf '3\\n' | select o; do echo \"o=$o\"; break; done; }\nf one two three\nprintf '2\\n' | select y in $w {x,z}; do echo \"y=$y\"; break; done\n", "",
+           "o=three\ny=q\n", 0);
+    // continue asks again, break leaves with the status of the list
+    expect("q4.sh", "printf '1\\n2\\n3\\n' | select x in a b c; do if [ $x = a ]; then continue; fi; echo \"x=$x\"; [ $x = b ] && break; done\necho end\n", "",
+           "x=b\nend\n", 0);
+    expect("q5.sh", "printf '1\\n' | select x in a; do expr 1 = 2; done\necho $?\n", "", "0\n1\n", 0);
+    {
+        RunResult r;
+
+        write_text(workDir, "q6.sh", "PS3='pick> '\nprintf '2\\n' | select x in alpha beta; do echo \"$x\"; break; done\n");
+        run_shell("q6.sh", "", &r);
+        lf_only(r.out);
+        lf_only(r.err);
+        CHECK_STR(r.out, "beta\n");
+        CHECK_STR(r.err, "1) alpha\n2) beta\npick> ");     // the menu and the prompt are on standard error
+        run_result_free(&r);
+
+        write_text(workDir, "q7.sh", "printf '' | select n in a b c d e f g h i j; do :; done\n");
+        run_shell("q7.sh", "", &r);
+        lf_only(r.err);
+        CHECK(strstr(r.err, " 1) a\n 2) b\n") != NULL && strstr(r.err, "10) j\n") != NULL);
+        run_result_free(&r);
+    }
+}
+
 int main(void) {
     tools_init("shell_control_test");
+    test_select();
     test_arrays();
     test_replace();
     test_braces();

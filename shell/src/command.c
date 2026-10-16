@@ -51,6 +51,7 @@ struct Node {
     char*    redirects;         // a compound command: the redirections written after it (`done < file`), or NULL
     char*    name;              // NODE_FOR: the variable; NODE_FUNCTION: the name of the function
     int      until;             // NODE_WHILE: until
+    int      isSelect;          // NODE_FOR: select instead of for
     int      hasElse;           // NODE_IF
     List     first;             // IF: the condition, WHILE: the condition
     List     second;            // IF: then, WHILE and FOR: the body
@@ -210,7 +211,7 @@ static int at_word(const Parser* p, const char* word) {
 
 static int is_reserved(const char* word) {
     static const char* const words[] = { "if", "then", "elif", "else", "fi", "while", "until", "do", "done", "for", "in",
-                                          "case", "esac", "{", "}" };
+                                          "case", "esac", "{", "}", "select" };
     size_t i;
 
     for (i = 0; i < sizeof words / sizeof words[0]; i++)
@@ -327,7 +328,8 @@ static size_t scan_simple(Parser* p, size_t start) {
                 j++;
             if (plain_word(p, j, word, sizeof word, &wordEnd) &&
                 (strcmp(word, "while") == 0 || strcmp(word, "until") == 0 || strcmp(word, "for") == 0 ||
-                 strcmp(word, "if") == 0 || strcmp(word, "case") == 0 || strcmp(word, "{") == 0)) {
+                 strcmp(word, "select") == 0 || strcmp(word, "if") == 0 || strcmp(word, "case") == 0 ||
+                 strcmp(word, "{") == 0)) {
                 p->pipeToCompound = 1;
                 return i;
             }
@@ -928,7 +930,7 @@ static Node* parse_single(Parser* p) {
             type = NODE_IF;
         else if (strcmp(word, "while") == 0 || strcmp(word, "until") == 0)
             type = NODE_WHILE;
-        else if (strcmp(word, "for") == 0)
+        else if (strcmp(word, "for") == 0 || strcmp(word, "select") == 0)
             type = NODE_FOR;
         else if (strcmp(word, "case") == 0)
             type = NODE_CASE;
@@ -945,6 +947,7 @@ static Node* parse_single(Parser* p) {
         }
         node->type = type;
         node->until = strcmp(word, "until") == 0;
+        node->isSelect = strcmp(word, "select") == 0;
         p->pos += strlen(word);
         if (type == NODE_IF)
             status = parse_if(p, node);
@@ -2063,6 +2066,107 @@ static int run_background(Runner* r, const Node* node, int status) {
     return started < 0 ? 1 : 0;
 }
 
+/* ---- select ------------------------------------------------------------------------------ */
+
+static int digits_of(size_t number) {
+    int n = 1;
+
+    while (number >= 10) {
+        number /= 10;
+        n++;
+    }
+    return n;
+}
+
+/** The menu of select on standard error: numbered, in as many columns as the width (COLUMNS, 80) allows. */
+static void print_select_menu(char* const* values, size_t count) {
+    const char* columnsText = var_get("COLUMNS");
+    int width = columnsText != NULL ? atoi(columnsText) : 80;
+    size_t indicesLength = (size_t)digits_of(count), maxLength = 0, columns, rows, row, i;
+
+    if (width <= 0)
+        width = 80;
+    for (i = 0; i < count; i++) {
+        size_t length = strlen(values[i]) + indicesLength + 2;
+
+        if (length > maxLength)
+            maxLength = length;
+    }
+    columns = maxLength > 0 ? (size_t)width / maxLength : 1;
+    if (columns == 0)
+        columns = 1;
+    rows = count > 0 ? count / columns + (count % columns != 0) : 1;
+    columns = count > 0 ? count / rows + (count % rows != 0) : 1;
+    if (rows == 1) {
+        rows = columns;
+        columns = 1;
+    }
+    for (row = 0; row < rows; row++) {
+        size_t index = row, position = 0;
+
+        for (;;) {
+            int numberWidth = position == 0 ? digits_of(rows) : (int)indicesLength;
+            int written = fprintf(stderr, "%*lu) %s", numberWidth, (unsigned long)(index + 1), values[index]);
+
+            index += rows;
+            position++;
+            if (index >= count)
+                break;
+            fprintf(stderr, "%*s", (int)(maxLength + 2) - written > 0 ? (int)(maxLength + 2) - written : 1, "");
+        }
+        fputc('\n', stderr);
+    }
+    fflush(stderr);
+}
+
+/**
+ * select NAME in WORDS; do LIST; done: shows the numbered words, asks with PS3 (default "#? ") and reads a line. A
+ * number of a word sets NAME to it and runs the list; any other text sets NAME to nothing and runs it, an empty
+ * line shows the menu again. REPLY is the line. It goes on until break or the end of the input.
+ */
+static int run_select(Runner* r, const Node* node, char* const* values, size_t count) {
+    int result = 0;
+    const char* prompt = var_get("PS3");
+
+    if (prompt == NULL)
+        prompt = "#? ";
+    activeLoopDepth++;
+    print_select_menu(values, count);
+    while (!*r->exitShell) {
+        char* line = NULL;
+        char* end;
+        long choice;
+
+        if (interrupt_ends_loop(r, result)) {
+            result = 130;
+            break;
+        }
+        fputs(prompt, stderr);
+        fflush(stderr);
+        if (!interp_read_line(&line)) {
+            fputc('\n', stderr);
+            break;
+        }
+        var_set("REPLY", line);
+        if (line[0] == '\0') {
+            free(line);
+            print_select_menu(values, count);
+            continue;
+        }
+        choice = strtol(line, &end, 10);
+        if (*end == '\0' && choice >= 1 && (size_t)choice <= count)
+            var_set(node->name, values[choice - 1]);
+        else
+            var_set(node->name, "");
+        free(line);
+        result = run_list(r, &node->second, result);
+        if (after_round())
+            break;
+    }
+    activeLoopDepth--;
+    return result;
+}
+
 static int run_node(Runner* r, const Node* node, int status) {
     if (node->redirects != NULL)
         return run_redirected(r, node, status);
@@ -2168,6 +2272,15 @@ static int run_node(Runner* r, const Node* node, int status) {
                     values[i] = _strdup(argv[i + 1]);
         }
         winshell_freePipeline(&pipeline);
+
+        if (node->isSelect) {
+            if (values != NULL)
+                result = run_select(r, node, values, count);
+            for (i = 0; i < count && values != NULL; i++)
+                free(values[i]);
+            free(values);
+            return result;
+        }
 
         activeLoopDepth++;
         for (i = 0; i < count && values != NULL && !*r->exitShell; i++) {

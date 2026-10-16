@@ -118,6 +118,11 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
     `read -a name` (the fields of a line) are there; a subshell and `$(...)` put the arrays back too, and a background job gets them. Arrays
     are not exported. Not there yet: `local` for arrays, `a=([2]=x)`, `a[1]` inside arithmetic, the operators `#` `%` `/` on `${a[@]}`,
     associative arrays (`declare -A`).
+  - `select NAME [in word...]; do list; done` shows the words (expanded as for `for`; without `in` they are `"$@"`) as a numbered menu on standard
+    error (in as many columns as `COLUMNS`, 80 by default, allows), asks with `PS3` (default `#? `), reads a line into `REPLY`, and sets `NAME`
+    to the word with that number, or to nothing for any other line; then it runs the list. An empty line shows the menu again. The loop ends
+    with `break` or at the end of the input (the status is that of the last list), and `continue` asks again. The input can come from a
+    pipe or `<` (`printf '2\n' | select ...`).
   - `list &` runs a whole list joined with `&&`/`||` as a background job and goes on at once (status 0). `$!` is the process id of the last
     job, `$$` the process id of the shell. A pipeline of programs is started without waiting; builtins, functions, control structures and
     groups run in a `shell -c` of their own, which is given the variables that are not exported, the functions and the positional
