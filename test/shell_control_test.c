@@ -522,8 +522,56 @@ static void test_replace(void) {
     expect("r8.sh", "v=\"{a,b}\"\necho \"${v/'{a,b}'/X}\" \"${v/{a,b}/X}\"\n", "", "X }/X}\n", 0);
 }
 
+static void test_arrays(void) {
+    printf("arrays\n");
+    expect("y1.sh", "a=(one \"two words\" three)\necho \"${a[0]}|${a[1]}|${a[2]}|${a[3]}|\"\necho \"${#a[@]} ${#a[1]}\"\n", "",
+           "one|two words|three||\n3 9\n", 0);
+    // "${a[@]}" is a word per element, "${a[*]}" one word, unquoted splits at blanks
+    expect("y2.sh", "a=(one \"two words\" three)\nfor x in \"${a[@]}\"; do echo \"[$x]\"; done\nfor x in \"${a[*]}\"; do echo \"<$x>\"; done\n"
+           "for x in ${a[@]}; do echo \"($x)\"; done\n", "",
+           "[one]\n[two words]\n[three]\n<one two words three>\n(one)\n(two)\n(words)\n(three)\n", 0);
+    // indices, negative indices, arithmetic subscripts
+    expect("y3.sh", "a=(x y z)\ni=1\necho \"${!a[@]} ${a[-1]} ${a[-2]} ${a[i]} ${a[$i]} ${a[i+1]}\"\n", "", "0 1 2 z y y y z\n", 0);
+    // a[i]=v makes a sparse array; += appends; a+=(..) goes after the highest index
+    expect("y4.sh", "a=(1 2)\na[5]=five\necho \"${!a[@]} ${#a[@]}\"\na+=(six)\necho \"${!a[@]}\"\na[1]+=\"!\"\necho \"${a[1]}\"\n", "",
+           "0 1 5 3\n0 1 5 6\n2!\n", 0);
+    // $a is ${a[0]}, a=x sets a[0], a scalar becomes an array
+    expect("y5.sh", "a=(p q)\necho \"$a ${a}\"\na=z\necho \"${a[@]}\"\ns=plain\ns[1]=second\necho \"${s[@]} ${#s[@]}\"\nt=ab\nt+=cd\necho $t\n", "",
+           "p p\nz q\nplain second 2\nabcd\n", 0);
+    // slices, unset of an element and of the whole array
+    expect("y6.sh", "b=(1 2 3 4 5)\necho \"${b[@]:1:3}|${b[@]:2}|${b[@]: -2}\"\nunset b[1]\necho \"${b[@]} (${!b[@]})\"\nunset b\necho \"[${b[@]}] ${#b[@]}\"\n", "",
+           "2 3 4|3 4 5|4 5\n1 3 4 5 (0 2 3 4)\n[] 0\n", 0);
+    // empty arrays, a default for an unset element, operators on an element
+    expect("y7.sh", "c=()\necho ${#c[@]}\nc+=(x)\nc+=(y z)\necho \"${c[@]} ${#c[@]}\"\na=(one)\necho \"${a[9]:-none} ${a[0]:-none} ${a[0]/n/N} ${a[0]%e}\"\n", "",
+           "0\nx y z 3\nnone one oNe on\n", 0);
+    // the elements are expanded like words: braces, variables, quotes, several lines
+    expect("y8.sh", "v=V\nw=(a{1,2} \"$v x\" '$v')\necho \"${#w[@]} ${w[0]} ${w[1]} ${w[2]} ${w[3]}\"\nm=(\n  multi\n  \"line elements\"\n)\necho \"${#m[@]} ${m[1]}\"\n", "",
+           "4 a1 a2 V x $v\n2 line elements\n", 0);
+    // parameters into an array, an array into parameters
+    expect("y9.sh", "f() { arr=(\"$@\"); echo \"${#arr[@]} ${arr[1]}\"; set_args \"${arr[@]}\"; }\nset_args() { echo \"$# [$2]\"; }\nf \"p q\" r s\n", "",
+           "3 r\n3 [r]\n", 0);
+    // a subshell and a substitution do not change the arrays of the caller
+    expect("y10.sh", "( x=(1 2); echo \"in ${x[@]}\" )\necho \"out [${x[@]}]\"\ny=(1)\nz=$(y+=(2); echo ${#y[@]})\necho \"$z ${#y[@]}\"\n", "",
+           "in 1 2\nout []\n2 1\n", 0);
+    // read -a, and a background job gets the arrays
+    expect("y11.sh", "echo hello big world | { read -a p; echo \"${#p[@]} ${p[1]}\"; }\nq=(1 \"2 3\")\necho \"${q[1]}\" &\nwait\n", "",
+           "3 big\n2 3\n", 0);
+    // an exported variable cannot be an array; an array is not exported
+    {
+        RunResult r;
+
+        write_text(workDir, "y12.sh", "export E=1\nE=(a b)\necho $?\na=(1 2)\nexport a\necho \"${a[1]}\"\n");
+        run_shell("y12.sh", "", &r);
+        lf_only(r.out);
+        CHECK_STR(r.out, "1\n2\n");
+        CHECK(strstr(r.err, "exported variable cannot be an array") != NULL);
+        run_result_free(&r);
+    }
+}
+
 int main(void) {
     tools_init("shell_control_test");
+    test_arrays();
     test_replace();
     test_braces();
     test_positionals();

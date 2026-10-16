@@ -124,6 +124,7 @@ static int builtin_export(char* const argv[]) {
 static int builtin_read(char* const argv[]) {
     int raw = 0, i, count, status = 0, gotAny = 0;
     const char* prompt = NULL;
+    const char* arrayName = NULL;
     const char* ifs;
     char* line = NULL;
     char* text = NULL;
@@ -142,6 +143,12 @@ static int builtin_read(char* const argv[]) {
                 raw = 1;
             } else if (*option == 's') {
                 // no echo: nothing to do here
+            } else if (*option == 'a') {
+                if (option[1] != '\0')
+                    arrayName = option + 1;
+                else if (argv[i + 1] != NULL)
+                    arrayName = argv[++i];
+                break;
             } else if (*option == 'p') {
                 if (option[1] != '\0')
                     prompt = option + 1;
@@ -217,7 +224,41 @@ static int builtin_read(char* const argv[]) {
     if (ifs == NULL)
         ifs = " \t\n";
 
-    if (count == 0) {
+    if (arrayName != NULL) {
+        // read -a NAME: every field of the line is an element
+        char** fields = NULL;
+        size_t fieldCount = 0, fieldCapacity = 0, at = 0;
+
+        while (at < length) {
+            size_t out = 0;
+            char* value;
+
+            while (at < length && strchr(ifs, text[at]) != NULL && strchr(" \t\n", text[at]) != NULL)
+                at++;
+            if (at >= length)
+                break;
+            value = malloc(length - at + 1);
+            if (value == NULL)
+                break;
+            while (at < length && strchr(ifs, text[at]) == NULL) {
+                if (!raw && text[at] == '\\' && at + 1 < length)
+                    at++;
+                value[out++] = text[at++];
+            }
+            value[out] = '\0';
+            if (at < length)
+                at++;                       // the separator
+            if (VEC_RESERVE(fields, fieldCapacity, fieldCount + 2) != 0) {
+                free(value);
+                break;
+            }
+            fields[fieldCount++] = value;
+        }
+        var_array_assign(arrayName, fields, fieldCount);
+        while (fieldCount > 0)
+            free(fields[--fieldCount]);
+        free(fields);
+    } else if (count == 0) {
         var_set("REPLY", text);
     } else {
         for (i = 0; i < count; i++) {
@@ -279,6 +320,33 @@ static int builtin_unset(char* const argv[]) {
         if (functions) {
             command_unset_function(argv[i]);
             continue;
+        }
+        {
+            const char* bracket = strchr(argv[i], '[');
+            size_t end = bracket != NULL ? winshell_subscript_end(bracket) : 0;
+
+            if (bracket != NULL && end > 0 && bracket[end + 1] == '\0' && valid_name(argv[i], (size_t)(bracket - argv[i]))) {
+                // unset NAME[index]
+                char name[256];
+                char* subscript = malloc(end);
+                long index;
+
+                if (subscript == NULL || (size_t)(bracket - argv[i]) >= sizeof name) {
+                    free(subscript);
+                    status = 1;
+                    continue;
+                }
+                memcpy(name, argv[i], (size_t)(bracket - argv[i]));
+                name[bracket - argv[i]] = '\0';
+                memcpy(subscript, bracket + 1, end - 1);
+                subscript[end - 1] = '\0';
+                if (winshell_eval_index(subscript, &index) == 0)
+                    var_array_unset(name, index);
+                else
+                    status = 1;
+                free(subscript);
+                continue;
+            }
         }
         if (!valid_name(argv[i], strlen(argv[i]))) {
             fprintf(stderr, "unset: '%s': not a valid identifier\n", argv[i]);

@@ -61,6 +61,21 @@ typedef struct Positionals Positionals;
 Positionals* winshell_positionals_save(void);
 void winshell_positionals_restore(Positionals* saved);
 
+/**
+ * A text expanded like the words of a command (variables, substitutions, quotes), the words joined with a space;
+ * malloc'ed, NULL after a message. winshell_eval_index: the value of an array subscript (arithmetic, after the
+ * expansion). Returns 0, or -1 after a message.
+ */
+char* winshell_expand_text(const char* text);
+
+/**
+ * text[0] is a [ or a (: the index of the matching ] (0 when none), or the length up to and including the matching )
+ * (0 when none). Quotes, ${...} and $(...) inside are passed.
+ */
+size_t winshell_subscript_end(const char* text);
+size_t winshell_paren_end(const char* text);
+int winshell_eval_index(const char* text, long* index);
+
 /** The status last given to winshell_setLastStatus. */
 int winshell_lastStatus(void);
 

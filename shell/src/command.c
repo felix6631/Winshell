@@ -292,6 +292,20 @@ static size_t scan_simple(Parser* p, size_t start) {
             i += passed;
             continue;
         }
+        if (c == '(' && quote == '\0' && i > start && text[i - 1] == '=') {
+            // NAME=( ... ) or NAME+=( ... ): an array, which may go over several lines
+            size_t k = i - 1, n;
+
+            if (k > start && text[k - 1] == '+')
+                k--;
+            while (k > start && (isalnum((unsigned char)text[k - 1]) || text[k - 1] == '_'))
+                k--;
+            if ((k == start || is_blank(text[k - 1])) && (isalpha((unsigned char)text[k]) || text[k] == '_') &&
+                (n = winshell_paren_end(text + i)) > 0) {
+                i += n;
+                continue;
+            }
+        }
         if (c == '\n')
             return i;
         if (c == '#' && (i == start || is_blank(text[i - 1]) || strchr(";|&", text[i - 1]) != NULL)) {
@@ -1924,6 +1938,27 @@ static void add_local_variable(const char* name, const char* value, void* contex
     text_append(b, "'\n", 2);
 }
 
+static void add_array_element(const char* name, long index, const char* value, void* context) {
+    TextBuffer* b = context;
+    char number[32];
+    const char* c;
+
+    text_append(b, name, strlen(name));
+    if (value == NULL) {
+        text_append(b, "=()\n", 4);        // an empty array
+        return;
+    }
+    snprintf(number, sizeof number, "[%ld]='", index);
+    text_append(b, number, strlen(number));
+    for (c = value; *c != '\0'; c++) {
+        if (*c == '\'')
+            text_append(b, "'\\''", 4);
+        else
+            text_append(b, c, 1);
+    }
+    text_append(b, "'\n", 2);
+}
+
 /** The functions, the variables of the shell and then the commands of the job, as the text of a script. */
 static char* background_script(const char* text) {
     TextBuffer b = { NULL, 0, 0 };
@@ -1936,6 +1971,7 @@ static char* background_script(const char* text) {
         }
     }
     var_each_local(add_local_variable, &b);
+    var_each_array(add_array_element, &b);
     if (text_append(&b, text, strlen(text)) != 0) {
         free(b.data);
         return NULL;

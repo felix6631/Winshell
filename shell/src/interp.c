@@ -17,9 +17,195 @@
 
 /* a pipeline: variables and wildcards are expanded, then it runs as a builtin or as programs */
 
+/* ---- arrays: a=(x y), a[i]=v, a+=(x), a+=v -------------------------------------------------- */
+
+static int is_name_start_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+}
+
+static int is_name_body_char(char c) {
+    return is_name_start_char(c) || (c >= '0' && c <= '9');
+}
+
+/** The words of the inside of NAME=( ... ), expanded like the words of a command (braces, variables, wildcards). */
+static int array_literal_words(const char* inner, size_t length, Pipeline* pipeline) {
+    char* line = malloc(length + 4);
+    char quote = '\0';
+    size_t i;
+    int result;
+
+    if (line == NULL)
+        return -1;
+    memcpy(line, "x ", 2);
+    for (i = 0; i < length; i++) {
+        char c = inner[i];
+
+        if (quote == '\0' && (c == '\n' || c == '\r'))
+            c = ' ';                        // the elements may be on several lines
+        else if (quote == '\0' && (c == '\'' || c == '"'))
+            quote = c;
+        else if (c == quote)
+            quote = '\0';
+        line[2 + i] = c;
+    }
+    line[2 + length] = '\0';
+    result = winshell_parse(line, pipeline);
+    free(line);
+    if (result != 0)
+        return -1;
+    if (pipeline->count > 0)
+        winshell_glob(pipeline);
+    return 0;
+}
+
+/**
+ * The assignments that are not a plain NAME=value: NAME=(values), NAME+=(values), NAME[index]=value,
+ * NAME[index]+=value and NAME+=value. Returns 1 when the text was one (*status is the result), else 0.
+ */
+static int try_array_assignment(const char* text, int* status) {
+    const char* p = text;
+    char name[256];
+    size_t nameLength = 0;
+    char* subscript = NULL;
+    int append = 0;
+
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (!is_name_start_char(*p))
+        return 0;
+    while (is_name_body_char(p[nameLength]))
+        nameLength++;
+    if (nameLength >= sizeof name)
+        return 0;
+    memcpy(name, p, nameLength);
+    name[nameLength] = '\0';
+    p += nameLength;
+
+    if (*p == '[') {
+        size_t end = winshell_subscript_end(p);
+
+        if (end == 0)
+            return 0;
+        subscript = malloc(end);
+        if (subscript == NULL)
+            return 0;
+        memcpy(subscript, p + 1, end - 1);
+        subscript[end - 1] = '\0';
+        p += end + 1;
+    }
+    if (p[0] == '+' && p[1] == '=') {
+        append = 1;
+        p++;
+    }
+    if (*p != '=') {
+        free(subscript);
+        return 0;
+    }
+    p++;
+
+    if (subscript == NULL && *p == '(') {
+        size_t end = winshell_paren_end(p);
+        Pipeline pipeline;
+        size_t count = 0;
+        const char* after;
+
+        if (end == 0) {
+            fprintf(stderr, "Error: Syntax error: unterminated array\n");
+            *status = 2;
+            return 1;
+        }
+        after = p + end;
+        while (*after == ' ' || *after == '\t' || *after == '\r' || *after == '\n')
+            after++;
+        if (*after != '\0') {
+            fprintf(stderr, "Error: Syntax error near unexpected token after the array\n");
+            *status = 2;
+            return 1;
+        }
+        if (array_literal_words(p + 1, end - 2, &pipeline) != 0) {
+            *status = 2;
+            return 1;
+        }
+        if (pipeline.count > 0 && pipeline.commands[0].argv != NULL)
+            while (pipeline.commands[0].argv[1 + count] != NULL)
+                count++;
+        if (pipeline.count > 0 && pipeline.commands[0].argv != NULL) {
+            *status = (append ? var_array_append(name, pipeline.commands[0].argv + 1, count)
+                              : var_array_assign(name, pipeline.commands[0].argv + 1, count)) == 0 ? 0 : 1;
+        } else {
+            *status = (append ? var_array_append(name, NULL, 0) : var_array_assign(name, NULL, 0)) == 0 ? 0 : 1;
+        }
+        winshell_freePipeline(&pipeline);
+        return 1;
+    }
+
+    if (subscript != NULL || append) {
+        // a[index]=value, a[index]+=value, a+=value: the value is expanded as the value of an assignment is
+        size_t valueLength = strlen(p);
+        char* line = malloc(valueLength + 16);
+        Pipeline pipeline;
+        const char* value;
+        char* combined = NULL;
+        long index = 0;
+
+        if (line == NULL) {
+            free(subscript);
+            return 0;
+        }
+        sprintf(line, "__ws_value=%s", p);
+        if (winshell_parse(line, &pipeline) != 0) {
+            free(line);
+            free(subscript);
+            *status = 2;
+            return 1;
+        }
+        free(line);
+        if (pipeline.count != 1 || pipeline.commands[0].argv != NULL || pipeline.commands[0].assignmentCount != 1) {
+            winshell_freePipeline(&pipeline);
+            free(subscript);
+            return 0;                       // more than an assignment: an ordinary command
+        }
+        value = pipeline.commands[0].assignments[0] + strlen("__ws_value=");
+        if (subscript != NULL && winshell_eval_index(subscript, &index) != 0) {
+            winshell_freePipeline(&pipeline);
+            free(subscript);
+            *status = 1;
+            return 1;
+        }
+        if (append) {
+            const char* old = subscript != NULL ? var_array_get(name, index) : var_get(name);
+            size_t oldLength = old != NULL ? strlen(old) : 0;
+
+            combined = malloc(oldLength + strlen(value) + 1);
+            if (combined == NULL) {
+                winshell_freePipeline(&pipeline);
+                free(subscript);
+                *status = 1;
+                return 1;
+            }
+            memcpy(combined, old != NULL ? old : "", oldLength);
+            strcpy(combined + oldLength, value);
+            value = combined;
+        }
+        if (subscript != NULL)
+            *status = var_array_set(name, index, value) == 0 ? 0 : 1;
+        else
+            *status = var_set(name, value) == 0 ? 0 : 1;
+        free(combined);
+        winshell_freePipeline(&pipeline);
+        free(subscript);
+        return 1;
+    }
+    free(subscript);
+    return 0;
+}
+
 int interp_run_simple(const char* text, int* exitShell, int status) {
     Pipeline pipeline;
     unsigned long substitutionsBefore = interp_substitution_count();
+
+    if (try_array_assignment(text, &status))
+        return status;
 
     // the parser and the executer report their own errors
     if (winshell_parse(text, &pipeline) != 0)

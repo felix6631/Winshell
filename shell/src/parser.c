@@ -468,15 +468,38 @@ static int lex_quote_mark(Lexer* L) {
     return 1;
 }
 
+static void lexer_value(Lexer* L, const char* value);
+
 /**
- * "$@" (and "${@}"): every positional parameter is a word of its own, joined to what is before and after it
- * in the quotes. With no parameters it is no word at all when nothing else is in the quotes. L->read is
- * after the $@.
+ * A list of values as the expansion of "$@", "${a[@]}" and their relatives. `separate` is the @ form: in double
+ * quotes every value is a word of its own, joined to what is before and after it in the quotes, and with no
+ * values it is no word at all when nothing else is in the quotes. The * form is one word, the values joined with
+ * a space; without quotes the values are split at blanks like any other expansion. L->read is after the
+ * expansion.
  */
-static void lexer_quoted_at(Lexer* L) {
-    int i, count = winshell_positional_count();
+static void lexer_words(Lexer* L, const char* const* values, size_t count, int separate) {
+    size_t i;
 
     L->dirty = 1;
+    if (L->quote != '"' || L->isAssign) {
+        for (i = 0; i < count; i++) {
+            if (i > 0)
+                lexer_value(L, " ");
+            lexer_value(L, values[i]);
+        }
+        return;
+    }
+    if (!separate) {
+        for (i = 0; i < count; i++) {
+            const char* value = values[i];
+
+            if (i > 0)
+                lexer_char(L, ' ', 1);
+            for (; *value != '\0'; value++)
+                lexer_char(L, *value, 1);
+        }
+        return;
+    }
     if (count == 0) {
         if (L->read[0] == '"' && L->text.length == L->wordStart && !L->quotedBefore) {
             L->read++;
@@ -485,17 +508,32 @@ static void lexer_quoted_at(Lexer* L) {
         }
         return;
     }
-    for (i = 1; i <= count; i++) {
-        const char* value = winshell_positional(i);
+    for (i = 0; i < count; i++) {
+        const char* value = values[i];
 
-        if (i > 1) {
-            L->quoted = 1;                          // an empty parameter is still a word
+        if (i > 0) {
+            L->quoted = 1;                          // an empty value is still a word
             lexer_word(L);
             L->quoted = 1;
         }
         for (; *value != '\0'; value++)
             lexer_char(L, *value, 1);
     }
+}
+
+/** "$@" (and "${@}"): every positional parameter is a word of its own. */
+static void lexer_quoted_at(Lexer* L) {
+    int count = winshell_positional_count(), i;
+    const char** values = calloc((size_t)count + 1, sizeof *values);
+
+    if (values == NULL) {
+        L->error = LEX_NOMEM;
+        return;
+    }
+    for (i = 1; i <= count; i++)
+        values[i - 1] = winshell_positional(i);
+    lexer_words(L, values, (size_t)count, 1);
+    free(values);
 }
 
 /* ---- command substitution, arithmetic and ${...} --------------------------------------------- */
@@ -533,6 +571,7 @@ static size_t quoted_length(const CHAR* text) {
  */
 static size_t piece_length(const CHAR* text) {
     size_t i;
+    int depth;
 
     if (text[0] == '`') {
         for (i = 1; text[i] != '\0'; i++) {
@@ -560,6 +599,7 @@ static size_t piece_length(const CHAR* text) {
     if (text[1] != '(' && text[1] != '{')
         return 0;
 
+    depth = 0;
     for (i = 2; text[i] != '\0';) {
         CHAR c = text[i];
 
@@ -580,8 +620,16 @@ static size_t piece_length(const CHAR* text) {
             if (n == 0)
                 return 0;
             i += n;
+        } else if (text[1] == '(' && c == '(') {
+            depth++;                        // a subshell or an array inside $( ... )
+            i++;
         } else if (c == (text[1] == '{' ? '}' : ')')) {
-            return i + 1;
+            if (text[1] == '(' && depth > 0) {
+                depth--;
+                i++;
+            } else {
+                return i + 1;
+            }
         } else {
             i++;
         }
@@ -1068,6 +1116,261 @@ static void lex_replace(Lexer* L, const char* current, const char* spec, size_t 
     free(value);
 }
 
+/* ---- arrays: ${NAME[i]}, ${NAME[@]}, ${#NAME[@]}, ${!NAME[@]} ---------------------------------------- */
+
+char* winshell_expand_text(const char* text) {
+    int nomem;
+
+    return expand_text(text, &nomem);
+}
+
+int winshell_eval_index(const char* text, long* index) {
+    char* expanded = winshell_expand_text(text);
+    long long value;
+    char error[128];
+    int status;
+
+    if (expanded == NULL)
+        return -1;
+    status = arith_eval(expanded, &value, error, sizeof error);
+    free(expanded);
+    if (status != 0) {
+        fprintf(stderr, "Error: %s: %s\n", text, error);
+        return -1;
+    }
+    *index = (long)value;
+    return 0;
+}
+
+/** The index of the ] that closes the [ at text[0], or 0 when there is none. */
+static size_t subscript_end(const char* text, size_t length) {
+    size_t k = 1;
+    int depth = 1;
+
+    while (k < length) {
+        if ((text[k] == '$' && k + 1 < length && (text[k + 1] == '{' || text[k + 1] == '(')) || text[k] == '`') {
+            size_t n = piece_length(text + k);
+
+            k += n > 0 ? n : 1;
+            continue;
+        }
+        if (text[k] == '[')
+            depth++;
+        else if (text[k] == ']' && --depth == 0)
+            return k;
+        k++;
+    }
+    return 0;
+}
+
+size_t winshell_subscript_end(const char* text) {
+    return subscript_end(text, strlen(text));
+}
+
+size_t winshell_paren_end(const char* text) {
+    size_t i = 1;
+    int depth = 1;
+
+    if (text[0] != '(')
+        return 0;
+    while (text[i] != '\0') {
+        char c = text[i];
+
+        if ((c == '$' && (text[i + 1] == '(' || text[i + 1] == '{')) || c == '`') {
+            size_t n = piece_length(text + i);
+
+            i += n > 0 ? n : 1;
+            continue;
+        }
+        if (c == '\'') {
+            const char* close = strchr(text + i + 1, '\'');
+
+            if (close == NULL)
+                return 0;
+            i = (size_t)(close - text) + 1;
+            continue;
+        }
+        if (c == '"') {
+            size_t n = quoted_length(text + i);
+
+            if (n == 0)
+                return 0;
+            i += n;
+            continue;
+        }
+        if (c == '(')
+            depth++;
+        else if (c == ')' && --depth == 0)
+            return i + 1;
+        i++;
+    }
+    return 0;
+}
+
+/** The values of the array (a scalar is an array of one) and their indices; 0, or -1 after an out of memory. */
+static int array_values(Lexer* L, const char* name, char*** values, long** indices, size_t* count) {
+    if (var_array_list(name, values, indices, count) != 0) {
+        L->error = LEX_NOMEM;
+        return -1;
+    }
+    return 0;
+}
+
+/** ${NAME[@]:offset:length} and the like on the list of values: the part that is asked for. */
+static void array_slice(Lexer* L, char** values, size_t count, const char* spec, size_t specLength, size_t* from, size_t* to) {
+    char* text = malloc(specLength + 1);
+    char* colonAt;
+    char* expanded;
+    long offset = 0, length = -1;
+
+    *from = 0;
+    *to = count;
+    if (text == NULL) {
+        L->error = LEX_NOMEM;
+        return;
+    }
+    memcpy(text, spec, specLength);
+    text[specLength] = '\0';
+    colonAt = strchr(text, ':');
+    if (colonAt != NULL)
+        *colonAt = '\0';
+    expanded = winshell_expand_text(text);
+    if (expanded != NULL) {
+        offset = atol(expanded);
+        free(expanded);
+    }
+    if (colonAt != NULL) {
+        expanded = winshell_expand_text(colonAt + 1);
+        if (expanded != NULL) {
+            length = atol(expanded);
+            free(expanded);
+        }
+    }
+    free(text);
+    (void)values;
+    if (offset < 0)
+        offset += (long)count;
+    if (offset < 0 || (size_t)offset > count)
+        offset = (long)count;
+    if (length < 0 || (size_t)length > count - (size_t)offset)
+        length = (long)(count - (size_t)offset);
+    *from = (size_t)offset;
+    *to = (size_t)offset + (size_t)length;
+}
+
+/**
+ * The forms of an array that have no element mode: ${#NAME[@]} ${#NAME[i]} ${!NAME[@]}. Returns 1 when body
+ * (the text between ${ and }) was one of them.
+ */
+static int lex_array_special(Lexer* L, const char* body, size_t length) {
+    int wantCount = 0, wantIndices = 0;
+    const char* p = body;
+    size_t nameLength = 0, end;
+    char name[256];
+    char** values;
+    long* indices;
+    size_t count, i;
+
+    if (length > 0 && body[0] == '#') {
+        wantCount = 1;
+        p++;
+        length--;
+    } else if (length > 0 && body[0] == '!') {
+        wantIndices = 1;
+        p++;
+        length--;
+    } else {
+        return 0;
+    }
+    if (length == 0 || !is_name_start(p[0]))
+        return 0;
+    while (nameLength < length && is_name_char(p[nameLength]))
+        nameLength++;
+    if (nameLength >= length || nameLength >= sizeof name || p[nameLength] != '[')
+        return 0;
+    end = subscript_end(p + nameLength, length - nameLength);
+    if (end == 0 || nameLength + end + 1 != length)
+        return 0;
+    memcpy(name, p, nameLength);
+    name[nameLength] = '\0';
+
+    if ((end == 2 && (p[nameLength + 1] == '@' || p[nameLength + 1] == '*'))) {
+        char number[32];
+
+        if (array_values(L, name, &values, &indices, &count) != 0)
+            return 1;
+        if (wantCount) {
+            snprintf(number, sizeof number, "%lu", (unsigned long)count);
+            lexer_value(L, number);
+        } else {
+            char** texts = calloc(count + 1, sizeof *texts);
+
+            if (texts == NULL) {
+                L->error = LEX_NOMEM;
+            } else {
+                for (i = 0; i < count; i++) {
+                    snprintf(number, sizeof number, "%ld", indices[i]);
+                    texts[i] = _strdup(number);
+                }
+                lexer_words(L, (const char* const*)texts, count, p[nameLength + 1] == '@');
+                for (i = 0; i < count; i++)
+                    free(texts[i]);
+                free(texts);
+            }
+        }
+        var_array_free_list(values, indices, count);
+        return 1;
+    }
+    if (wantCount) {
+        // ${#NAME[i]}: the length of one element
+        char* subscript = malloc(end);
+        long index;
+        const char* element;
+        char number[32];
+
+        if (subscript == NULL) {
+            L->error = LEX_NOMEM;
+            return 1;
+        }
+        memcpy(subscript, p + nameLength + 1, end - 1);
+        subscript[end - 1] = '\0';
+        if (winshell_eval_index(subscript, &index) != 0) {
+            free(subscript);
+            L->error = LEX_SYNTAX;
+            return 1;
+        }
+        free(subscript);
+        element = var_array_get(name, index);
+        snprintf(number, sizeof number, "%lu", (unsigned long)(element != NULL ? strlen(element) : 0));
+        lexer_value(L, number);
+        return 1;
+    }
+    lexer_syntax_error(L, "Syntax error: bad substitution");
+    return 1;
+}
+
+/** ${NAME[@]} and ${NAME[*]}, whole or sliced (${NAME[@]:offset:length}). rest is what follows the ]. */
+static void lex_array_all(Lexer* L, const char* name, int separate, const char* rest, size_t restLength) {
+    char** values;
+    long* indices;
+    size_t count, from = 0, to;
+
+    if (array_values(L, name, &values, &indices, &count) != 0)
+        return;
+    to = count;
+    if (restLength == 0) {
+        // all of them
+    } else if (rest[0] == ':' && restLength > 1) {
+        array_slice(L, values, count, rest + 1, restLength - 1, &from, &to);
+    } else {
+        lexer_syntax_error(L, "Syntax error: bad substitution");
+        var_array_free_list(values, indices, count);
+        return;
+    }
+    lexer_words(L, (const char* const*)values + from, to - from, separate);
+    var_array_free_list(values, indices, count);
+}
+
 /**
  * ${NAME}, ${#NAME}, ${NAME:-w} ${NAME-w} ${NAME:=w} ${NAME=w} ${NAME:+w} ${NAME+w} ${NAME:?w} ${NAME?w},
  * ${NAME#p} ${NAME##p} ${NAME%p} ${NAME%%p}, ${NAME:offset} and ${NAME:offset:length}. The word and the
@@ -1090,6 +1393,9 @@ static int lex_braced(Lexer* L) {
     body = r + 2;
     bodyLength = total - 3;
     L->read = r + total;
+
+    if (lex_array_special(L, body, bodyLength))
+        return 1;
 
     // ${#NAME}: the length of the value
     if (bodyLength > 1 && body[0] == '#') {
@@ -1131,7 +1437,42 @@ static int lex_braced(Lexer* L) {
     rest = body + nameLength;
     bodyLength -= nameLength;
 
-    current = variable_value(name, scratch, sizeof scratch);
+    current = NULL;
+    if (bodyLength > 0 && rest[0] == '[') {
+        // ${NAME[@]}, ${NAME[*]} or one element: ${NAME[index]}, which the operators below work on
+        size_t end = subscript_end(rest, bodyLength);
+
+        if (end == 0) {
+            lexer_syntax_error(L, "Syntax error: bad substitution");
+            return 1;
+        }
+        if (end == 2 && (rest[1] == '@' || rest[1] == '*')) {
+            lex_array_all(L, name, rest[1] == '@', rest + end + 1, bodyLength - end - 1);
+            return 1;
+        }
+        {
+            char* subscript = malloc(end);
+            long index;
+
+            if (subscript == NULL) {
+                L->error = LEX_NOMEM;
+                return 1;
+            }
+            memcpy(subscript, rest + 1, end - 1);
+            subscript[end - 1] = '\0';
+            if (winshell_eval_index(subscript, &index) != 0) {
+                free(subscript);
+                L->error = LEX_SYNTAX;
+                return 1;
+            }
+            free(subscript);
+            current = var_array_get(name, index);
+        }
+        rest += end + 1;
+        bodyLength -= end + 1;
+    } else {
+        current = variable_value(name, scratch, sizeof scratch);
+    }
     set = current != NULL;
     nonnull = set && current[0] != '\0';
     if (bodyLength == 0) {

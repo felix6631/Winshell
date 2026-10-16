@@ -109,6 +109,15 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
     only with a comma at its top level or a range of two numbers or two letters; `{}`, `{a}`, `{ list; }` and `find -exec {}` stay. Not
     expanded: quotes, `${...}` and `$(...)`, the value of `NAME={a,b}`, the target of a redirection (`> out{1,2}`), the patterns of a
     `case`, and `\{` (the `\` stays). A word that would become more than 65536 stays as it is.
+  - Arrays (indexed; they may be sparse): `a=(x "y z" w)` (the elements are expanded like the words of a command: braces, variables, quotes,
+    wildcards, several lines), `a[2]=v`, `a+=(more)` (after the highest index), `a[i]+=string`, `a+=string`. Reading: `${a[i]}` (the index is
+    an arithmetic expression: `${a[i+1]}`, a negative one counts from the end), `${a[@]}` (in double quotes a word per element, and no
+    word when there is none), `${a[*]}` (one word), `${#a[@]}` (the count), `${#a[i]}` (the length of an element), `${!a[@]}` (the indices),
+    `${a[@]:start:count}`, and the operators `:-` `#` `%` `/` on one element. `$a` is `${a[0]}` and `a=x` changes `a[0]`. A variable of
+    the shell that is not exported becomes an array with `a[1]=x` (its value is `a[0]`); an exported one cannot. `unset a[i]`, `unset a` and
+    `read -a name` (the fields of a line) are there; a subshell and `$(...)` put the arrays back too, and a background job gets them. Arrays
+    are not exported. Not there yet: `local` for arrays, `a=([2]=x)`, `a[1]` inside arithmetic, the operators `#` `%` `/` on `${a[@]}`,
+    associative arrays (`declare -A`).
   - `list &` runs a whole list joined with `&&`/`||` as a background job and goes on at once (status 0). `$!` is the process id of the last
     job, `$$` the process id of the shell. A pipeline of programs is started without waiting; builtins, functions, control structures and
     groups run in a `shell -c` of their own, which is given the variables that are not exported, the functions and the positional
