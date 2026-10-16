@@ -115,7 +115,14 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
     parameters (changes made afterwards are not seen by the other). The standard input of a job is NUL and Ctrl+C does not reach it.
     `jobs` lists the jobs (`[1]+  Running   sleep 5 &`); `wait [PID|%N]...` waits and returns the status of the last one (127 for an unknown
     PID). On a terminal `[1] PID` is printed when a job starts, and a job that ended is reported as `[1]+  Done   command` before the next
-    prompt. Jobs go on after the shell has ended. Not there yet: `fg`, `bg`, `kill %N`, `disown`.
+    prompt. Jobs go on after the shell has ended.
+  - A job is named `%N` (or `N`), `%%`/`%+` (the current one: the last started), `%-` (the one before), `%string` (its command starts
+    with it) or `%?string` (has it). `fg [job]` shows the command, waits for the job and returns its status (a Ctrl+C while waiting ends
+    the job, 130). `bg [job]` lets a job that `kill -STOP` stopped go on (`[1]+ command &`), and says "already in background" when it runs.
+    `jobs` shows a stopped job as `Stopped` and has `-l` (with the PID) and `-p` (PIDs only). `disown [job|-a]` forgets jobs without ending
+    them. A `%job` argument of `kill` is replaced by the process ids of every process of the job (`kill -9 %1`, `kill %+ %-`). An unknown job
+    is a message and status 1. A Windows console has no Ctrl+Z that stops a job: use `kill -STOP`. A job gets NUL as its input, so `fg`
+    does not give it the terminal.
 - **Scripts and command substitution**
   - `shell FILE [argument...]` runs the lines of the file one after the other (`$0` is FILE, `$1`..`$9`, `$#`, `$@`, `$*` are the
     arguments); so does `shell -c 'command' [name [argument...]]`. There may be any number of arguments (`${10}` works). `"$@"` becomes one

@@ -5,6 +5,7 @@
 #include <string.h>
 #include <windows.h>
 #include "interp.h"
+#include "jobs.h"
 #include "command.h"
 #include "parser.h"
 #include "executer.h"
@@ -51,6 +52,24 @@ int interp_run_simple(const char* text, int* exitShell, int status) {
             // x=$(command) has the status of the command
             if (status == 0 && interp_substitution_count() != substitutionsBefore)
                 status = interp_substitution_status();
+        // kill %1: the job is its processes
+        } else if (pipeline.count == 1 && pipeline.commands[0].argv != NULL &&
+                   strcmp(pipeline.commands[0].argv[0], "kill") == 0 && jobs_has_job_argument(pipeline.commands[0].argv)) {
+            Command* command = &pipeline.commands[0];
+            char** expanded = jobs_expand_kill_arguments(command->argv);
+
+            if (expanded == NULL) {
+                status = 1;
+            } else {
+                LPSTR* original = command->argv;
+                int result;
+
+                command->argv = expanded;
+                result = execute_pipeline(&pipeline);
+                command->argv = original;
+                jobs_free_arguments(expanded, (size_t)-1);
+                status = result == -1 ? 127 : result;
+            }
         // a builtin only makes sense as a command of its own, not inside a pipeline
         } else if (pipeline.count == 1 && pipeline.commands[0].argv != NULL &&
                    (builtin_exists(pipeline.commands[0].argv[0]) ||

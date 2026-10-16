@@ -292,7 +292,7 @@ static int builtin_unset(char* const argv[]) {
 
 int builtin_exists(const char* name) {
     static const char* const names[] = { "cd", "export", "unset", "exit", "quit", "source", ".", ":", "break",
-                                         "continue", "read", "return", "local", "trap", "jobs", "wait", "shift" };
+                                         "continue", "read", "return", "local", "trap", "jobs", "wait", "shift", "fg", "bg", "disown" };
     size_t i;
 
     for (i = 0; i < sizeof names / sizeof names[0]; i++)
@@ -426,7 +426,19 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
         return 1;
     }
     if (strcmp(name, "jobs") == 0) {
-        *status = jobs_builtin_jobs();
+        *status = jobs_builtin_jobs(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "fg") == 0) {
+        *status = jobs_builtin_fg(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "bg") == 0) {
+        *status = jobs_builtin_bg(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "disown") == 0) {
+        *status = jobs_builtin_disown(command->argv);
         return 1;
     }
     if (strcmp(name, "wait") == 0) {

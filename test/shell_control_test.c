@@ -421,6 +421,27 @@ static void test_background(void) {
         CHECK(strstr(r.err, "pid 99999 is not a child of this shell") != NULL);
         run_result_free(&r);
     }
+    // fg waits for a job and gives its status; kill takes job specs; bg goes on with a stopped job
+    expect("b20.sh", "sleep 1 &\nfg\necho \"s=$?\"\n", "", "sleep 1\ns=0\n", 0);
+    expect("b21.sh", "(sleep 1; exit 4) &\nfg %1\necho $?\n", "", "(sleep 1; exit 4)\n4\n", 0);
+    expect("b22.sh", "sleep 30 &\nsleep 40 &\nkill %1\nwait %1\necho $?\nkill -9 %2\nwait %2\necho $?\njobs\n", "", "143\n137\n", 0);
+    expect("b23.sh", "sleep 30 &\nkill %%\nwait\necho $?\nsleep 30 &\nsleep 30 &\nkill %- %+\nwait\necho $?\n", "", "0\n0\n", 0);
+    expect("b24.sh", "sleep 30 &\nkill -STOP %1\njobs\nbg\njobs\nbg\nkill %1\nwait\n", "",
+           "[1]+  Stopped               sleep 30 &\n[1]+ sleep 30 &\n[1]+  Running               sleep 30 &\n", 0);
+    expect("b25.sh", "sleep 2 &\nsleep 2 &\njobs -p | wc -l\ndisown %1\njobs -p | wc -l\ndisown -a\njobs\necho end\n", "", "2\n1\nend\n", 0);
+    expect("b26.sh", "sleep 30 &\nkill %sl\nwait\nsleep 30 &\nkill %?eep\nwait\necho ok\n", "", "ok\n", 0);
+    {
+        RunResult r;
+
+        write_text(workDir, "b27.sh", "kill %9\necho $?\nfg %5\necho $?\nfg\necho $?\nbg\necho $?\nsleep 5 &\nbg\necho $?\nkill %1\n");
+        run_shell("b27.sh", "", &r);
+        lf_only(r.out);
+        CHECK_STR(r.out, "1\n1\n1\n1\n0\n");
+        CHECK(strstr(r.err, "kill: %9: no such job") != NULL);
+        CHECK(strstr(r.err, "fg: %5: no such job") != NULL);
+        CHECK(strstr(r.err, "bg: job 1 already in background") != NULL);
+        run_result_free(&r);
+    }
     // $$ is the process id of the shell, not the same as $! of a child
     expect("b14.sh", "echo $$ | grep -c '^[0-9][0-9]*$'\n", "", "1\n", 0);
     // redirections with & in them are not a job
