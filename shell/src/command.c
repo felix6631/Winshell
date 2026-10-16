@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#include "brace.h"
 #include "builtin.h"
 #include "jobs.h"
 #include "command.h"
@@ -1461,10 +1462,13 @@ static char* expand_case_word(const char* text, char** pattern) {
     if (line == NULL)
         return NULL;
     sprintf(line, "x \"\" %s", text);
+    winshell_brace_enable(0);
     if (winshell_parse(line, &pipeline) != 0) {
+        winshell_brace_enable(1);
         free(line);
         return NULL;
     }
+    winshell_brace_enable(1);
     free(line);
     if (pipeline.count > 0 && pipeline.commands[0].argv != NULL && pipeline.commands[0].argv[2] != NULL) {
         const Command* c = &pipeline.commands[0];

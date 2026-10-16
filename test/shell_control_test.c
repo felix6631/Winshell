@@ -466,8 +466,20 @@ static void test_positionals(void) {
     expect("a10.sh", "for a in \"$@\"; do echo \"[$a]\"; done\necho \"$#\"\n", "\"p q\" r \"\"", "[p q]\n[r]\n[]\n3\n", 0);
 }
 
+static void test_braces(void) {
+    printf("brace expansion in scripts\n");
+    expect("c1.sh", "echo a{b,c}d {1..3} {a..c}{1,2}\n", "", "abd acd 1 2 3 a1 a2 b1 b2 c1 c2\n", 0);
+    expect("c2.sh", "for i in {1..3}; do echo \"i=$i\"; done\n", "", "i=1\ni=2\ni=3\n", 0);
+    expect("c3.sh", "mkdir -p bd{1,2}/sub\nls -d bd?/sub\nrm -r bd1 bd2\n", "", "bd1/sub\nbd2/sub\n", 0);
+    expect("c4.sh", "echo $(echo {p,q}) \"{a,b}\" '{c,d}' {x}\n", "", "p q {a,b} {c,d} {x}\n", 0);
+    expect("c5.sh", "v=x\necho ${v}{1,2}\na={m,n}\necho \"$a\"\n", "", "x1 x2\n{m,n}\n", 0);
+    expect("c6.sh", "f() { for a in \"$@\"; do echo \"[$a]\"; done; }\nf {1,2} \"{3,4}\"\n", "", "[1]\n[2]\n[{3,4}]\n", 0);
+    expect("c7.sh", "case b in {a,b}) echo literal;; b) echo plain;; esac\n", "", "plain\n", 0);
+}
+
 int main(void) {
     tools_init("shell_control_test");
+    test_braces();
     test_positionals();
     test_compound_pipelines();
     test_background();

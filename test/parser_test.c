@@ -732,7 +732,61 @@ static void test_duplication(void) {
     CHECK_INT(parse("echo hi 2>>&1", &p), -1);
 }
 
+/** The words the line becomes, joined with a comma ("-" when the line does not parse). */
+static void expect_words(const char* line, const char* expected) {
+    Pipeline p;
+    char joined[512] = "";
+    size_t i;
+
+    if (parse(line, &p) != 0) {
+        strcpy(joined, "-");
+    } else {
+        for (i = 1; p.commands[0].argv != NULL && p.commands[0].argv[i] != NULL; i++) {
+            if (i > 1)
+                strcat(joined, ",");
+            strcat(joined, p.commands[0].argv[i]);
+        }
+        winshell_freePipeline(&p);
+    }
+    if (strcmp(joined, expected) != 0)
+        printf("    for: %s\n", line);
+    CHECK_STR(joined, expected);
+}
+
+static void test_braces(void) {
+    printf("brace expansion\n");
+    expect_words("echo a{b,c}d", "abd,acd");
+    expect_words("echo {1..5}", "1,2,3,4,5");
+    expect_words("echo {5..1}", "5,4,3,2,1");
+    expect_words("echo {01..03}", "01,02,03");
+    expect_words("echo {-2..1}", "-2,-1,0,1");
+    expect_words("echo {a..e}", "a,b,c,d,e");
+    expect_words("echo {e..a..2}", "e,c,a");
+    expect_words("echo {1..10..4}", "1,5,9");
+    expect_words("echo x{a,b{1,2}}y", "xay,xb1y,xb2y");
+    expect_words("echo {a,b}{1,2}", "a1,a2,b1,b2");
+    expect_words("echo {a..b}{1..2}", "a1,a2,b1,b2");
+    expect_words("echo {,x}", "x");
+    expect_words("echo p{,x}q", "pq,pxq");
+    expect_words("echo {a,{b,c}}", "a,b,c");
+
+    // what is not an expression stays as it is
+    expect_words("echo {a} {} {a,b {1..} {a..} {xx..yy}", "{a},{},{a,b,{1..},{a..},{xx..yy}");
+    expect_words("echo {a,b}c} {a{b}", "ac},bc},{a{b}");
+    expect_words("find . -exec echo {} ;", ".,-exec,echo,{},;");
+    expect_words("echo {1.5}", "{1.5}");
+
+    // quotes, substitutions, assignments and redirection targets
+    expect_words("echo \"{a,b}\" '{c,d}' x\"{e,f}\"", "{a,b},{c,d},x{e,f}");
+    expect_words("echo ${NOSUCHVARIABLE}{1,2}x", "1x,2x");
+    expect_words("echo $NOSUCHVARIABLE{1,2}x", "");
+    expect_words("echo \\{a,b}", "\\{a,b}");
+    expect_words("echo {a,b}\"c d\"", "ac d,bc d");
+    expect_words("echo {a,b} > out{1,2}", "a,b");
+}
+
 int main(void) {
+    test_braces();
     test_assignments();
     test_duplication();
     test_variables();

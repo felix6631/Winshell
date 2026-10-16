@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <windows.h>
 #include "parser.h"
+#include "brace.h"
 #include "vpath.h"
 #include "variables.h"
 #include "arith.h"
@@ -1431,8 +1432,18 @@ int winshell_parse(const CHAR* line, Pipeline* pipeline) {
     Builder builder;
     int status = PARSE_OK;
 
+    char* braced = NULL;
+    int tokenized;
+
     memset(pipeline, 0, sizeof *pipeline);
-    if (tokenize(line, &pipeline->buffer, &pipeline->patterns, &lexemes, &lexemeCount) != 0)
+    // brace expansion comes first: a{b,c} is two words before anything else is looked at
+    if (winshell_brace_expand(line, &braced) < 0) {
+        fprintf(stderr, "Error: Out of memory\n");
+        return -1;
+    }
+    tokenized = tokenize(braced != NULL ? braced : line, &pipeline->buffer, &pipeline->patterns, &lexemes, &lexemeCount);
+    free(braced);
+    if (tokenized != 0)
         return -1;
 
     memset(&builder, 0, sizeof builder);

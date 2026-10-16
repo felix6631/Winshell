@@ -104,6 +104,11 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
   - `&> file`, `&>> file`: write standard output and standard error to the same file.
   - Redirections of standard output and error are applied in the order written: `a > f 2>&1` sends both to f, `a 2>&1 > f` sends the error to the old output and only the output to f.
   - A redirection takes precedence over a pipe. The exit code of the last command is the result.
+  - Brace expansion is done before the other expansions on the words outside quotes: `a{b,c}d` -> `abd acd`, `{1..5}`, `{5..1}`, `{01..10}`
+    (a leading 0 pads), `{a..e}`, `{1..10..3}` (a step), nested `x{a,b{1,2}}y`, several `{a,b}{1,2}` -> `a1 a2 b1 b2`. It is an expression
+    only with a comma at its top level or a range of two numbers or two letters; `{}`, `{a}`, `{ list; }` and `find -exec {}` stay. Not
+    expanded: quotes, `${...}` and `$(...)`, the value of `NAME={a,b}`, the target of a redirection (`> out{1,2}`), the patterns of a
+    `case`, and `\{` (the `\` stays). A word that would become more than 65536 stays as it is.
   - `list &` runs a whole list joined with `&&`/`||` as a background job and goes on at once (status 0). `$!` is the process id of the last
     job, `$$` the process id of the shell. A pipeline of programs is started without waiting; builtins, functions, control structures and
     groups run in a `shell -c` of their own, which is given the variables that are not exported, the functions and the positional
