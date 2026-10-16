@@ -3,6 +3,7 @@
 #include "vec.h"
 #include "command.h"
 #include "cwd.h"
+#include "jobs.h"
 #include "vpath.h"
 #include "variables.h"
 #include <ctype.h>
@@ -291,7 +292,7 @@ static int builtin_unset(char* const argv[]) {
 
 int builtin_exists(const char* name) {
     static const char* const names[] = { "cd", "export", "unset", "exit", "quit", "source", ".", ":", "break",
-                                         "continue", "read", "return", "local", "trap" };
+                                         "continue", "read", "return", "local", "trap", "jobs", "wait" };
     size_t i;
 
     for (i = 0; i < sizeof names / sizeof names[0]; i++)
@@ -387,6 +388,14 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
             *status = interp_run_file(command->argv[1], (const char* const*)command->argv + 2, count, count > 0,
                                       exitShell, *status);
         }
+        return 1;
+    }
+    if (strcmp(name, "jobs") == 0) {
+        *status = jobs_builtin_jobs();
+        return 1;
+    }
+    if (strcmp(name, "wait") == 0) {
+        *status = jobs_builtin_wait(command->argv);
         return 1;
     }
     if (strcmp(name, "trap") == 0) {

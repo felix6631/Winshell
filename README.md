@@ -116,7 +116,7 @@ nmake gnu       :: GNU 도구와 출력 대조 (MSYS2 나 Git for Windows 의 ba
 
 Winshell은 활발히 개발 중입니다.
 
-- **쉘**: 백그라운드 실행(`&`), 중괄호 확장, `${NAME/패턴/값}`, `$$`, 배열, `select`, `trap` 의 다른 신호
+- **쉘**: 중괄호 확장, `${NAME/패턴/값}`, 배열, `fg`/`bg`(작업 제어), `select`, `trap` 의 다른 신호
 - **호환성**: Windows XP까지 동작하는 것이 목표입니다(아직 검증 전). UTF-8 동작은 Windows 10 1903 이상에서 적용됩니다.
 - **coreutils**
 

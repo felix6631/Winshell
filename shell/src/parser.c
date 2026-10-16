@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <windows.h>
 #include "parser.h"
 #include "vpath.h"
 #include "variables.h"
@@ -115,6 +116,11 @@ static const char* variable_value(const char* name, char* scratch, size_t size) 
         if (status == 0xC000013AU)
             status = 130;
         snprintf(scratch, size, "%u", status);
+        return scratch;
+    }
+
+    if (strcmp(name, "$") == 0) {
+        snprintf(scratch, size, "%lu", (unsigned long)GetCurrentProcessId());
         return scratch;
     }
 
@@ -771,7 +777,7 @@ static int lex_braced(Lexer* L) {
     } else if (bodyLength > 0 && isdigit((unsigned char)body[0])) {
         while (nameLength < bodyLength && isdigit((unsigned char)body[nameLength]))
             nameLength++;
-    } else if (bodyLength > 0 && strchr("?#@*", body[0]) != NULL) {
+    } else if (bodyLength > 0 && strchr("?#@*!$", body[0]) != NULL) {
         nameLength = 1;
     }
     if (nameLength == 0 || nameLength >= sizeof name) {
@@ -951,10 +957,10 @@ static int lex_variable(Lexer* L) {
         return 1;
     }
     if (r[0] != '$' || !(is_name_start(r[1]) || isdigit((unsigned char)r[1]) || r[1] == '?' || r[1] == '#' ||
-                         r[1] == '@' || r[1] == '*'))
+                         r[1] == '@' || r[1] == '*' || r[1] == '!' || r[1] == '$'))
         return 0;
 
-    if (r[1] == '?' || r[1] == '#' || r[1] == '@' || r[1] == '*' || isdigit((unsigned char)r[1])) {
+    if (r[1] == '?' || r[1] == '#' || r[1] == '@' || r[1] == '*' || r[1] == '!' || r[1] == '$' || isdigit((unsigned char)r[1])) {
         start = r + 1;
         length = 1;
         after = r + 2;

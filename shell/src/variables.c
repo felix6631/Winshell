@@ -120,6 +120,14 @@ int var_export(const char* name, const char* value) {
     return 0;
 }
 
+void var_each_local(void (*fn)(const char* name, const char* value, void* context), void* context) {
+    size_t i;
+
+    for (i = 0; i < entryCount; i++)
+        if (entries[i].value != NULL && !entries[i].exported)
+            fn(entries[i].name, entries[i].value, context);
+}
+
 void var_unset(const char* name) {
     Entry* entry = find_entry(name);
 

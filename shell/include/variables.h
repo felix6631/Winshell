@@ -25,6 +25,9 @@ int var_set(const char* name, const char* value);
  */
 int var_export(const char* name, const char* value);
 
+/** Calls fn for every variable of the shell that is not exported (the parameters too), in no order. */
+void var_each_local(void (*fn)(const char* name, const char* value, void* context), void* context);
+
 /** unset NAME: removes the variable, whichever kind it is. */
 void var_unset(const char* name);
 

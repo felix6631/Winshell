@@ -104,7 +104,13 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
   - `&> file`, `&>> file`: write standard output and standard error to the same file.
   - Redirections of standard output and error are applied in the order written: `a > f 2>&1` sends both to f, `a 2>&1 > f` sends the error to the old output and only the output to f.
   - A redirection takes precedence over a pipe. The exit code of the last command is the result.
-  - `&` (background jobs) is not supported yet; a lone `&` is a syntax error.
+  - `list &` runs a whole list joined with `&&`/`||` as a background job and goes on at once (status 0). `$!` is the process id of the last
+    job, `$$` the process id of the shell. A pipeline of programs is started without waiting; builtins, functions, control structures and
+    groups run in a `shell -c` of their own, which is given the variables that are not exported, the functions and the positional
+    parameters (changes made afterwards are not seen by the other). The standard input of a job is NUL and Ctrl+C does not reach it.
+    `jobs` lists the jobs (`[1]+  Running   sleep 5 &`); `wait [PID|%N]...` waits and returns the status of the last one (127 for an unknown
+    PID). On a terminal `[1] PID` is printed when a job starts, and a job that ended is reported as `[1]+  Done   command` before the next
+    prompt. Jobs go on after the shell has ended. Not there yet: `fg`, `bg`, `kill %N`, `disown`.
 - **Scripts and command substitution**
   - `shell FILE [argument...]` runs the lines of the file one after the other (`$0` is FILE, `$1`..`$9`, `$#`, `$@`, `$*` are the
     arguments); so does `shell -c 'command' [name [argument...]]`. `source FILE [argument...]` and `. FILE` run a file in the

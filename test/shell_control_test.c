@@ -391,9 +391,55 @@ static void test_compound_pipelines(void) {
     expect("p13.sh", "for i in 1 2; do echo $i; done |\n  tr 12 ab\n", "", "a\nb\n", 0);
 }
 
+static void test_background(void) {
+    printf("background jobs\n");
+    // a program: $! is its process id, wait waits for it
+    expect("b1.sh", "sleep 1 &\nwait\necho done\n", "", "done\n", 0);
+    expect("b2.sh", "echo bg > b2.txt &\nwait $!\ncat b2.txt\n", "", "bg\n", 0);
+    expect("b3.sh", "sleep 1 &\ntest -n \"$!\" && echo has-pid\nwait\n", "", "has-pid\n", 0);
+    // the status of the command with & is 0, wait gives the status of the job
+    expect("b4.sh", "(sleep 1; exit 3) &\necho \"started $?\"\nwait $!\necho \"waited $?\"\n", "", "started 0\nwaited 3\n", 0);
+    // only the last command of the line goes to the background; an and-or list goes as a whole
+    expect("b5.sh", "echo first; echo second &\nwait\n", "", "first\nsecond\n", 0);
+    expect("b6.sh", "sleep 1 && echo and-list &\nwait\n", "", "and-list\n", 0);
+    // functions, loops and groups run in a shell of their own that is given the variables and functions
+    expect("b7.sh", "n=5\nf() { echo \"f $n $1\"; }\nf hello &\nwait\n", "", "f 5 hello\n", 0);
+    expect("b8.sh", "for i in 1 2; do echo \"loop $i\"; done &\nwait\n", "", "loop 1\nloop 2\n", 0);
+    expect("b9.sh", "{ sleep 1; echo group; } &\necho not-waiting\nwait\n", "", "not-waiting\ngroup\n", 0);
+    expect("b10.sh", "set_x() { echo \"$1:$2\"; }\nset_x a b &\nwait\necho x | cat &\nwait\n", "", "a:b\nx\n", 0);
+    // the input of a job is empty, jobs lists the running ones, and a finished one is gone after wait
+    expect("b11.sh", "cat &\nwait\necho end\n", "", "end\n", 0);
+    expect("b12.sh", "sleep 2 &\njobs\nwait\njobs\necho end\n", "", "[1]+  Running               sleep 2 &\nend\n", 0);
+    // wait for a process that is not a child, and for a job number
+    {
+        RunResult r;
+
+        write_text(workDir, "b13.sh", "wait 99999\necho $?\nsleep 1 &\nwait %1\necho $?\nwait %7\necho $?\n");
+        run_shell("b13.sh", "", &r);
+        lf_only(r.out);
+        CHECK_STR(r.out, "127\n0\n127\n");
+        CHECK(strstr(r.err, "pid 99999 is not a child of this shell") != NULL);
+        run_result_free(&r);
+    }
+    // $$ is the process id of the shell, not the same as $! of a child
+    expect("b14.sh", "echo $$ | grep -c '^[0-9][0-9]*$'\n", "", "1\n", 0);
+    // redirections with & in them are not a job
+    expect("b15.sh", "echo err 2>&1 | cat\necho both &> b15.txt\ncat b15.txt\n", "", "err\nboth\n", 0);
+    // a & with no command
+    {
+        RunResult r;
+
+        write_text(workDir, "b16.sh", "& echo x\n");
+        run_shell("b16.sh", "", &r);
+        CHECK_INT(r.exitCode, 2);
+        run_result_free(&r);
+    }
+}
+
 int main(void) {
     tools_init("shell_control_test");
     test_compound_pipelines();
+    test_background();
     test_if();
     test_loops();
     test_break_continue();

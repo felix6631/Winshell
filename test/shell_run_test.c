@@ -306,9 +306,10 @@ static void test_duplication(void) {
     CHECK(strstr(r.out, "first\n") == r.out && strstr(r.out, "nosuch.txt") != NULL);
     run_result_free(&r);
 
-    // a & that is not part of an operator is still not supported
-    script("echo a &\n", &r);
-    CHECK(strstr(r.err, "'&' is not supported") != NULL);
+    // a & that is not part of an operator starts a background job
+    script("echo a &\nwait\n", &r);
+    CHECK_STR(r.err, "");
+    CHECK_STR(r.out, "a\n");
     run_result_free(&r);
 
     // the status is that of the command; the copies do not change it

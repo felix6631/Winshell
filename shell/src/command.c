@@ -10,6 +10,7 @@
 #include <string.h>
 #include <windows.h>
 #include "builtin.h"
+#include "jobs.h"
 #include "command.h"
 #include "cwd.h"
 #include "executer.h"
@@ -30,7 +31,8 @@ typedef struct {
 } List;
 
 typedef enum {
-    NODE_SIMPLE, NODE_IF, NODE_WHILE, NODE_FOR, NODE_PIPE, NODE_CASE, NODE_GROUP, NODE_SUBSHELL, NODE_FUNCTION
+    NODE_SIMPLE, NODE_IF, NODE_WHILE, NODE_FOR, NODE_PIPE, NODE_CASE, NODE_GROUP, NODE_SUBSHELL, NODE_FUNCTION,
+    NODE_BACKGROUND             // list &: first is the and-or list, text its source
 } NodeType;
 
 /** One clause of a case: the patterns (text, expanded when the case is run) and the commands. */
@@ -317,7 +319,7 @@ static size_t scan_simple(Parser* p, size_t start) {
         }
         op = winshell_operator_at(text, i, &length, &skip);
         if (op < 0)
-            return syntax(p, "Syntax error: '&' is not supported (no background commands)%s", NULL), (size_t)-1;
+            return i;                   // a lone & (the command goes to the background): parse_andor takes it
         if (op > 0)
             return i;
         i += skip + 1;
@@ -367,7 +369,10 @@ static int parse_list(Parser* p, List* list, const char* const* stops) {
 /** A command, then any number of `&& command` and `|| command`, to a ; newline or the end. */
 static int parse_andor(Parser* p, List* list, int firstOp) {
     int op = firstOp;
+    size_t firstIndex = list->count, sourceStart;
 
+    skip_blanks(p);
+    sourceStart = p->pos;
     for (;;) {
         Node* node;
         size_t length, skip;
@@ -402,6 +407,45 @@ static int parse_andor(Parser* p, List* list, int firstOp) {
                 return incomplete(p, next == LIST_AND ? "Syntax error: missing command after '&&'"
                                                       : "Syntax error: missing command after '||'");
             continue;
+        }
+        if (p->text[p->pos] == '&' && p->text[p->pos + 1] != '&' && p->text[p->pos + 1] != '>') {
+            // list &: the whole and-or list runs as a background job
+            Node* job = new_node(NODE_BACKGROUND);
+            size_t end = p->pos, k;
+
+            if (job == NULL) {
+                p->error = ERROR_MEMORY;
+                return -1;
+            }
+            job->type = NODE_BACKGROUND;
+            while (end > sourceStart && is_blank(p->text[end - 1]))
+                end--;
+            job->text = malloc(end - sourceStart + 1);
+            if (job->text == NULL) {
+                free_node(job);
+                p->error = ERROR_MEMORY;
+                return -1;
+            }
+            memcpy(job->text, p->text + sourceStart, end - sourceStart);
+            job->text[end - sourceStart] = '\0';
+            for (k = firstIndex; k < list->count; k++) {
+                if (list_add(&job->first, list->nodes[k], k == firstIndex ? LIST_FIRST : list->ops[k]) != 0) {
+                    // the nodes stay with the list, which frees them: only the shell of the job goes
+                    free(job->first.nodes);
+                    free(job->first.ops);
+                    free(job->text);
+                    free(job);
+                    p->error = ERROR_MEMORY;
+                    return -1;
+                }
+            }
+            list->count = firstIndex;       // moved into the job
+            p->pos++;                       // the &
+            if (list_add(list, job, firstOp) != 0) {
+                free_node(job);
+                p->error = ERROR_MEMORY;
+                return -1;
+            }
         }
         return 0;                       // ; newline end: the caller skips it
     }
@@ -535,6 +579,8 @@ static int parse_trailer(Parser* p, Node* node) {
         return 0;
     if (c == '|')
         return 0;                       // the next stage of a pipeline: parse_command goes on
+    if (c == '&' && next != '&' && next != '>')
+        return 0;                       // a background job: parse_andor takes the &
     if (c == '<' || c == '>' || (c == '&' && next == '>') || (isdigit((unsigned char)c) && next == '>')) {
         size_t start = p->pos, end;
 
@@ -774,7 +820,7 @@ static Node* parse_single(Parser* p) {
 
     // name() compound-command
     if (isalpha((unsigned char)p->text[p->pos]) || p->text[p->pos] == '_') {
-        size_t nameEnd = p->pos, k;
+        size_t nameEnd = p->pos, k, definitionStart = p->pos;
 
         while (isalnum((unsigned char)p->text[nameEnd]) || p->text[nameEnd] == '_')
             nameEnd++;
@@ -827,6 +873,12 @@ static Node* parse_single(Parser* p) {
                     free_node(function);
                     p->error = ERROR_MEMORY;
                     return NULL;
+                }
+                // the text of the definition, for a background job that needs the function
+                function->text = malloc(p->pos - definitionStart + 1);
+                if (function->text != NULL) {
+                    memcpy(function->text, p->text + definitionStart, p->pos - definitionStart);
+                    function->text[p->pos - definitionStart] = '\0';
                 }
                 return function;
             }
@@ -1002,6 +1054,10 @@ static int activeLoopDepth;
 
 void command_interrupt(void) {
     InterlockedExchange(&interruptRequested, 1);
+}
+
+int command_was_interrupted(void) {
+    return InterlockedCompareExchange(&interruptRequested, 0, 0) != 0;
 }
 
 int command_break(int levels, int isContinue) {
@@ -1239,6 +1295,7 @@ static int run_node(Runner* r, const Node* node, int status);
 typedef struct {
     char* name;
     Node* body;                 // owned: taken from the tree of the definition
+    char* source;               // the text of the definition (NULL when unknown)
 } Function;
 
 static Function* functions;
@@ -1275,6 +1332,7 @@ static int define_function(Node* node) {
 
     if (function != NULL) {
         free_node(function->body);
+        free(function->source);
     } else {
         Function* grown = realloc(functions, (functionCount + 1) * sizeof *grown);
 
@@ -1289,6 +1347,7 @@ static int define_function(Node* node) {
         }
     }
     function->body = body;
+    function->source = node->text != NULL ? _strdup(node->text) : NULL;
     node->second.nodes[0] = NULL;       // the table owns it now
     return 0;
 }
@@ -1299,6 +1358,7 @@ int command_unset_function(const char* name) {
     for (i = 0; i < functionCount; i++) {
         if (strcmp(functions[i].name, name) == 0) {
             free(functions[i].name);
+            free(functions[i].source);
             free_node(functions[i].body);
             functions[i] = functions[--functionCount];
             return 1;
@@ -1813,6 +1873,152 @@ static int run_simple(Runner* r, const Node* node, int status) {
     return result;
 }
 
+/* ---- background jobs ----------------------------------------------------------------------- */
+
+/*
+ * `list &`. A pipeline of programs is started at once without waiting for it (its standard input is NUL,
+ * as for a job of a shell without job control). Anything else (builtins, functions, compound commands,
+ * and-or lists) runs in a shell of its own, `shell -c`, which is given what it needs from this one: the
+ * variables that are not exported, the functions and the parameters. The job is in the table of jobs.c.
+ */
+
+typedef struct {
+    char*  data;
+    size_t length, capacity;
+} TextBuffer;
+
+static int text_append(TextBuffer* b, const char* text, size_t length) {
+    if (VEC_RESERVE(b->data, b->capacity, b->length + length + 1) != 0)
+        return -1;
+    memcpy(b->data + b->length, text, length);
+    b->length += length;
+    b->data[b->length] = '\0';
+    return 0;
+}
+
+static void add_local_variable(const char* name, const char* value, void* context) {
+    TextBuffer* b = context;
+    const char* c;
+
+    if (!(isalpha((unsigned char)name[0]) || name[0] == '_'))
+        return;                         // the parameters go as arguments
+    for (c = name; *c != '\0'; c++)
+        if (!isalnum((unsigned char)*c) && *c != '_')
+            return;
+    text_append(b, name, strlen(name));
+    text_append(b, "='", 2);
+    for (c = value; *c != '\0'; c++) {
+        if (*c == '\'')
+            text_append(b, "'\\''", 4);
+        else
+            text_append(b, c, 1);
+    }
+    text_append(b, "'\n", 2);
+}
+
+/** The functions, the variables of the shell and then the commands of the job, as the text of a script. */
+static char* background_script(const char* text) {
+    TextBuffer b = { NULL, 0, 0 };
+    size_t i;
+
+    for (i = 0; i < functionCount; i++) {
+        if (functions[i].source != NULL) {
+            text_append(&b, functions[i].source, strlen(functions[i].source));
+            text_append(&b, "\n", 1);
+        }
+    }
+    var_each_local(add_local_variable, &b);
+    if (text_append(&b, text, strlen(text)) != 0) {
+        free(b.data);
+        return NULL;
+    }
+    return b.data;
+}
+
+/** Whether every stage of the pipeline text is a program (not a builtin, a function or a bare assignment). */
+static int background_is_programs(const char* text) {
+    char** parts;
+    size_t count, i;
+    int programs = 1;
+
+    if (split_pipeline_text(text, &parts, &count) != 0)
+        return 0;
+    for (i = 0; i < count; i++) {
+        const char* word = parts[i];
+        size_t n;
+
+        while (is_blank(*word))
+            word++;
+        n = strcspn(word, " \t=");
+        if (word[n] == '=' || n == 0 || part_is_function_call(parts[i]))
+            programs = 0;
+        free(parts[i]);
+    }
+    free(parts);
+    return programs;
+}
+
+static int run_background(Runner* r, const Node* node, int status) {
+    const Node* only = node->first.count == 1 ? node->first.nodes[0] : NULL;
+    char label[512];
+    char* script;
+    char* arguments[16];
+    int count = 0, i, started;
+    const char* number;
+    const char* name;
+
+    (void)r;
+    (void)status;
+    snprintf(label, sizeof label, "%s &", node->text);
+
+    if (only != NULL && only->type == NODE_SIMPLE && background_is_programs(only->text)) {
+        Pipeline pipeline;
+        HANDLE* processes = NULL;
+        size_t processCount = 0;
+
+        if (winshell_parse(only->text, &pipeline) != 0)
+            return 2;
+        if (pipeline.count > 0 && winshell_glob(&pipeline) == 0 &&
+            execute_pipeline_background(&pipeline, &processes, &processCount) == 0)
+            jobs_add(processes, processCount, label);
+        winshell_freePipeline(&pipeline);
+        return 0;
+    }
+
+    script = background_script(node->text);
+    if (script == NULL)
+        return 1;
+    number = var_get("#");
+    name = var_get("0");
+    count = number != NULL ? atoi(number) : 0;
+    if (count > 9)
+        count = 9;
+    {
+        char executable[MAX_PATH];
+        char names[9][3];
+
+        if (GetModuleFileNameA(NULL, executable, sizeof executable) == 0) {
+            free(script);
+            return 1;
+        }
+        arguments[0] = executable;
+        arguments[1] = "-c";
+        arguments[2] = script;
+        arguments[3] = (char*)(name != NULL ? name : "shell");
+        for (i = 0; i < count; i++) {
+            const char* value;
+
+            snprintf(names[i], sizeof names[i], "%d", i + 1);
+            value = var_get(names[i]);
+            arguments[4 + i] = (char*)(value != NULL ? value : "");
+        }
+        arguments[4 + count] = NULL;
+        started = jobs_start_shell(arguments, label);
+    }
+    free(script);
+    return started < 0 ? 1 : 0;
+}
+
 static int run_node(Runner* r, const Node* node, int status) {
     if (node->redirects != NULL)
         return run_redirected(r, node, status);
@@ -1834,6 +2040,9 @@ static int run_node(Runner* r, const Node* node, int status) {
 
     case NODE_FUNCTION:
         return define_function((Node*)node) == 0 ? 0 : 1;
+
+    case NODE_BACKGROUND:
+        return run_background(r, node, status);
     case NODE_SIMPLE:
         return run_simple(r, node, status);
 

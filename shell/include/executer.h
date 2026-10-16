@@ -27,6 +27,13 @@
 int execute_pipeline(const Pipeline* pipeline);
 
 /**
+ * The same without waiting (`command &`): the standard input is NUL and the processes are in a group of their own.
+ * Returns 0 and the processes that were started (malloc'ed array, handles for the caller to keep), or -1 when
+ * none could be started.
+ */
+int execute_pipeline_background(const Pipeline* pipeline, HANDLE** processes, size_t* count);
+
+/**
  * The redirections of a compound command (`done < file`, `fi > out 2>&1`): they are applied to the standard
  * descriptors of the shell itself for as long as the command runs, so that what it runs (builtins such as
  * read, and the programs it starts) writes and reads there, and restored after it. The command is the one

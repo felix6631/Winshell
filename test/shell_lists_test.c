@@ -52,9 +52,10 @@ static void test_lists(void) {
     CHECK(strstr(r.err, "missing command after '&&'") != NULL);
     CHECK_STR(r.out, "");
     run_result_free(&r);
-    script("echo a & echo b\n", &r);
-    CHECK(strstr(r.err, "'&' is not supported") != NULL);
-    CHECK_STR(r.out, "");
+    // a & ends a command (a background job); the jobs are waited for here to see both outputs
+    script("echo a & echo b\nwait\n", &r);
+    CHECK_STR(r.err, "");
+    CHECK(strstr(r.out, "a\n") != NULL && strstr(r.out, "b\n") != NULL);
     run_result_free(&r);
     script("&& echo a\n", &r);
     CHECK(strstr(r.err, "near unexpected token '&&'") != NULL);

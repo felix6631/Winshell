@@ -59,6 +59,9 @@ void command_run_exit_trap(int* status);
 void* command_traps_enter_subshell(void);
 void command_traps_leave_subshell(void* saved);
 
+/** Whether a Ctrl+C is waiting to be served (the builtin wait stops then). */
+int command_was_interrupted(void);
+
 /** Ctrl+C: the loops that are running stop (status 130) at the end of the round. Called from the console handler. */
 void command_interrupt(void);
 

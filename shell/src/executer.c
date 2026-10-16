@@ -142,7 +142,7 @@ static char* build_environment(const Command* command, int* failed) {
  * Starts one program with the given standard handles, which have to be inheritable.
  * Returns the process handle, or NULL after reporting the problem.
  */
-static HANDLE start_program(char* const argv[], HANDLE in, HANDLE out, HANDLE err, char* environment) {
+static HANDLE start_program(char* const argv[], HANDLE in, HANDLE out, HANDLE err, char* environment, DWORD flags) {
     char path[MAX_PATH];
     char* command;
     STARTUPINFOA si;
@@ -175,7 +175,7 @@ static HANDLE start_program(char* const argv[], HANDLE in, HANDLE out, HANDLE er
         NULL,               // process security attributes
         NULL,               // thread security attributes
         TRUE,               // child process inherits the handles given above
-        0,                  // creation flags; using the same console window
+        flags,              // creation flags; using the same console window
         environment,        // environment block; NULL is the parent's environment
         NULL,               // current directory; use parent's current directory
         &si,                // startup information
@@ -205,7 +205,7 @@ err_start:
  * *process gets the program, or NULL when none was started (a failure, or NAME=value alone).
  */
 static int start_command(const Command* command, HANDLE pipeRead, HANDLE pipeWrite,
-                         HANDLE shellIn, HANDLE shellOut, HANDLE shellErr, HANDLE* process) {
+                         HANDLE shellIn, HANDLE shellOut, HANDLE shellErr, DWORD flags, HANDLE* process) {
     HANDLE in = shellIn, out = shellOut, err = shellErr;
     // the copies and files opened for this command, to close afterwards; descriptors that
     // were made copies of another one (2>&1) refer to the same handle, which is closed once
@@ -266,7 +266,7 @@ static int start_command(const Command* command, HANDLE pipeRead, HANDLE pipeWri
 
     // NAME=value alone starts nothing; its redirections were still made (and truncate their files)
     if (ready && command->argv != NULL)
-        *process = start_program(command->argv, in, out, err, environment);
+        *process = start_program(command->argv, in, out, err, environment, flags);
     free(environment);
 
     // The shell must not keep any pipe end of its own, or EOF never arrives.
@@ -276,7 +276,11 @@ static int start_command(const Command* command, HANDLE pipeRead, HANDLE pipeWri
     return ready ? COMMAND_READY : COMMAND_FAILED;
 }
 
-int execute_pipeline(const Pipeline* pipeline) {
+/**
+ * Starts the pipeline. In the background nothing is waited for: the processes are handed to the caller (*keep), the
+ * input is NUL and the processes are in a group of their own, which Ctrl+C does not reach.
+ */
+static int run_pipeline(const Pipeline* pipeline, int background, HANDLE** keep, size_t* keepCount) {
     HANDLE shellIn  = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE shellOut = GetStdHandle(STD_OUTPUT_HANDLE);
     HANDLE shellErr = GetStdHandle(STD_ERROR_HANDLE);
@@ -285,6 +289,9 @@ int execute_pipeline(const Pipeline* pipeline) {
     DWORD exitCode = (DWORD)-1;
     int noopSucceeded = 0;      // the last command was NAME=value alone
     size_t i;
+
+    HANDLE nul = INVALID_HANDLE_VALUE;
+    DWORD flags = background ? CREATE_NEW_PROCESS_GROUP : 0;
 
     if (pipeline->count == 0)
         return 0;
@@ -297,6 +304,13 @@ int execute_pipeline(const Pipeline* pipeline) {
     SetHandleInformation(shellIn,  HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
     SetHandleInformation(shellOut, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
     SetHandleInformation(shellErr, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    if (background) {
+        SECURITY_ATTRIBUTES inheritable = { sizeof inheritable, NULL, TRUE };
+
+        nul = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable, OPEN_EXISTING, 0, NULL);
+        if (nul != INVALID_HANDLE_VALUE)
+            shellIn = nul;
+    }
 
     for (i = 0; i < pipeline->count; i++) {
         const Command* command = &pipeline->commands[i];
@@ -309,7 +323,7 @@ int execute_pipeline(const Pipeline* pipeline) {
             break;
         }
 
-        result = start_command(command, pipeRead, pipeWrite, shellIn, shellOut, shellErr, &processes[i]);
+        result = start_command(command, pipeRead, pipeWrite, shellIn, shellOut, shellErr, flags, &processes[i]);
         if (result == COMMAND_READY && command->argv == NULL && isLast)
             noopSucceeded = 1;
 
@@ -322,6 +336,19 @@ int execute_pipeline(const Pipeline* pipeline) {
         }
     }
     close_handle(&pipeRead);
+    if (nul != INVALID_HANDLE_VALUE)
+        CloseHandle(nul);
+
+    if (background) {
+        size_t started = 0;
+
+        for (i = 0; i < pipeline->count; i++)
+            if (processes[i] != NULL)
+                processes[started++] = processes[i];
+        *keep = processes;
+        *keepCount = started;
+        return started > 0 ? 0 : -1;
+    }
 
     for (i = 0; i < pipeline->count; i++) {
         if (processes[i] == NULL)
@@ -339,6 +366,14 @@ int execute_pipeline(const Pipeline* pipeline) {
 
     free(processes);
     return (int)exitCode;
+}
+
+int execute_pipeline(const Pipeline* pipeline) {
+    return run_pipeline(pipeline, 0, NULL, NULL);
+}
+
+int execute_pipeline_background(const Pipeline* pipeline, HANDLE** processes, size_t* count) {
+    return run_pipeline(pipeline, 1, processes, count);
 }
 
 /* ---- redirections of the shell itself, for compound commands ------------------------------- */

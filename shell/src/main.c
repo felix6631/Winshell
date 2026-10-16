@@ -6,6 +6,7 @@
 #include "interp.h"
 #include "command.h"
 #include "cwd.h"
+#include "jobs.h"
 #include "variables.h"
 #include "vec.h"
 
@@ -170,10 +171,13 @@ static void print_usage(void) {
 /** Runs the commands of the terminal or of standard input, one line at a time. */
 static int interactive_loop(void) {
     int status = 0, exitShell = 0;
+    DWORD mode;
 
+    jobs_set_interactive(GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode));
     while (!exitShell) {
         char* input;
 
+        jobs_report_finished();
         printf(" > ");
         fflush(stdout);
 
