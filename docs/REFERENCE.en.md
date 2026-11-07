@@ -59,6 +59,14 @@ The options of every command, the shell language, building and testing, and the 
 | `whoami` | Done |
 | `yes` | Done (the arguments joined with spaces as a line, again and again; ends when the reader closes) |
 | `seq` | Done (`-f -s -w`, whole numbers exactly, fractions with the decimals of FIRST/INCREMENT, negative operands such as `-3`) |
+| `base32` | Done (`-d -i -w`; RFC 4648) |
+| `base64` | Done (`-d -i -w`; lines of 76, invalid input writes what was decoded and gives status 1) |
+| `unexpand` | Done (`-a --first-only -t list`; including the rule of the single blank in front of a tab stop, as in GNU) |
+| `expand` | Done (`-t N`, `-t list`, `/N` and `+N`, `-i`, backspaces, UTF-8) |
+| `fold` | Done (`-w -N -b -s`; the columns of tabs, backspaces, CR and UTF-8 characters) |
+| `truncate` | Done (`-s [+-<>/%]size`, `-r`, `-c`, `-o`; suffixes `K M G T P E` and `KB MB ...`) |
+| `readlink` | Done (`-f -e -m -n -q -s -v -z`; the target of a junction or symbolic link, `-f -e -m` give the canonical path of `realpath`) |
+| `mktemp` | Done (`-d -u -q --suffix -p/--tmpdir -t`; the `XXX...` of the template become random characters, a file or directory is made, its name is printed) |
 
 For what is still to come, see the [roadmap in the README](../README.en.md#roadmap).
 
@@ -234,7 +242,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `false`, `find`, `grep`, `head`, `hostname`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `tty`, `uname`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expand`, `expr`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `ls`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -295,6 +303,14 @@ The test programs are divided by feature (`test\`).
 | `hostname_test` | `hostname`: `-s -f -d`, setting is refused |
 | `nproc_test` | `nproc`: `--all --ignore`, at least 1 |
 | `tty_test` | `tty`: output and status when not a terminal |
+| `mktemp_test` | `mktemp`: the shape of the names, files and directories, `-u --suffix -p`, errors |
+| `readlink_test` | `readlink`: the target of a junction, non-links, `-f -e -m` |
+| `truncate_test` | `truncate`: absolute/relative sizes, suffixes, `-r -c`, errors |
+| `fold_test` | `fold`: width, `-s -b`, tabs/backspaces/CR, UTF-8, several files |
+| `expand_test` | `expand`: tab sizes and lists, `-i`, backspaces |
+| `unexpand_test` | `unexpand`: initial blanks, `-a`, tab lists, the single blank rule |
+| `base64_test` | `base64`: the vectors of RFC 4648, `-w`, decoding and errors |
+| `base32_test` | `base32`: the vectors of RFC 4648, `-w`, decoding and errors |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -362,6 +378,14 @@ Winshell/
 ├─ hostname/     hostname command
 ├─ nproc/        nproc command
 ├─ tty/          tty command
+├─ mktemp/       mktemp command
+├─ readlink/     readlink command
+├─ truncate/     truncate command
+├─ fold/         fold command
+├─ expand/       expand command
+├─ unexpand/     unexpand command
+├─ base64/       base64 command
+├─ base32/       base32 command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)

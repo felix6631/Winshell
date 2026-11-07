@@ -59,6 +59,14 @@
 | `whoami` | 완료 |
 | `yes` | 완료 (인자를 공백으로 이어 한 줄로 끝없이 출력, 읽는 쪽이 닫으면 종료) |
 | `seq` | 완료 (`-f -s -w`, 정수는 정확히, 소수는 FIRST/INCREMENT 의 자릿수대로, `-3` 같은 음수 인자) |
+| `base32` | 완료 (`-d -i -w`; RFC 4648) |
+| `base64` | 완료 (`-d -i -w`; 76 칸 줄바꿈, 잘못된 입력은 디코딩된 부분을 쓴 뒤 상태 1) |
+| `unexpand` | 완료 (`-a --first-only -t 목록`; 탭 앞의 공백 하나 규칙까지 GNU 와 같음) |
+| `expand` | 완료 (`-t N`, `-t 목록`, `/N` 과 `+N`, `-i`, 백스페이스, UTF-8) |
+| `fold` | 완료 (`-w -N -b -s`; 탭, 백스페이스, CR, UTF-8 문자의 칸 계산) |
+| `truncate` | 완료 (`-s [+-<>/%]크기`, `-r`, `-c`, `-o`; `K M G T P E` 와 `KB MB …` 접미사) |
+| `readlink` | 완료 (`-f -e -m -n -q -s -v -z`; 정션/심볼릭 링크의 대상, `-f -e -m` 은 `realpath` 와 같은 정규 경로) |
+| `mktemp` | 완료 (`-d -u -q --suffix -p/--tmpdir -t`; 템플릿의 `XXX…` 를 무작위 글자로 바꿔 파일/디렉터리를 만들고 이름을 출력) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
 
@@ -216,7 +224,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `false`, `find`, `grep`, `head`, `hostname`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `tty`, `uname`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expand`, `expr`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `ls`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -277,6 +285,14 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `hostname_test` | `hostname`: `-s -f -d`, 이름 바꾸기 거부 |
 | `nproc_test` | `nproc`: `--all --ignore`, 최소 1 |
 | `tty_test` | `tty`: 터미널이 아닐 때의 출력과 상태 |
+| `mktemp_test` | `mktemp`: 이름의 모양, 파일/디렉터리 생성, `-u --suffix -p`, 오류 |
+| `readlink_test` | `readlink`: 정션의 대상, 링크가 아닌 것, `-f -e -m` |
+| `truncate_test` | `truncate`: 절대/상대 크기, 접미사, `-r -c`, 오류 |
+| `fold_test` | `fold`: 너비, `-s -b`, 탭/백스페이스/CR, UTF-8, 여러 파일 |
+| `expand_test` | `expand`: 탭 크기와 목록, `-i`, 백스페이스 |
+| `unexpand_test` | `unexpand`: 앞 공백, `-a`, 탭 목록, 공백 하나 규칙 |
+| `base64_test` | `base64`: RFC 4648 예, `-w`, 디코딩과 오류 |
+| `base32_test` | `base32`: RFC 4648 예, `-w`, 디코딩과 오류 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -344,6 +360,14 @@ Winshell/
 ├─ hostname/     hostname 명령
 ├─ nproc/        nproc 명령
 ├─ tty/          tty 명령
+├─ mktemp/       mktemp 명령
+├─ readlink/     readlink 명령
+├─ truncate/     truncate 명령
+├─ fold/         fold 명령
+├─ expand/       expand 명령
+├─ unexpand/     unexpand 명령
+├─ base64/       base64 명령
+├─ base32/       base32 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)
