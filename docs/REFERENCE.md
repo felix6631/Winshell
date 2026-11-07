@@ -67,6 +67,13 @@
 | `truncate` | 완료 (`-s [+-<>/%]크기`, `-r`, `-c`, `-o`; `K M G T P E` 와 `KB MB …` 접미사) |
 | `readlink` | 완료 (`-f -e -m -n -q -s -v -z`; 정션/심볼릭 링크의 대상, `-f -e -m` 은 `realpath` 와 같은 정규 경로) |
 | `mktemp` | 완료 (`-d -u -q --suffix -p/--tmpdir -t`; 템플릿의 `XXX…` 를 무작위 글자로 바꿔 파일/디렉터리를 만들고 이름을 출력) |
+| `cksum` | 완료 (POSIX CRC 와 바이트 수; 표준 입력은 이름 없이 출력) |
+| `sha512sum` | 완료 (`SHA-512`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; 기본 `해시 *이름`, BSD 형식, 검사 결과 `이름: OK`) |
+| `sha384sum` | 완료 (`SHA-384`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; 기본 `해시 *이름`, BSD 형식, 검사 결과 `이름: OK`) |
+| `sha256sum` | 완료 (`SHA-256`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; 기본 `해시 *이름`, BSD 형식, 검사 결과 `이름: OK`) |
+| `sha224sum` | 완료 (`SHA-224`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; 기본 `해시 *이름`, BSD 형식, 검사 결과 `이름: OK`) |
+| `sha1sum` | 완료 (`SHA-1`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; 기본 `해시 *이름`, BSD 형식, 검사 결과 `이름: OK`) |
+| `md5sum` | 완료 (`MD5 (RFC 1321)`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; 기본 `해시 *이름`, BSD 형식, 검사 결과 `이름: OK`) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
 
@@ -224,7 +231,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expand`, `expr`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `ls`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expand`, `expr`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -293,6 +300,13 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `unexpand_test` | `unexpand`: 앞 공백, `-a`, 탭 목록, 공백 하나 규칙 |
 | `base64_test` | `base64`: RFC 4648 예, `-w`, 디코딩과 오류 |
 | `base32_test` | `base32`: RFC 4648 예, `-w`, 디코딩과 오류 |
+| `md5sum_test` | `md5sum`: 다이제스트, 줄 형식, `-c` 검사, 오류 |
+| `sha1sum_test` | `sha1sum`: 다이제스트, 줄 형식, `-c` 검사, 오류 |
+| `sha224sum_test` | `sha224sum`: 다이제스트, 줄 형식, `-c` 검사, 오류 |
+| `sha256sum_test` | `sha256sum`: 다이제스트, 줄 형식, `-c` 검사, 오류 |
+| `sha384sum_test` | `sha384sum`: 다이제스트, 줄 형식, `-c` 검사, 오류 |
+| `sha512sum_test` | `sha512sum`: 다이제스트, 줄 형식, `-c` 검사, 오류 |
+| `cksum_test` | `cksum`: 표준 입력과 파일의 CRC, 오류 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -368,6 +382,13 @@ Winshell/
 ├─ unexpand/     unexpand 명령
 ├─ base64/       base64 명령
 ├─ base32/       base32 명령
+├─ md5sum/       md5sum 명령
+├─ sha1sum/      sha1sum 명령
+├─ sha224sum/    sha224sum 명령
+├─ sha256sum/    sha256sum 명령
+├─ sha384sum/    sha384sum 명령
+├─ sha512sum/    sha512sum 명령
+├─ cksum/        cksum 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)

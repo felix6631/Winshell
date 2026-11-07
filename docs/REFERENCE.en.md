@@ -67,6 +67,13 @@ The options of every command, the shell language, building and testing, and the 
 | `truncate` | Done (`-s [+-<>/%]size`, `-r`, `-c`, `-o`; suffixes `K M G T P E` and `KB MB ...`) |
 | `readlink` | Done (`-f -e -m -n -q -s -v -z`; the target of a junction or symbolic link, `-f -e -m` give the canonical path of `realpath`) |
 | `mktemp` | Done (`-d -u -q --suffix -p/--tmpdir -t`; the `XXX...` of the template become random characters, a file or directory is made, its name is printed) |
+| `cksum` | Done (the CRC of POSIX and the byte count; standard input is printed without a name) |
+| `sha512sum` | Done (`SHA-512`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; the default `HASH *NAME` lines, the BSD form, `NAME: OK` when checking) |
+| `sha384sum` | Done (`SHA-384`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; the default `HASH *NAME` lines, the BSD form, `NAME: OK` when checking) |
+| `sha256sum` | Done (`SHA-256`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; the default `HASH *NAME` lines, the BSD form, `NAME: OK` when checking) |
+| `sha224sum` | Done (`SHA-224`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; the default `HASH *NAME` lines, the BSD form, `NAME: OK` when checking) |
+| `sha1sum` | Done (`SHA-1`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; the default `HASH *NAME` lines, the BSD form, `NAME: OK` when checking) |
+| `md5sum` | Done (`MD5 (RFC 1321)`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; the default `HASH *NAME` lines, the BSD form, `NAME: OK` when checking) |
 
 For what is still to come, see the [roadmap in the README](../README.en.md#roadmap).
 
@@ -242,7 +249,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expand`, `expr`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `ls`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expand`, `expr`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -311,6 +318,13 @@ The test programs are divided by feature (`test\`).
 | `unexpand_test` | `unexpand`: initial blanks, `-a`, tab lists, the single blank rule |
 | `base64_test` | `base64`: the vectors of RFC 4648, `-w`, decoding and errors |
 | `base32_test` | `base32`: the vectors of RFC 4648, `-w`, decoding and errors |
+| `md5sum_test` | `md5sum`: digests, line formats, checking with `-c`, errors |
+| `sha1sum_test` | `sha1sum`: digests, line formats, checking with `-c`, errors |
+| `sha224sum_test` | `sha224sum`: digests, line formats, checking with `-c`, errors |
+| `sha256sum_test` | `sha256sum`: digests, line formats, checking with `-c`, errors |
+| `sha384sum_test` | `sha384sum`: digests, line formats, checking with `-c`, errors |
+| `sha512sum_test` | `sha512sum`: digests, line formats, checking with `-c`, errors |
+| `cksum_test` | `cksum`: CRC of standard input and files, errors |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -386,6 +400,13 @@ Winshell/
 ├─ unexpand/     unexpand command
 ├─ base64/       base64 command
 ├─ base32/       base32 command
+├─ md5sum/       md5sum command
+├─ sha1sum/      sha1sum command
+├─ sha224sum/    sha224sum command
+├─ sha256sum/    sha256sum command
+├─ sha384sum/    sha384sum command
+├─ sha512sum/    sha512sum command
+├─ cksum/        cksum command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
