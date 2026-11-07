@@ -52,6 +52,13 @@
 | `uniq` | 완료 (`-c -d -D -u -i -f -s -w`) |
 | `wc` | 완료 (`-l -w -m -c -L`) |
 | `printf` | 완료 (GNU printf: `%d %i %o %u %x %X %e %f %g %a %c %s %b %%`, 플래그/너비/정밀도/`*`, 이스케이프 `\n \xHH \NNN \uHHHH \c`, 형식 반복, `'a` 문자 상수; 값은 `long double` 이 아닌 `double` 로 계산) |
+| `tty` | 완료 (`-s`; 콘솔이면 `/dev/console`, 아니면 `not a tty` 와 상태 1) |
+| `nproc` | 완료 (`--all`, `--ignore=N`, 프로세스 선호도와 `OMP_NUM_THREADS`/`OMP_THREAD_LIMIT` 반영) |
+| `hostname` | 완료 (`-s -f -d`; 이름을 바꾸는 것은 지원하지 않음) |
+| `uname` | 완료 (`-a -s -n -r -v -m -p -i -o`; 시스템 이름은 `Windows_NT`, 릴리스는 `10.0.26200` 같은 버전) |
+| `whoami` | 완료 |
+| `yes` | 완료 (인자를 공백으로 이어 한 줄로 끝없이 출력, 읽는 쪽이 닫으면 종료) |
+| `seq` | 완료 (`-f -s -w`, 정수는 정확히, 소수는 FIRST/INCREMENT 의 자릿수대로, `-3` 같은 음수 인자) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
 
@@ -209,7 +216,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `false`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `uniq`, `wc`, `which`, `xargs`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `false`, `find`, `grep`, `head`, `hostname`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `tty`, `uname`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -263,6 +270,13 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `sharing_test` | **공유 위반**: 다른 프로세스가 연 파일/디렉터리에 대한 `rm`/`mv`/`cp`, 다른 볼륨으로의 `mv` |
 | `async_test` | **비동기**: 조각으로 들어오는 입력, 입력이 닫히길 기다리는 프로그램, `tail -f` |
 | `printf_test` | `printf`: 이스케이프, 변환과 플래그, 형식 반복, 문자 상수, 숫자 오류의 상태 |
+| `seq_test` | `seq`: 정수/소수, `-w -s -f`, 음수 인자, 오류 |
+| `yes_test` | `yes`: `head` 로 끊는 출력, 긴 줄과 많은 줄 |
+| `whoami_test` | `whoami`: 사용자 이름 |
+| `uname_test` | `uname`: 옵션별 출력과 `-a` 의 순서 |
+| `hostname_test` | `hostname`: `-s -f -d`, 이름 바꾸기 거부 |
+| `nproc_test` | `nproc`: `--all --ignore`, 최소 1 |
+| `tty_test` | `tty`: 터미널이 아닐 때의 출력과 상태 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -323,6 +337,13 @@ Winshell/
 ├─ test_cmd/     test_cmd 명령
 ├─ true/         true 명령
 ├─ printf/       printf 명령
+├─ seq/          seq 명령
+├─ yes/          yes 명령
+├─ whoami/       whoami 명령
+├─ uname/        uname 명령
+├─ hostname/     hostname 명령
+├─ nproc/        nproc 명령
+├─ tty/          tty 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)

@@ -124,10 +124,9 @@ Winshell은 활발히 개발 중입니다.
 <summary>구현 예정 명령 펼치기</summary>
 
 b2sum, base32, base64, chgrp, chmod, chown, cksum, csplit, dd, df, dir, dircolors, du, expand, factor, fmt, fold,
-groups, hostid, hostname, id, install, join, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup, nproc,
-numfmt, od, pathchk, pinky, pr, ptx, readlink, seq, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, shred,
-shuf, split, stat, stdbuf, sum, sync, truncate, tsort, tty, uname, unexpand, unlink, uptime, users, vdir, who,
-whoami, yes
+groups, hostid, id, install, join, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup,
+numfmt, od, pathchk, pinky, pr, ptx, readlink, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, shred,
+shuf, split, stat, stdbuf, sum, sync, truncate, tsort, unexpand, unlink, uptime, users, vdir, who
 
 대상 제외(Windows에서 의미가 없거나 대응 개념이 없음): chcon, chroot, runcon, stty, coreutils(멀티콜 바이너리)
 

@@ -130,10 +130,9 @@ Winshell is under active development.
 <summary>Show the planned commands</summary>
 
 b2sum, base32, base64, chgrp, chmod, chown, cksum, csplit, dd, df, dir, dircolors, du, expand, factor, fmt, fold,
-groups, hostid, hostname, id, install, join, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup, nproc,
-numfmt, od, pathchk, pinky, pr, ptx, readlink, seq, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, shred,
-shuf, split, stat, stdbuf, sum, sync, truncate, tsort, tty, uname, unexpand, unlink, uptime, users, vdir, who,
-whoami, yes
+groups, hostid, id, install, join, link, ln, logname, md5sum, mkfifo, mknod, mktemp, nice, nohup,
+numfmt, od, pathchk, pinky, pr, ptx, readlink, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, shred,
+shuf, split, stat, stdbuf, sum, sync, truncate, tsort, unexpand, unlink, uptime, users, vdir, who
 
 Out of scope (meaningless or no counterpart on Windows): chcon, chroot, runcon, stty, coreutils (the multi-call binary)
 

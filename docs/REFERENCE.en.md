@@ -52,6 +52,13 @@ The options of every command, the shell language, building and testing, and the 
 | `uniq` | Done (`-c -d -D -u -i -f -s -w`) |
 | `wc` | Done (`-l -w -m -c -L`) |
 | `printf` | Done (GNU printf: `%d %i %o %u %x %X %e %f %g %a %c %s %b %%`, flags/width/precision/`*`, escapes `\n \xHH \NNN \uHHHH \c`, the format is reused, `'a` character constants; numbers are `double`, not `long double`) |
+| `tty` | Done (`-s`; `/dev/console` for a console, else `not a tty` and status 1) |
+| `nproc` | Done (`--all`, `--ignore=N`, honours the process affinity and `OMP_NUM_THREADS`/`OMP_THREAD_LIMIT`) |
+| `hostname` | Done (`-s -f -d`; setting the name is not supported) |
+| `uname` | Done (`-a -s -n -r -v -m -p -i -o`; the system is `Windows_NT`, the release a version such as `10.0.26200`) |
+| `whoami` | Done |
+| `yes` | Done (the arguments joined with spaces as a line, again and again; ends when the reader closes) |
+| `seq` | Done (`-f -s -w`, whole numbers exactly, fractions with the decimals of FIRST/INCREMENT, negative operands such as `-3`) |
 
 For what is still to come, see the [roadmap in the README](../README.en.md#roadmap).
 
@@ -227,7 +234,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `false`, `find`, `grep`, `head`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `uniq`, `wc`, `which`, `xargs`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `basename`, `cat`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expr`, `false`, `find`, `grep`, `head`, `hostname`, `kill`, `ls`, `mkdir`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `tty`, `uname`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -281,6 +288,13 @@ The test programs are divided by feature (`test\`).
 | `sharing_test` | **sharing violations**: `rm`/`mv`/`cp` of files and directories another process holds open, moves between volumes |
 | `async_test` | **asynchronous**: input that comes in pieces, programs that wait for the end of their input, `tail -f` |
 | `printf_test` | `printf`: escapes, conversions and flags, reuse of the format, character constants, status after numeric errors |
+| `seq_test` | `seq`: whole numbers/fractions, `-w -s -f`, negative operands, errors |
+| `yes_test` | `yes`: output cut by `head`, long lines and many lines |
+| `whoami_test` | `whoami`: the user name |
+| `uname_test` | `uname`: the output of each option and the order of `-a` |
+| `hostname_test` | `hostname`: `-s -f -d`, setting is refused |
+| `nproc_test` | `nproc`: `--all --ignore`, at least 1 |
+| `tty_test` | `tty`: output and status when not a terminal |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -341,6 +355,13 @@ Winshell/
 ├─ test_cmd/     test_cmd command
 ├─ true/         true command
 ├─ printf/       printf command
+├─ seq/          seq command
+├─ yes/          yes command
+├─ whoami/       whoami command
+├─ uname/        uname command
+├─ hostname/     hostname command
+├─ nproc/        nproc command
+├─ tty/          tty command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
