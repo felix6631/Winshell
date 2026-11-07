@@ -74,6 +74,13 @@
 | `sha224sum` | 완료 (`SHA-224`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; 기본 `해시 *이름`, BSD 형식, 검사 결과 `이름: OK`) |
 | `sha1sum` | 완료 (`SHA-1`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; 기본 `해시 *이름`, BSD 형식, 검사 결과 `이름: OK`) |
 | `md5sum` | 완료 (`MD5 (RFC 1321)`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; 기본 `해시 *이름`, BSD 형식, 검사 결과 `이름: OK`) |
+| `factor` | 완료 (64비트까지, Miller-Rabin 과 Pollard rho; 인자 또는 표준 입력) |
+| `split` | 완료 (`-l -b -C -n N K/N l/N l/K/N r/N r/K/N -a -d -x -e -t --additional-suffix --verbose`; 숫자 접미사는 모자라면 `x89` 다음 `x9000` 으로 늘어남) |
+| `du` | 완료 (`-0 -a -b -B -c -d -h -k -l -m -P -L -S -s -x --apparent-size --exclude --si`; 디스크 사용량은 할당 크기, 하드 링크는 한 번만 셈) |
+| `stat` | 완료 (`-c -f -L -t --printf`; 서식 `%a %A %b %B %d %D %f %F %g %G %h %i %m %n %N %o %s %t %T %u %U %w %W %x %X %y %Y %z %Z`; 장치는 볼륨 번호, inode 는 파일 인덱스, 사용자/그룹은 SID 의 마지막 번호) |
+| `unlink` | 완료 (파일 하나를 지움, 디렉터리는 거부, 읽기 전용도 지움) |
+| `link` | 완료 (하드 링크 하나) |
+| `ln` | 완료 (`-s -f -i -n -v -b -S -r -T -t`; 하드 링크는 `CreateHardLink`, 심볼릭 링크는 권한 없이 만들 수 있으면 심볼릭 링크, 디렉터리는 정션으로 대신) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
 
@@ -231,7 +238,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expand`, `expr`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `link`, `ln`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `sleep`, `sort`, `split`, `stat`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -307,6 +314,13 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `sha384sum_test` | `sha384sum`: 다이제스트, 줄 형식, `-c` 검사, 오류 |
 | `sha512sum_test` | `sha512sum`: 다이제스트, 줄 형식, `-c` 검사, 오류 |
 | `cksum_test` | `cksum`: 표준 입력과 파일의 CRC, 오류 |
+| `ln_test` | `ln`: 하드 링크, 놓일 곳, `-f -i -b -v -T -t`, 디렉터리 정션, 오류 |
+| `link_test` | `link`: 하드 링크와 거부되는 것 |
+| `unlink_test` | `unlink`: 파일 지우기, 디렉터리 거부 |
+| `stat_test` | `stat`: 서식, 기본/간결 출력, 형식, 시간, 링크, `-f` |
+| `du_test` | `du`: 합계와 순서, 단위, 하드 링크, `--exclude`, 오류 |
+| `split_test` | `split`: 줄/바이트/조각 나누기, 이름(`-d -x -a`, 늘어나는 접미사), 오류 |
+| `factor_test` | `factor`: 작은 수, 큰 수(2^64-1), 여러 수, 오류 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -389,6 +403,13 @@ Winshell/
 ├─ sha384sum/    sha384sum 명령
 ├─ sha512sum/    sha512sum 명령
 ├─ cksum/        cksum 명령
+├─ ln/           ln 명령
+├─ link/         link 명령
+├─ unlink/       unlink 명령
+├─ stat/         stat 명령
+├─ du/           du 명령
+├─ split/        split 명령
+├─ factor/       factor 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)

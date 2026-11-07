@@ -90,4 +90,11 @@ int fs_copy(const FsOptions* options, const char* srcDisplay, const char* srcNat
  */
 int fs_remove(const FsOptions* options, const char* display, const char* native);
 
+/**
+ * The target of a symbolic link or junction as text of the virtual file system (an absolute target becomes a
+ * path like /c/dir; a relative one is kept as it is, with slashes). Returns 0, or -1 when the path is not a link
+ * (or does not exist): *error is the reason, as "readlink" says it.
+ */
+int fs_read_link(const char* native, char* out, size_t size, const char** error);
+
 #endif //FSUTIL_H

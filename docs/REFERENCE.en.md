@@ -74,6 +74,13 @@ The options of every command, the shell language, building and testing, and the 
 | `sha224sum` | Done (`SHA-224`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; the default `HASH *NAME` lines, the BSD form, `NAME: OK` when checking) |
 | `sha1sum` | Done (`SHA-1`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; the default `HASH *NAME` lines, the BSD form, `NAME: OK` when checking) |
 | `md5sum` | Done (`MD5 (RFC 1321)`: `-b -c -t -w -z --tag --quiet --status --strict --ignore-missing`; the default `HASH *NAME` lines, the BSD form, `NAME: OK` when checking) |
+| `factor` | Done (up to 64 bits, Miller-Rabin and Pollard rho; arguments or standard input) |
+| `split` | Done (`-l -b -C -n N K/N l/N l/K/N r/N r/K/N -a -d -x -e -t --additional-suffix --verbose`; numeric suffixes grow when they run out: `x89` is followed by `x9000`) |
+| `du` | Done (`-0 -a -b -B -c -d -h -k -l -m -P -L -S -s -x --apparent-size --exclude --si`; disk usage is the allocated size, hard links are counted once) |
+| `stat` | Done (`-c -f -L -t --printf`; sequences `%a %A %b %B %d %D %f %F %g %G %h %i %m %n %N %o %s %t %T %u %U %w %W %x %X %y %Y %z %Z`; the device is the volume number, the inode the file index, the user and group the last number of the SID) |
+| `unlink` | Done (removes one file, refuses a directory, also removes a read-only file) |
+| `link` | Done (one hard link) |
+| `ln` | Done (`-s -f -i -n -v -b -S -r -T -t`; a hard link is `CreateHardLink`, a symbolic link is made without privilege when Windows allows it and a junction stands for one to a directory) |
 
 For what is still to come, see the [roadmap in the README](../README.en.md#roadmap).
 
@@ -249,7 +256,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `echo`, `env`, `expand`, `expr`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `sleep`, `sort`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `wc`, `which`, `whoami`, `xargs`, `yes`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `link`, `ln`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `sleep`, `sort`, `split`, `stat`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `wc`, `which`, `whoami`, `xargs`, `yes`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -325,6 +332,13 @@ The test programs are divided by feature (`test\`).
 | `sha384sum_test` | `sha384sum`: digests, line formats, checking with `-c`, errors |
 | `sha512sum_test` | `sha512sum`: digests, line formats, checking with `-c`, errors |
 | `cksum_test` | `cksum`: CRC of standard input and files, errors |
+| `ln_test` | `ln`: hard links, where links go, `-f -i -b -v -T -t`, junctions to directories, errors |
+| `link_test` | `link`: hard links and what is refused |
+| `unlink_test` | `unlink`: removing a file, refusing a directory |
+| `stat_test` | `stat`: sequences, default/terse output, formats, times, links, `-f` |
+| `du_test` | `du`: sums and order, units, hard links, `--exclude`, errors |
+| `split_test` | `split`: pieces by lines/bytes/count, names (`-d -x -a`, growing suffixes), errors |
+| `factor_test` | `factor`: small numbers, large numbers (2^64-1), several numbers, errors |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -407,6 +421,13 @@ Winshell/
 ├─ sha384sum/    sha384sum command
 ├─ sha512sum/    sha512sum command
 ├─ cksum/        cksum command
+├─ ln/           ln command
+├─ link/         link command
+├─ unlink/       unlink command
+├─ stat/         stat command
+├─ du/           du command
+├─ split/        split command
+├─ factor/       factor command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)

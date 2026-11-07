@@ -78,77 +78,6 @@ static int on_option(int id, const char* value, void* context) {
     return 0;
 }
 
-typedef struct {
-    ULONG  ReparseTag;
-    USHORT ReparseDataLength;
-    USHORT Reserved;
-    union {
-        struct {
-            USHORT SubstituteNameOffset, SubstituteNameLength, PrintNameOffset, PrintNameLength;
-            ULONG  Flags;
-            WCHAR  PathBuffer[1];
-        } symbolicLink;
-        struct {
-            USHORT SubstituteNameOffset, SubstituteNameLength, PrintNameOffset, PrintNameLength;
-            WCHAR  PathBuffer[1];
-        } mountPoint;
-    } u;
-} ReparseData;
-
-/** The target of a link as text of the virtual file system. Returns 0, or -1 (not a link: *error is the reason). */
-static int link_target(const char* native, char* out, size_t size, const char** error) {
-    HANDLE file = CreateFileA(native, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
-                              FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    union {
-        ReparseData data;
-        char bytes[MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
-    } buffer;
-    DWORD got = 0;
-    WCHAR* name;
-    int length, relative = 0;
-    char utf8[VPATH_MAX * 3];
-
-    if (file == INVALID_HANDLE_VALUE) {
-        *error = fs_strerror(GetLastError());
-        return -1;
-    }
-    if (!DeviceIoControl(file, FSCTL_GET_REPARSE_POINT, NULL, 0, &buffer, sizeof buffer, &got, NULL)) {
-        CloseHandle(file);
-        *error = "Invalid argument";
-        return -1;
-    }
-    CloseHandle(file);
-    if (buffer.data.ReparseTag == IO_REPARSE_TAG_SYMLINK) {
-        relative = (buffer.data.u.symbolicLink.Flags & 1) != 0;       /* SYMLINK_FLAG_RELATIVE */
-        name = buffer.data.u.symbolicLink.PathBuffer +
-               (relative ? buffer.data.u.symbolicLink.PrintNameOffset : buffer.data.u.symbolicLink.SubstituteNameOffset) / sizeof(WCHAR);
-        length = (relative ? buffer.data.u.symbolicLink.PrintNameLength : buffer.data.u.symbolicLink.SubstituteNameLength) / (int)sizeof(WCHAR);
-    } else if (buffer.data.ReparseTag == IO_REPARSE_TAG_MOUNT_POINT) {
-        name = buffer.data.u.mountPoint.PathBuffer + buffer.data.u.mountPoint.SubstituteNameOffset / sizeof(WCHAR);
-        length = buffer.data.u.mountPoint.SubstituteNameLength / (int)sizeof(WCHAR);
-    } else {
-        *error = "Invalid argument";
-        return -1;
-    }
-    if (!relative && length > 4 && name[0] == L'\\' && name[1] == L'?' && name[2] == L'?' && name[3] == L'\\') {
-        name += 4;
-        length -= 4;
-    }
-    length = WideCharToMultiByte(CP_UTF8, 0, name, length, utf8, (int)sizeof utf8 - 1, NULL, NULL);
-    utf8[length > 0 ? length : 0] = '\0';
-    if (!relative && vpath_from_native(utf8, out, size) == 0)
-        return 0;
-    snprintf(out, size, "%s", utf8);
-    if (relative) {
-        char* p;
-
-        for (p = out; *p != '\0'; p++)
-            if (*p == '\\')
-                *p = '/';
-    }
-    return 0;
-}
-
 /** Runs `realpath` with the arguments and returns what it printed (malloc'ed); NULL when it could not be run. */
 static char* run_realpath(char* const argv[], size_t* length, int* exitCode) {
     char path[MAX_PATH];
@@ -239,7 +168,7 @@ int main(int argc, char* argv[]) {
             char native[VPATH_MAX];
             const char* error = "Invalid argument";
 
-            if (vpath_to_native(operands[i], native, sizeof native) != 0 || link_target(native, target, sizeof target, &error) != 0) {
+            if (vpath_to_native(operands[i], native, sizeof native) != 0 || fs_read_link(native, target, sizeof target, &error) != 0) {
                 if (s.verbose)
                     fprintf(stderr, PROGRAM ": %s: %s\n", operands[i], error);
                 status = 1;
