@@ -58,7 +58,8 @@ int main(void) {
     expect("-s dir sl", "", 0);                                          // a junction when Windows has no symbolic links
     run_tool(workDir, "readlink", "sl", "", &r);
     snprintf(expected, sizeof expected, "%s/dir\n", virtualWorkDir);
-    CHECK_STR(r.out, expected);
+    // a junction holds the absolute target; a real symbolic link (where Windows allows it) holds "dir" as given
+    CHECK(strcmp(r.out, expected) == 0 || strcmp(r.out, "dir\n") == 0);
     run_result_free(&r);
     expect("-sv dir sl2", "'sl2' -> 'dir'\n", 0);
     expect("-sT dir sl", "", 1);                                         // sl is a link to a directory, not a file
