@@ -97,6 +97,10 @@
 | `csplit` | 완료 (`-b -f -k -n -s -q -z --suppress-matched`; 패턴 줄 번호, `/정규식/[오프셋]`, `%정규식%[오프셋]`, `{N}`, `{*}`; 정규식은 POSIX 기본; `%-3u`처럼 끝에 공백이 붙는 파일 이름은 Windows가 공백을 지워 GNU와 다름) |
 | `numfmt` | 완료 (`--from --to --from-unit --to-unit --round --padding --format --suffix --field -d --header --invalid --debug -z`; GNU는 long double로 계산하지만 여기서는 큰 정수로 정확히 계산해, 16자리 이상 숫자는 마지막 자리가 다를 수 있음; `--grouping`은 C 로캘처럼 아무 효과 없음; CR LF는 줄 끝으로 받음) |
 | `sync` | 완료 (`-d -f`, `FILE...`; 파일 버퍼를 디스크로 내보냄; FILE 없이는 시스템이 알아서 쓰므로 성공만 하고, `-f`는 관리자 권한이 없어 파일을 여는 것까지만) |
+| `shred` | 완료 (`-f -n -s -u -v -x -z --remove[=HOW] --random-source`; 4번 이상은 무작위와 고정 무늬 패스; 크기는 4096 블록으로 올림(GNU는 파일 시스템의 블록); `-f`는 읽기 전용 속성을 지움; 표준 출력은 일반 파일일 때만) |
+| `nice` | 완료 (`-n N`, `--adjustment`, 옛 형식 `-N` `--N` `-+N`; Windows의 우선순위 클래스로 대응: 보통 0, 낮음 이하 10, 유휴 19, 보통 이상 -5, 높음 -10, 실시간 -20) |
+| `nohup` | 완료 (표준 입력이 터미널이면 NUL에서 읽고, 표준 출력이 터미널이면 `nohup.out`에 이어 쓰고, 터미널인 표준 오류는 표준 출력으로; Windows에는 SIGHUP이 없어 그 부분은 없음; 상태 125/126/127) |
+| `df` | 완료 (`-a -B -h -H -i -k -l -P -t -T -x --output --total`, `DF_BLOCK_SIZE`; 파일 시스템은 드라이브(`C:` → `/c`), 형식은 ntfs/fat32 등, inode는 없어 `-`; `--sync`는 받기만 함) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
 
@@ -254,7 +258,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -353,6 +357,10 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `sync_test` | `sync`: 파일과 디렉터리, 옵션 오류 |
 | `numfmt_test` | `numfmt`: `--to`/`--from`, 반올림, 패딩, 형식, 접미사, 필드와 구분자, `--invalid`, 오류 |
 | `csplit_test` | `csplit`: 줄 번호, 정규식과 오프셋, 건너뛰기, 반복, 옵션, 오류 |
+| `df_test` | `df`: 머리글과 열, 단위(-B -h -H -P), inode 열, `--output`, `--total`, `-t -x`, 오류 |
+| `nohup_test` | `nohup`: 명령 실행과 상태, 입력 전달, 오류 상태 |
+| `nice_test` | `nice`: 우선순위 값, 조정과 옛 형식, 오류 상태 |
+| `shred_test` | `shred`: 덮어쓰기와 크기, `-z`, `-u`와 `--remove`, `-v`, 오류 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -458,6 +466,10 @@ Winshell/
 ├─ sync/         sync 명령
 ├─ numfmt/       numfmt 명령
 ├─ csplit/       csplit 명령
+├─ df/           df 명령
+├─ nohup/        nohup 명령
+├─ nice/         nice 명령
+├─ shred/        shred 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)

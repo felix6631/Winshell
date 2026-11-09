@@ -123,8 +123,8 @@ Winshell은 활발히 개발 중입니다.
 <details>
 <summary>구현 예정 명령 펼치기</summary>
 
-chgrp, chmod, chown, df, dir, dircolors, fmt, install, mkfifo,
-mknod, nice, nohup, pinky, pr, ptx, shred, stdbuf, uptime, vdir,
+chgrp, chmod, chown, dir, dircolors, fmt, install, mkfifo,
+mknod, pinky, pr, ptx, stdbuf, uptime, vdir,
 who
 
 대상 제외(Windows에서 의미가 없거나 대응 개념이 없음): chcon, chroot, runcon, stty, coreutils(멀티콜 바이너리)
