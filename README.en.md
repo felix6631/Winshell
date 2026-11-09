@@ -129,8 +129,8 @@ Winshell is under active development.
 <details>
 <summary>Show the planned commands</summary>
 
-b2sum, chgrp, chmod, chown, csplit, dd, df, dir, dircolors, fmt, groups, hostid, id, install, join, logname, mkfifo,
-mknod, nice, nohup, numfmt, od, pathchk, pinky, pr, ptx, shred, shuf, stdbuf, sum, sync, tsort, uptime, users, vdir,
+b2sum, chgrp, chmod, chown, csplit, dd, df, dir, dircolors, fmt, groups, hostid, id, install, logname, mkfifo,
+mknod, nice, nohup, numfmt, pathchk, pinky, pr, ptx, shred, stdbuf, sync, uptime, users, vdir,
 who
 
 Out of scope (meaningless or no counterpart on Windows): chcon, chroot, runcon, stty, coreutils (the multi-call binary)

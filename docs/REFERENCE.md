@@ -81,6 +81,11 @@
 | `unlink` | 완료 (파일 하나를 지움, 디렉터리는 거부, 읽기 전용도 지움) |
 | `link` | 완료 (하드 링크 하나) |
 | `ln` | 완료 (`-s -f -i -n -v -b -S -r -T -t`; 하드 링크는 `CreateHardLink`, 심볼릭 링크는 권한 없이 만들 수 있으면 심볼릭 링크, 디렉터리는 정션으로 대신) |
+| `od` | 완료 (`-A -j -N -t -v -w -S --endian`과 `-a -b -c -d -f -i -l -o -s -x -h`; 여러 종류를 아래위로 맞춰 출력, `z` 접미사, 같은 줄은 `*`; `-t fL`(80비트 long double)은 이 컴파일러에 없어 제외) |
+| `join` | 완료 (`-1 -2 -j -a -v -e -o -t -i -z --check-order --nocheck-order --header`, `-o auto`; GNU의 합치기 순서와 정렬 검사 그대로) |
+| `shuf` | 완료 (`-e -i -n -o -r -z --random-source`; 같은 무작위 바이트를 주면 GNU와 같은 순열, 큰 범위도 메모리를 쓰지 않음) |
+| `sum` | 완료 (BSD `-r`, System V `-s`) |
+| `tsort` | 완료 (GNU와 같은 순서, 순환은 표준 오류에 알리고 한 쌍을 버린 뒤 계속, 종료 코드 1) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
 
@@ -238,7 +243,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `link`, `ln`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `sleep`, `sort`, `split`, `stat`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `join`, `kill`, `link`, `ln`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `od`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -321,6 +326,11 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `du_test` | `du`: 합계와 순서, 단위, 하드 링크, `--exclude`, 오류 |
 | `split_test` | `split`: 줄/바이트/조각 나누기, 이름(`-d -x -a`, 늘어나는 접미사), 오류 |
 | `factor_test` | `factor`: 작은 수, 큰 수(2^64-1), 여러 수, 오류 |
+| `tsort_test` | `tsort`: 순서, 공백/줄 구분, CR LF, 순환(보고와 버림), 오류 |
+| `sum_test` | `sum`: BSD와 System V 합계, 블록 수, 이름 붙는 경우 |
+| `shuf_test` | `shuf`: `--random-source`로 GNU와 같은 순열, 순열이 보존하는 것, `-o -r -z -i -e -n`, 오류 |
+| `join_test` | `join`: 짝짓기, `-a -v -e -o`, 구분자, CR LF, 정렬 검사, `--header`, 오류 |
+| `od_test` | `od`: 기본 8진수, 형식과 크기, 주소 기수, `-j -N`, `*`, 여러 형식, `z`, `--endian`, 오류 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -410,6 +420,11 @@ Winshell/
 ├─ du/           du 명령
 ├─ split/        split 명령
 ├─ factor/       factor 명령
+├─ tsort/        tsort 명령
+├─ sum/          sum 명령
+├─ shuf/         shuf 명령
+├─ join/         join 명령
+├─ od/           od 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)

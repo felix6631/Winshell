@@ -81,6 +81,11 @@ The options of every command, the shell language, building and testing, and the 
 | `unlink` | Done (removes one file, refuses a directory, also removes a read-only file) |
 | `link` | Done (one hard link) |
 | `ln` | Done (`-s -f -i -n -v -b -S -r -T -t`; a hard link is `CreateHardLink`, a symbolic link is made without privilege when Windows allows it and a junction stands for one to a directory) |
+| `od` | Done (`-A -j -N -t -v -w -S --endian` and `-a -b -c -d -f -i -l -o -s -x -h`; several types aligned one under the other, the `z` suffix, equal lines as `*`; `-t fL` (the 80-bit long double) is left out because this compiler has no such type) |
+| `join` | Done (`-1 -2 -j -a -v -e -o -t -i -z --check-order --nocheck-order --header`, `-o auto`; the merge and the order check of GNU) |
+| `shuf` | Done (`-e -i -n -o -r -z --random-source`; the same random bytes give the permutation of GNU shuf, a huge range is not built in memory) |
+| `sum` | Done (BSD `-r`, System V `-s`) |
+| `tsort` | Done (the order of GNU tsort; a loop is reported on standard error, one pair is dropped and it goes on, status 1) |
 
 For what is still to come, see the [roadmap in the README](../README.en.md#roadmap).
 
@@ -256,7 +261,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `kill`, `link`, `ln`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `sleep`, `sort`, `split`, `stat`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `wc`, `which`, `whoami`, `xargs`, `yes`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `join`, `kill`, `link`, `ln`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `od`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `wc`, `which`, `whoami`, `xargs`, `yes`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -339,6 +344,11 @@ The test programs are divided by feature (`test\`).
 | `du_test` | `du`: sums and order, units, hard links, `--exclude`, errors |
 | `split_test` | `split`: pieces by lines/bytes/count, names (`-d -x -a`, growing suffixes), errors |
 | `factor_test` | `factor`: small numbers, large numbers (2^64-1), several numbers, errors |
+| `tsort_test` | `tsort`: order, blanks and lines, CR LF, loops (reported, one pair dropped), errors |
+| `sum_test` | `sum`: BSD and System V sums, blocks, when the name is written |
+| `shuf_test` | `shuf`: the permutation of GNU with `--random-source`, what a permutation keeps, `-o -r -z -i -e -n`, errors |
+| `join_test` | `join`: pairing, `-a -v -e -o`, separators, CR LF, the order check, `--header`, errors |
+| `od_test` | `od`: default octal, types and sizes, address radix, `-j -N`, `*`, several types, `z`, `--endian`, errors |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -428,6 +438,11 @@ Winshell/
 ├─ du/           du command
 ├─ split/        split command
 ├─ factor/       factor command
+├─ tsort/        tsort command
+├─ sum/          sum command
+├─ shuf/         shuf command
+├─ join/         join command
+├─ od/           od command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
