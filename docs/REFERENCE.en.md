@@ -86,6 +86,9 @@ The options of every command, the shell language, building and testing, and the 
 | `shuf` | Done (`-e -i -n -o -r -z --random-source`; the same random bytes give the permutation of GNU shuf, a huge range is not built in memory) |
 | `sum` | Done (BSD `-r`, System V `-s`) |
 | `tsort` | Done (the order of GNU tsort; a loop is reported on standard error, one pair is dropped and it goes on, status 1) |
+| `dd` | Done (`if of bs ibs obs cbs count skip seek status conv iflag oflag`; `conv=` notrunc noerror sync swab ucase lcase ascii ebcdic ibm block unblock excl nocreat sparse fsync; the record counts and the speed go to standard error) |
+| `pathchk` | Done (`-p -P --portability`; the limits of Linux, 255 and 4095, with `-p` 14 and 255 and the portable characters) |
+| `b2sum` | Done (BLAKE2b, `-l` digest length, `--tag`, `-c` follows the length of each line; the options of the other `*sum` tools) |
 
 For what is still to come, see the [roadmap in the README](../README.en.md#roadmap).
 
@@ -261,7 +264,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `join`, `kill`, `link`, `ln`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `od`, `paste`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `wc`, `which`, `whoami`, `xargs`, `yes`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `dd`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `join`, `kill`, `link`, `ln`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `wc`, `which`, `whoami`, `xargs`, `yes`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -349,6 +352,9 @@ The test programs are divided by feature (`test\`).
 | `shuf_test` | `shuf`: the permutation of GNU with `--random-source`, what a permutation keeps, `-o -r -z -i -e -n`, errors |
 | `join_test` | `join`: pairing, `-a -v -e -o`, separators, CR LF, the order check, `--header`, errors |
 | `od_test` | `od`: default octal, types and sizes, address radix, `-j -N`, `*`, several types, `z`, `--endian`, errors |
+| `b2sum_test` | `b2sum`: known values, `-l`, the BSD form, checking sums of different lengths, errors |
+| `pathchk_test` | `pathchk`: the limits, portable characters, `-P` (empty name, leading `-`), a file on the way, messages |
+| `dd_test` | `dd`: blocks and counts, skip/seek, conversions, copying to a file (seek, notrunc), statistics, errors |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -443,6 +449,9 @@ Winshell/
 ├─ shuf/         shuf command
 ├─ join/         join command
 ├─ od/           od command
+├─ b2sum/        b2sum command
+├─ pathchk/      pathchk command
+├─ dd/           dd command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)

@@ -8,7 +8,7 @@
 #include "textutil.h"
 #include "vpath.h"
 
-enum { OPT_BINARY = 1, OPT_CHECK, OPT_TEXT, OPT_WARN, OPT_ZERO, OPT_TAG, OPT_QUIET, OPT_STATUS, OPT_STRICT, OPT_IGNORE_MISSING };
+enum { OPT_BINARY = 1, OPT_CHECK, OPT_TEXT, OPT_WARN, OPT_ZERO, OPT_TAG, OPT_QUIET, OPT_STATUS, OPT_STRICT, OPT_IGNORE_MISSING, OPT_LENGTH };
 
 static const ArgsOption options[] = {
     { OPT_BINARY,         'b', "binary",         ARGS_NONE },
@@ -24,12 +24,65 @@ static const ArgsOption options[] = {
     { 0 }
 };
 
+/* b2sum has -l as well */
+static const ArgsOption optionsBlake[] = {
+    { OPT_BINARY,         'b', "binary",         ARGS_NONE },
+    { OPT_CHECK,          'c', "check",          ARGS_NONE },
+    { OPT_LENGTH,         'l', "length",         ARGS_REQUIRED },
+    { OPT_TEXT,           't', "text",           ARGS_NONE },
+    { OPT_WARN,           'w', "warn",           ARGS_NONE },
+    { OPT_ZERO,           'z', "zero",           ARGS_NONE },
+    { OPT_TAG,            0,   "tag",            ARGS_NONE },
+    { OPT_QUIET,          0,   "quiet",          ARGS_NONE },
+    { OPT_STATUS,         0,   "status",         ARGS_NONE },
+    { OPT_STRICT,         0,   "strict",         ARGS_NONE },
+    { OPT_IGNORE_MISSING, 0,   "ignore-missing", ARGS_NONE },
+    { 0 }
+};
+
 typedef struct {
     int binary, check, text, warn, zero, tag, quiet, status, strict, ignoreMissing;
+    unsigned long long lengthBits;      /* b2sum -l: 0 is the default, 512 */
 } Settings;
+
+static size_t digestBytes;              /* of the digest that is made (b2sum: from -l) */
 
 static const char* currentProgram;
 static const char* currentBits;
+
+static void print_usage_blake(void) {
+    printf("Usage: %s [OPTION]... [FILE]...\n"
+           "Print or check %s checksums.\n"
+           "\n"
+           "With no FILE, or when FILE is -, read standard input.\n"
+           "\n"
+           "  -b, --binary         read in binary mode (default unless reading tty stdin)\n"
+           "  -c, --check          read %s sums from the FILEs and check them\n"
+           "  -l, --length         digest length in bits; must not exceed the maximum for\n"
+           "                       the blake2 algorithm and must be a multiple of 8\n"
+           "      --tag            create a BSD-style checksum\n"
+           "  -t, --text           read in text mode (default if reading tty stdin)\n"
+           "  -z, --zero           end each output line with NUL, not newline,\n"
+           "                       and disable file name escaping\n"
+           "\n"
+           "The following five options are useful only when verifying checksums:\n"
+           "      --ignore-missing  don't fail or report status for missing files\n"
+           "      --quiet          don't print OK for each successfully verified file\n"
+           "      --status         don't output anything, status code shows success\n"
+           "      --strict         exit non-zero for improperly formatted checksum lines\n"
+           "  -w, --warn           warn about improperly formatted checksum lines\n"
+           "\n"
+           "      --help     display this help and exit\n"
+           "      --version  output version information and exit\n"
+           "\n"
+           "The sums are computed as described in RFC 7693.  When checking, the input\n"
+           "should be a former output of this program.  The default mode is to print a\n"
+           "line with checksum, a space, a character indicating input mode ('*' for binary,\n"
+           "' ' for text or where binary is insignificant), and name for each FILE.\n"
+           "\n"
+           "Note: There is no difference between binary mode and text mode on GNU systems.\n",
+           currentProgram, currentBits, currentBits);
+}
 
 static void print_usage(void) {
     printf("Usage: %s [OPTION]... [FILE]...\n"
@@ -62,8 +115,28 @@ static void print_usage(void) {
 static int on_option(int id, const char* value, void* context) {
     Settings* s = context;
 
-    (void)value;
     switch (id) {
+        case OPT_LENGTH: {
+            char* end;
+            unsigned long long n = strtoull(value, &end, 10);
+
+            if (*value == '\0' || *end != '\0' || *value == '-') {
+                fprintf(stderr, "%s: invalid length: '%s'\n", currentProgram, value);
+                return -1;
+            }
+            s->lengthBits = n;
+            if (n > 512) {
+                fprintf(stderr, "%s: invalid length: '%s'\n%s: maximum digest length for 'blake2b' is 512 bits\n",
+                        currentProgram, value, currentProgram);
+                return -1;
+            }
+            if (n % 8 != 0) {
+                fprintf(stderr, "%s: invalid length: '%s'\n%s: length is not a multiple of 8\n", currentProgram, value,
+                        currentProgram);
+                return -1;
+            }
+            break;
+        }
         case OPT_BINARY: s->binary = 1; s->text = 0; break;
         case OPT_TEXT:   s->text = 1; s->binary = 0; break;
         case OPT_CHECK:  s->check = 1; break;
@@ -81,13 +154,16 @@ static int on_option(int id, const char* value, void* context) {
 static const char hexDigits[] = "0123456789abcdef";
 
 /** The digest of a stream as hexadecimal text; returns 0, or -1 on a read error. */
-static int digest_stream(HashAlgorithm algorithm, FILE* in, char* hex) {
+static int digest_stream(HashAlgorithm algorithm, size_t size, FILE* in, char* hex) {
     HashContext context;
     unsigned char buffer[65536], out[64];
     long got;
-    size_t i, size = hash_size(algorithm);
+    size_t i;
 
-    hash_init(&context, algorithm);
+    if (algorithm == HASH_BLAKE2B)
+        hash_init_blake2b(&context, size);
+    else
+        hash_init(&context, algorithm);
     while ((got = text_read_some(in, buffer, sizeof buffer)) > 0)
         hash_update(&context, buffer, (size_t)got);
     if (got < 0)
@@ -117,6 +193,7 @@ static void put_name(const char* name, int escape) {
 }
 
 static int make_sums(const Settings* s, const char* tag, HashAlgorithm algorithm, const char** operands, int count) {
+    char blakeTag[32];
     int i, status = 0;
     char hex[130];
 
@@ -128,7 +205,7 @@ static int make_sums(const Settings* s, const char* tag, HashAlgorithm algorithm
             status = 1;
             continue;
         }
-        if (digest_stream(algorithm, in, hex) != 0) {
+        if (digest_stream(algorithm, digestBytes, in, hex) != 0) {
             fprintf(stderr, "%s: %s: read error\n", currentProgram, operands[i]);
             status = 1;
             if (in != stdin)
@@ -141,7 +218,12 @@ static int make_sums(const Settings* s, const char* tag, HashAlgorithm algorithm
         if (needsEscape)
             putchar('\\');
         if (s->tag) {
-            printf("%s (", tag);
+            if (algorithm == HASH_BLAKE2B && digestBytes != 64) {
+                snprintf(blakeTag, sizeof blakeTag, "%s-%u", tag, (unsigned)(digestBytes * 8));
+                printf("%s (", blakeTag);
+            } else {
+                printf("%s (", tag);
+            }
             put_name(operands[i], needsEscape);
             printf(") = %s", hex);
         } else {
@@ -154,7 +236,8 @@ static int make_sums(const Settings* s, const char* tag, HashAlgorithm algorithm
 }
 
 /** One line of a checksum file: the hash, the name and the mode. Returns 1 when it is well formed. */
-static int parse_line(char* line, const char* tag, size_t hexLength, char** hash, char** name, int* escaped) {
+static int parse_line(char* line, const char* tag, size_t hexLength, int variable, char** hash, char** name, int* escaped,
+                      size_t* foundLength) {
     char* s = line;
     size_t tagLength = strlen(tag), length;
 
@@ -163,7 +246,43 @@ static int parse_line(char* line, const char* tag, size_t hexLength, char** hash
         *escaped = 1;
         s++;
     }
-    if (strncmp(s, tag, tagLength) == 0 && s[tagLength] == ' ' && s[tagLength + 1] == '(') {
+    if (variable && strncmp(s, "BLAKE2", 6) == 0) {
+        // BSD style of BLAKE2b: BLAKE2[b][-BITS] (name) = hash, the hash as long as the bits say
+        char* open = s + 6;
+        unsigned long bits = 512;
+        char* nameStart;
+        size_t total, hashLength;
+
+        if (*open == 'b')
+            open++;
+
+        if (*open == '-') {
+            char* end;
+
+            if (open[1] < '0' || open[1] > '9')
+                return 0;
+            bits = strtoul(open + 1, &end, 10);
+            if (bits == 0 || bits > 512 || bits % 8 != 0)
+                return 0;
+            open = end;
+        }
+        if (open[0] != ' ' || open[1] != '(')
+            return 0;
+        nameStart = open + 2;
+        total = strlen(nameStart);
+        hashLength = bits / 4;
+        if (total < hashLength + 4 || strncmp(nameStart + total - hashLength - 4, ") = ", 4) != 0)
+            return 0;
+        nameStart[total - hashLength - 4] = '\0';
+        *hash = nameStart + total - hashLength;
+        *name = nameStart;
+        for (length = 0; length < hashLength; length++)
+            if (!isxdigit((unsigned char)(*hash)[length]))
+                return 0;
+        *foundLength = hashLength;
+        return 1;
+    }
+    if (!variable && strncmp(s, tag, tagLength) == 0 && s[tagLength] == ' ' && s[tagLength + 1] == '(') {
         // BSD style: TAG (name) = hash
         char* nameStart = s + tagLength + 2;
         size_t total = strlen(nameStart);
@@ -178,16 +297,33 @@ static int parse_line(char* line, const char* tag, size_t hexLength, char** hash
         for (length = 0; length < hexLength; length++)
             if (!isxdigit((unsigned char)(*hash)[length]))
                 return 0;
+        *foundLength = hexLength;
         return 1;
     }
+    if (variable) {                     // the hash is as long as its hexadecimal digits go (an even number up to 128)
+        hexLength = 0;
+        while (isxdigit((unsigned char)s[hexLength]))
+            hexLength++;
+        if (hexLength == 0 || hexLength % 2 != 0 || hexLength > 128)
+            return 0;
+    }
+    *foundLength = hexLength;
     for (length = 0; length < hexLength; length++)
         if (!isxdigit((unsigned char)s[length]))
             return 0;
-    if (s[hexLength] != ' ' || (s[hexLength + 1] != ' ' && s[hexLength + 1] != '*') || s[hexLength + 2] == '\0')
+    if (s[hexLength] != ' ')
         return 0;
     *hash = s;
-    s[hexLength] = '\0';
-    *name = s + hexLength + 2;
+    // "HASH *NAME" or "HASH  NAME"; with a single blank (or when nothing follows the mode character) the name follows it
+    if ((s[hexLength + 1] == ' ' || s[hexLength + 1] == '*') && s[hexLength + 2] != '\0') {
+        s[hexLength] = '\0';
+        *name = s + hexLength + 2;
+    } else {
+        if (s[hexLength + 1] == '\0')
+            return 0;
+        s[hexLength] = '\0';
+        *name = s + hexLength + 1;
+    }
     return 1;
 }
 
@@ -215,9 +351,10 @@ static int hex_equal(const char* a, const char* b) {
     return *a == *b;
 }
 
-static int check_sums(const Settings* s, const char* tag, HashAlgorithm algorithm, const char** operands, int count) {
+static int check_sums(const Settings* s, const char* tag, const char* shownTag, HashAlgorithm algorithm, const char** operands, int count) {
     int i, status = 0;
-    size_t hexLength = hash_size(algorithm) * 2;
+    size_t hexLength = algorithm == HASH_BLAKE2B ? 128 : hash_size(algorithm) * 2;
+    int variable = algorithm == HASH_BLAKE2B;
 
     for (i = 0; i < count; i++) {
         FILE* in;
@@ -242,6 +379,7 @@ static int check_sums(const Settings* s, const char* tag, HashAlgorithm algorith
             char* hash;
             char* name;
             int escaped;
+            size_t lineLength = hexLength;
 
             while (end < length && data[end] != '\n')
                 end++;
@@ -256,11 +394,11 @@ static int check_sums(const Settings* s, const char* tag, HashAlgorithm algorith
                 free(line);
                 continue;
             }
-            if (!parse_line(line, tag, hexLength, &hash, &name, &escaped)) {
+            if (!parse_line(line, tag, hexLength, variable, &hash, &name, &escaped, &lineLength)) {
                 bad++;
                 if (s->warn && !s->status)
                     fprintf(stderr, "%s: %s: %ld: improperly formatted %s checksum line\n", currentProgram, operands[i],
-                            lineNumber, tag);
+                            lineNumber, shownTag);
                 free(line);
                 continue;
             }
@@ -292,7 +430,7 @@ static int check_sums(const Settings* s, const char* tag, HashAlgorithm algorith
                     }
                 }
                 if (opened && target != NULL) {
-                    ok = digest_stream(algorithm, target, hex) == 0 && hex_equal(hex, hash);
+                    ok = digest_stream(algorithm, lineLength / 2, target, hex) == 0 && hex_equal(hex, hash);
                     if (target != stdin)
                         fclose(target);
                 }
@@ -317,7 +455,7 @@ static int check_sums(const Settings* s, const char* tag, HashAlgorithm algorith
         fflush(stdout);
 
         if (wellFormed == 0 && bad >= 0 && !s->status) {
-            fprintf(stderr, "%s: %s: no properly formatted checksum lines found\n", currentProgram, operands[i]);
+            fprintf(stderr, "%s: %s: no properly formatted %s checksum lines found\n", currentProgram, operands[i], shownTag);
             status = 1;
         } else if (wellFormed == 0) {
             status = 1;
@@ -344,15 +482,16 @@ int checksum_main(const char* program, const char* version, const char* tag, Has
     const char** operands;
     int count, result, status;
     static const char* const bitsNames[] = { "MD5 (128-bit)", "SHA1 (160-bit)", "SHA224 (224-bit)", "SHA256 (256-bit)",
-                                             "SHA384 (384-bit)", "SHA512 (512-bit)" };
+                                             "SHA384 (384-bit)", "SHA512 (512-bit)", "BLAKE2 (512-bit)" };
+    const char* shownTag = algorithm == HASH_BLAKE2B ? "BLAKE2" : tag;
 
     currentProgram = program;
     currentBits = bitsNames[algorithm];
     memset(&spec, 0, sizeof spec);
     spec.program = program;
     spec.version = version;
-    spec.usage = print_usage;
-    spec.options = options;
+    spec.usage = algorithm == HASH_BLAKE2B ? print_usage_blake : print_usage;
+    spec.options = algorithm == HASH_BLAKE2B ? optionsBlake : options;
     spec.usageStatus = 1;
     memset(&settings, 0, sizeof settings);
     text_binary_streams();
@@ -384,7 +523,9 @@ int checksum_main(const char* program, const char* version, const char* tag, Has
         return 1;
     }
     count = (int)text_default_operands(operands, (size_t)count);
-    status = settings.check ? check_sums(&settings, tag, algorithm, operands, count)
+    digestBytes = algorithm == HASH_BLAKE2B ? (settings.lengthBits == 0 ? 64 : (size_t)(settings.lengthBits / 8)) :
+                  hash_size(algorithm);
+    status = settings.check ? check_sums(&settings, tag, shownTag, algorithm, operands, count)
                             : make_sums(&settings, tag, algorithm, operands, count);
     return fflush(stdout) != 0 ? 1 : status;
 }

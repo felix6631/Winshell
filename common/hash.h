@@ -9,23 +9,26 @@
  * (FIPS 180-4), written out here so that the tools need nothing from Windows. One context, whatever the algorithm.
  */
 
-typedef enum { HASH_MD5, HASH_SHA1, HASH_SHA224, HASH_SHA256, HASH_SHA384, HASH_SHA512 } HashAlgorithm;
+typedef enum { HASH_MD5, HASH_SHA1, HASH_SHA224, HASH_SHA256, HASH_SHA384, HASH_SHA512, HASH_BLAKE2B } HashAlgorithm;
 
 typedef struct {
     HashAlgorithm algorithm;
     uint64_t      length;           /* bytes so far */
     unsigned char block[128];
     size_t        blockLength;
+    size_t        outLength;        /* BLAKE2b: the bytes of the digest, 1..64 */
     union {
         uint32_t w32[8];
         uint64_t w64[8];
     } state;
 } HashContext;
 
-/** The size of the digest in bytes: 16, 20, 28, 32, 48, 64. */
+/** The size of the digest in bytes: 16, 20, 28, 32, 48, 64 (BLAKE2b: at most 64, as long as hash_init_blake2b says). */
 size_t hash_size(HashAlgorithm algorithm);
 
 void hash_init(HashContext* context, HashAlgorithm algorithm);
+/** BLAKE2b (RFC 7693) with a digest of outLength bytes (1..64) instead of hash_init. */
+void hash_init_blake2b(HashContext* context, size_t outLength);
 void hash_update(HashContext* context, const void* data, size_t length);
 
 /** Ends the digest; `out` has room for hash_size(). */

@@ -43,7 +43,8 @@ sum_cases() {
     printf 'not a checksum line\nanother one\n' > s_none.txt
     : > s_empty.txt
     gnu "$tool" "s_sp ace.txt" > s_escaped.txt
-    for c in s_good.txt s_tag.txt s_text.txt s_missing.txt s_bad.txt s_upper.txt s_mixed.txt s_none.txt s_empty.txt s_escaped.txt; do
+    sed 's/ \*/ /' s_good.txt > s_single.txt                 # HASH NAME with a single blank
+    for c in s_good.txt s_tag.txt s_text.txt s_missing.txt s_bad.txt s_upper.txt s_mixed.txt s_none.txt s_empty.txt s_escaped.txt s_single.txt; do
         compare "$tool" -c "$c"
         compare "$tool" --check "$c"
         compare "$tool" -c --quiet "$c"
