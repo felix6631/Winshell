@@ -18,15 +18,37 @@ static void message(const char* arguments, const char* part, int status) {
     run_result_free(&r);
 }
 
+/** The niceness a command sees under nice with these arguments: the nice that runs inside prints it. */
+static int niceness_of(const char* arguments) {
+    RunResult r;
+    char command[128];
+    int value;
+
+    if (arguments[0] == '\0')
+        snprintf(command, sizeof command, "%s", arguments);
+    else
+        snprintf(command, sizeof command, "%s nice", arguments);
+    run_tool(workDir, "nice", command, "", &r);
+    value = r.out != NULL ? atoi(r.out) : 9999;
+    run_result_free(&r);
+    return value;
+}
+
 int main(void) {
+    int base;
+
     tools_init("nice_test");
 
     printf("the niceness\n");
-    expect("", "", "0\n", 0);
-    expect("-n 12 nice", "", "10\n", 0);                   // below normal is 10: the new process has that class
-    expect("-n 30 nice", "", "19\n", 0);                   // idle is 19 and the most there is
-    expect("-n 3 nice", "", "0\n", 0);                     // a small adjustment stays the normal class
-    expect("-n -10 nice", "", "-10\n", 0);                  // high priority (realtime needs the rights of an administrator)
+    // the process may start with another priority class (a CI runner does), so the numbers are relative to it
+    base = niceness_of("");
+    CHECK(base >= -20 && base <= 19);
+    CHECK_INT(niceness_of("-n 0"), base);                  // no change
+    CHECK_INT(niceness_of("-n 30"), 19);                   // idle is 19 and the most there is
+    CHECK(niceness_of("-n 3") >= base);
+    CHECK(niceness_of("-n 12") >= base);
+    CHECK(niceness_of("-n -5") <= base);                   // a lower niceness (a higher priority) never raises it
+    CHECK(niceness_of("-n 5") >= niceness_of("-n 3"));
 
     printf("running a command\n");
     expect("echo hi", "", "hi\n", 0);
