@@ -89,6 +89,11 @@
 | `dd` | 완료 (`if of bs ibs obs cbs count skip seek status conv iflag oflag`; `conv=` notrunc noerror sync swab ucase lcase ascii ebcdic ibm block unblock excl nocreat sparse fsync; 블록 수와 속도는 표준 오류로) |
 | `pathchk` | 완료 (`-p -P --portability`; 길이 한계는 리눅스 값 255/4095, `-p`는 14/255와 이식 가능한 문자) |
 | `b2sum` | 완료 (BLAKE2b, `-l` 다이제스트 길이, `--tag`, `-c`는 줄마다 길이를 따름; 다른 `*sum`과 같은 옵션) |
+| `users` | 완료 (지금 로그온한 사용자 이름을 정렬해 한 줄로; 세션은 시스템에서 가져오고 FILE은 받아도 무시) |
+| `groups` | 완료 (그룹 이름; `USER...`를 주면 `user : 그룹...`; 계정의 그룹, 기본 그룹이 먼저) |
+| `id` | 완료 (`-a -g -G -n -r -u -z`, `USER...`; ID는 보안 식별자(SID)의 마지막 번호, 실제/유효 ID는 같음, `-Z`는 SELinux가 없어 오류) |
+| `hostid` | 완료 (16진수 8자리; 장치 GUID(MachineGuid)에서 만들어 같은 컴퓨터에서는 늘 같음) |
+| `logname` | 완료 (계정 이름; Windows에는 따로 로그인 이름이 없음) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
 
@@ -246,7 +251,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `dd`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `join`, `kill`, `link`, `ln`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `dd`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -337,6 +342,11 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `b2sum_test` | `b2sum`: 알려진 값, `-l`, BSD 형식, 길이가 다른 합계 검사, 오류 |
 | `pathchk_test` | `pathchk`: 길이 한계, 이식 가능한 문자, `-P`(빈 이름, 앞의 `-`), 경로 중간의 파일, 메시지 |
 | `dd_test` | `dd`: 블록과 개수, skip/seek, 변환, 파일로 복사(seek, notrunc), 통계, 오류 |
+| `logname_test` | `logname`: `whoami`와 같은 이름, 오류 |
+| `hostid_test` | `hostid`: 16진수 8자리, 늘 같은 값, 오류 |
+| `id_test` | `id`: 기본 형식, `-u -g -G -n -r -z`가 서로 맞는지, 이름 준 사용자, 옵션 조합 오류 |
+| `groups_test` | `groups`: `id -Gn`과 같은 이름, 사용자 지정, 없는 사용자 |
+| `users_test` | `users`: 한 줄의 모양, FILE, 오류 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -434,6 +444,11 @@ Winshell/
 ├─ b2sum/        b2sum 명령
 ├─ pathchk/      pathchk 명령
 ├─ dd/           dd 명령
+├─ logname/      logname 명령
+├─ hostid/       hostid 명령
+├─ id/           id 명령
+├─ groups/       groups 명령
+├─ users/        users 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)

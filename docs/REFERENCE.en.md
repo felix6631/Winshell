@@ -89,6 +89,11 @@ The options of every command, the shell language, building and testing, and the 
 | `dd` | Done (`if of bs ibs obs cbs count skip seek status conv iflag oflag`; `conv=` notrunc noerror sync swab ucase lcase ascii ebcdic ibm block unblock excl nocreat sparse fsync; the record counts and the speed go to standard error) |
 | `pathchk` | Done (`-p -P --portability`; the limits of Linux, 255 and 4095, with `-p` 14 and 255 and the portable characters) |
 | `b2sum` | Done (BLAKE2b, `-l` digest length, `--tag`, `-c` follows the length of each line; the options of the other `*sum` tools) |
+| `users` | Done (the names of the users logged on, sorted, on one line; the sessions come from the system and a FILE is accepted and ignored) |
+| `groups` | Done (the names of the groups; with `USER...` as `user : group...`; the groups of the account, the primary group first) |
+| `id` | Done (`-a -g -G -n -r -u -z`, `USER...`; an ID is the last number of the security identifier (SID), the real and the effective ID are the same, `-Z` is an error as there is no SELinux) |
+| `hostid` | Done (eight hexadecimal digits, made from the machine GUID, so it stays the same on a computer) |
+| `logname` | Done (the name of the account; Windows has no separate login name) |
 
 For what is still to come, see the [roadmap in the README](../README.en.md#roadmap).
 
@@ -264,7 +269,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `dd`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `head`, `hostname`, `join`, `kill`, `link`, `ln`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `wc`, `which`, `whoami`, `xargs`, `yes`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `dd`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -355,6 +360,11 @@ The test programs are divided by feature (`test\`).
 | `b2sum_test` | `b2sum`: known values, `-l`, the BSD form, checking sums of different lengths, errors |
 | `pathchk_test` | `pathchk`: the limits, portable characters, `-P` (empty name, leading `-`), a file on the way, messages |
 | `dd_test` | `dd`: blocks and counts, skip/seek, conversions, copying to a file (seek, notrunc), statistics, errors |
+| `logname_test` | `logname`: the same name as `whoami`, errors |
+| `hostid_test` | `hostid`: eight hexadecimal digits, the same each time, errors |
+| `id_test` | `id`: the default format, that `-u -g -G -n -r -z` agree, users named, errors of the option combinations |
+| `groups_test` | `groups`: the same names as `id -Gn`, users named, a user that does not exist |
+| `users_test` | `users`: the shape of the line, a FILE, errors |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -452,6 +462,11 @@ Winshell/
 ├─ b2sum/        b2sum command
 ├─ pathchk/      pathchk command
 ├─ dd/           dd command
+├─ logname/      logname command
+├─ hostid/       hostid command
+├─ id/           id command
+├─ groups/       groups command
+├─ users/        users command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
