@@ -94,6 +94,9 @@ The options of every command, the shell language, building and testing, and the 
 | `id` | Done (`-a -g -G -n -r -u -z`, `USER...`; an ID is the last number of the security identifier (SID), the real and the effective ID are the same, `-Z` is an error as there is no SELinux) |
 | `hostid` | Done (eight hexadecimal digits, made from the machine GUID, so it stays the same on a computer) |
 | `logname` | Done (the name of the account; Windows has no separate login name) |
+| `csplit` | Done (`-b -f -k -n -s -q -z --suppress-matched`; patterns: a line number, `/REGEXP/[OFFSET]`, `%REGEXP%[OFFSET]`, `{N}`, `{*}`; POSIX basic regular expressions; a name that ends in blanks, as with `%-3u`, loses them on Windows) |
+| `numfmt` | Done (`--from --to --from-unit --to-unit --round --padding --format --suffix --field -d --header --invalid --debug -z`; GNU computes with long double, here the values are exact big integers, so numbers of 16 or more digits can differ in the last place; `--grouping` has no effect, as in the C locale; CR LF ends a line) |
+| `sync` | Done (`-d -f`, `FILE...`; flushes the buffers of the files; without FILE the system writes by itself, so it only succeeds, and `-f` only opens the file as flushing a volume needs administrator rights) |
 
 For what is still to come, see the [roadmap in the README](../README.en.md#roadmap).
 
@@ -269,7 +272,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `cut`, `date`, `dd`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nl`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -365,6 +368,9 @@ The test programs are divided by feature (`test\`).
 | `id_test` | `id`: the default format, that `-u -g -G -n -r -z` agree, users named, errors of the option combinations |
 | `groups_test` | `groups`: the same names as `id -Gn`, users named, a user that does not exist |
 | `users_test` | `users`: the shape of the line, a FILE, errors |
+| `sync_test` | `sync`: files and directories, option errors |
+| `numfmt_test` | `numfmt`: `--to`/`--from`, rounding, padding, format, suffix, fields and delimiters, `--invalid`, errors |
+| `csplit_test` | `csplit`: line numbers, regular expressions and offsets, skipping, repeats, options, errors |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -467,6 +473,9 @@ Winshell/
 ├─ id/           id command
 ├─ groups/       groups command
 ├─ users/        users command
+├─ sync/         sync command
+├─ numfmt/       numfmt command
+├─ csplit/       csplit command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
