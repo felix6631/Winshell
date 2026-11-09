@@ -101,6 +101,9 @@
 | `nice` | 완료 (`-n N`, `--adjustment`, 옛 형식 `-N` `--N` `-+N`; Windows의 우선순위 클래스로 대응: 보통 0, 낮음 이하 10, 유휴 19, 보통 이상 -5, 높음 -10, 실시간 -20) |
 | `nohup` | 완료 (표준 입력이 터미널이면 NUL에서 읽고, 표준 출력이 터미널이면 `nohup.out`에 이어 쓰고, 터미널인 표준 오류는 표준 출력으로; Windows에는 SIGHUP이 없어 그 부분은 없음; 상태 125/126/127) |
 | `df` | 완료 (`-a -B -h -H -i -k -l -P -t -T -x --output --total`, `DF_BLOCK_SIZE`; 파일 시스템은 드라이브(`C:` → `/c`), 형식은 ntfs/fat32 등, inode는 없어 `-`; `--sync`는 받기만 함) |
+| `dircolors` | 완료 (`-b -c -p`, 내장 데이터베이스는 GNU 8.32의 것; `TERM` 줄, 키워드와 `.확장자`/`*글롭`, 쉘 인용; `SHELL`이 없으면 Bourne 쉘로 봄) |
+| `install` | 완료 (`-b --backup -S -c -C -d -D -m -p -t -T -v`, `-o`/`-g`는 이름만 검사; `-s`와 SELinux 옵션은 받기만 함; 모드는 chmod처럼 읽기 전용 속성으로만 남음) |
+| `chmod` | 완료 (`-c -f -v -R --reference --preserve-root`; 8진수와 기호 모드 계산은 GNU와 같음; Windows가 가진 것은 읽기 전용 속성뿐이라 쓰기 비트가 하나도 없으면 읽기 전용, 하나라도 있으면 쓰기 가능이 되고 나머지는 계산해 알려 주기만 함; 디렉터리는 바뀌지 않음; 특수 비트(`s` `t`)는 저장되지 않음) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
 
@@ -258,7 +261,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chmod`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -361,6 +364,9 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `nohup_test` | `nohup`: 명령 실행과 상태, 입력 전달, 오류 상태 |
 | `nice_test` | `nice`: 우선순위 값, 조정과 옛 형식, 오류 상태 |
 | `shred_test` | `shred`: 덮어쓰기와 크기, `-z`, `-u`와 `--remove`, `-v`, 오류 |
+| `chmod_test` | `chmod`: 8진수와 기호 모드, 읽기 전용 속성(stat이 보여 주는 모드), `-R`, `--reference`, `-c -v -f`, 오류 |
+| `install_test` | `install`: 복사와 덮어쓰기, 디렉터리 대상 `-t -T`, `-D -d`, `-m`, 백업, `-C -p`, 오류 |
+| `dircolors_test` | `dircolors`: 쉘 문법, TERM 줄, 키워드와 코드, 인용, 내장 데이터베이스, 오류 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -470,6 +476,9 @@ Winshell/
 ├─ nohup/        nohup 명령
 ├─ nice/         nice 명령
 ├─ shred/        shred 명령
+├─ chmod/        chmod 명령
+├─ install/      install 명령
+├─ dircolors/    dircolors 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)

@@ -101,6 +101,9 @@ The options of every command, the shell language, building and testing, and the 
 | `nice` | Done (`-n N`, `--adjustment`, the old forms `-N` `--N` `-+N`; mapped to the priority classes of Windows: normal 0, below normal 10, idle 19, above normal -5, high -10, realtime -20) |
 | `nohup` | Done (standard input that is a terminal is read from NUL, standard output that is a terminal is appended to `nohup.out`, a standard error that is a terminal goes to standard output; Windows has no SIGHUP so that part is left out; statuses 125/126/127) |
 | `df` | Done (`-a -B -h -H -i -k -l -P -t -T -x --output --total`, `DF_BLOCK_SIZE`; a file system is a drive (`C:` as `/c`), the type is ntfs, fat32 and so on, inodes do not exist and show `-`; `--sync` is only accepted) |
+| `dircolors` | Done (`-b -c -p`, the built-in database is the one of GNU 8.32; `TERM` lines, keywords and `.ext` / `*glob` names, quoting for the shell; without `SHELL` the Bourne shell is taken) |
+| `install` | Done (`-b --backup -S -c -C -d -D -m -p -t -T -v`, `-o` and `-g` are only checked as names; `-s` and the SELinux options are accepted; as with chmod the mode is kept only as the read-only attribute) |
+| `chmod` | Done (`-c -f -v -R --reference --preserve-root`; octal and symbolic modes are computed as GNU does; all Windows keeps is the read-only attribute, so a mode with no write bit makes a file read-only and one with any makes it writable, the rest is computed and reported but not kept; directories do not change; the special bits (`s` `t`) are not stored) |
 
 For what is still to come, see the [roadmap in the README](../README.en.md#roadmap).
 
@@ -276,7 +279,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chmod`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -379,6 +382,9 @@ The test programs are divided by feature (`test\`).
 | `nohup_test` | `nohup`: running a command and its status, input passed on, error statuses |
 | `nice_test` | `nice`: the niceness values, adjustments and the old forms, error statuses |
 | `shred_test` | `shred`: overwriting and sizes, `-z`, `-u` and `--remove`, `-v`, errors |
+| `chmod_test` | `chmod`: octal and symbolic modes, the read-only attribute (the mode stat shows), `-R`, `--reference`, `-c -v -f`, errors |
+| `install_test` | `install`: copying and replacing, directory targets `-t -T`, `-D -d`, `-m`, backups, `-C -p`, errors |
+| `dircolors_test` | `dircolors`: the shell syntax, TERM lines, keywords and codes, quoting, the built-in database, errors |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -488,6 +494,9 @@ Winshell/
 ├─ nohup/        nohup command
 ├─ nice/         nice command
 ├─ shred/        shred command
+├─ chmod/        chmod command
+├─ install/      install command
+├─ dircolors/    dircolors command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)

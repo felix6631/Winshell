@@ -43,7 +43,7 @@ for f in report*.txt; do n=$(wc -l < "$f"); echo "$f: $n lines"; done
 |  | **Winshell** | Git Bash (MSYS2) | Cygwin | WSL |
 | --- | --- | --- | --- | --- |
 | How it runs | Native Win32 executables | GNU tools on `msys-2.0.dll` | GNU tools on `cygwin1.dll` | A Linux distribution on a Linux kernel |
-| What you need | One `bin\` folder | Git for Windows | A Cygwin install | The WSL feature + a distribution |
+| What you need | One `bin\` folder | Git for Windows | A Cygwin | The WSL feature + a distribution |
 | Default path style | `/c/...` (`C:\...` works as is) | `/c/...` | `/cygdrive/c/...` | `/mnt/c/...` |
 | GNU compatibility | Main options, verified against GNU output | GNU itself | GNU itself | GNU itself |
 
@@ -129,7 +129,7 @@ Winshell is under active development.
 <details>
 <summary>Show the planned commands</summary>
 
-chgrp, chmod, chown, dir, dircolors, fmt, install, mkfifo,
+chgrp, chown, dir, fmt, install, mkfifo,
 mknod, pinky, pr, ptx, stdbuf, uptime, vdir,
 who
 
