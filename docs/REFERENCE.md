@@ -91,7 +91,10 @@
 | `dd` | 완료 (`if of bs ibs obs cbs count skip seek status conv iflag oflag`; `conv=` notrunc noerror sync swab ucase lcase ascii ebcdic ibm block unblock excl nocreat sparse fsync; 블록 수와 속도는 표준 오류로) |
 | `pathchk` | 완료 (`-p -P --portability`; 길이 한계는 리눅스 값 255/4095, `-p`는 14/255와 이식 가능한 문자) |
 | `b2sum` | 완료 (BLAKE2b, `-l` 다이제스트 길이, `--tag`, `-c`는 줄마다 길이를 따름; 다른 `*sum`과 같은 옵션) |
-| `users` | 완료 (지금 로그온한 사용자 이름을 정렬해 한 줄로; 세션은 시스템에서 가져오고 FILE은 받아도 무시) |
+| `users` | 완료 (열려 있는 쉘의 사용자 이름을 정렬해 한 줄로; 세션은 쉘이 시작할 때 남긴 기록에서 가져오고 FILE은 받아도 읽지 않음) |
+| `who` | 완료 (`-a -b -d -H -l -m -p -q -r -s -t -T -u -w`, `who am i`; Windows에는 utmp가 없어서 **열려 있는 Winshell 쉘이 세션**: 이름은 `pts/N`, 시간은 쉘을 연 시각, PID는 쉘의 PID; `-b`는 시스템 부팅 시각; 죽은 프로세스·login·run level·시계 변경은 없어서 `-d -l -p -r -t`는 아무것도 내지 않음; 머리글과 열 모양은 GNU와 같음) |
+| `pinky` | 완료 (`-l -b -h -p -s -f -w -i -q`; 짧은 형식은 열려 있는 쉘을 보여 주고, 긴 형식은 계정의 이름·홈·쉘(Winshell의 `shell.exe`)과 `.project`·`.plan`; 유휴 시간은 알 수 없어서 `?`) |
+| `uptime` | 완료 (현재 시각, 부팅 후 시간(`GetTickCount64`), 사용자 수(열려 있는 쉘), load average; Windows에는 load average가 없어서 `0.00, 0.00, 0.00`) |
 | `groups` | 완료 (그룹 이름; `USER...`를 주면 `user : 그룹...`; 계정의 그룹, 기본 그룹이 먼저) |
 | `id` | 완료 (`-a -g -G -n -r -u -z`, `USER...`; ID는 보안 식별자(SID)의 마지막 번호, 실제/유효 ID는 같음, `-Z`는 SELinux가 없어 오류) |
 | `hostid` | 완료 (16진수 8자리; 장치 GUID(MachineGuid)에서 만들어 같은 컴퓨터에서는 늘 같음) |
@@ -268,7 +271,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dir`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pr`, `printenv`, `printf`, `ps`, `ptx`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `vdir`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dir`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pinky`, `pr`, `printenv`, `printf`, `ps`, `ptx`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `uptime`, `users`, `vdir`, `wc`, `which`, `who`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -366,6 +369,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `id_test` | `id`: 기본 형식, `-u -g -G -n -r -z`가 서로 맞는지, 이름 준 사용자, 옵션 조합 오류 |
 | `groups_test` | `groups`: `id -Gn`과 같은 이름, 사용자 지정, 없는 사용자 |
 | `users_test` | `users`: 한 줄의 모양, FILE, 오류 |
+| `who_test` | `who`, `users`, `uptime`, `pinky`: 테스트가 쓴 세션 기록으로 출력, 머리글, `-q -T -u -m`, `who am i`, 죽은 프로세스의 기록, 쉘이 스스로 등록하고 끝나면 기록이 사라짐, 오류 |
 | `sync_test` | `sync`: 파일과 디렉터리, 옵션 오류 |
 | `numfmt_test` | `numfmt`: `--to`/`--from`, 반올림, 패딩, 형식, 접미사, 필드와 구분자, `--invalid`, 오류 |
 | `csplit_test` | `csplit`: 줄 번호, 정규식과 오프셋, 건너뛰기, 반복, 옵션, 오류 |
@@ -500,6 +504,9 @@ Winshell/
 ├─ ptx/          ptx 명령
 ├─ dir/          dir 명령
 ├─ vdir/         vdir 명령
+├─ pinky/        pinky 명령
+├─ uptime/       uptime 명령
+├─ who/          who 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)

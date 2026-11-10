@@ -9,6 +9,7 @@
 #include "jobs.h"
 #include "variables.h"
 #include "vec.h"
+#include "sessions.h"
 
 /** Set when Ctrl+C or Ctrl+Break reached the shell. */
 static volatile LONG interrupted = 0;
@@ -259,7 +260,21 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "shell: %s: invalid option\n", argv[1]);
         return 2;
     } else {
+        DWORD consoleMode;
+
+        // a shell that reads from a console is a session: who and the others list it (the record goes with the process)
+        if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &consoleMode) || getenv("WINSHELL_TEST_SESSION") != NULL) {
+            int number = session_open();
+
+            if (number >= 0) {
+                char tty[16];
+
+                snprintf(tty, sizeof tty, "pts/%d", number);
+                var_export("WINSHELL_PTS", tty);
+            }
+        }
         status = interactive_loop();
+        session_close();
     }
     command_run_exit_trap(&status);
     fflush(stdout);

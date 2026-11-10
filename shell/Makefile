@@ -1,8 +1,9 @@
 ## shell 빌드 규칙 (NMAKE / MSVC). 보통은 최상위 Makefile을 통해 호출됩니다.
 
 NAME     = shell
-SRCS     = src\main.c src\arith.c src\command.c src\interp.c src\parser.c src\list.c src\executer.c src\builtin.c src\glob.c src\variables.c src\cwd.c src\jobs.c src\brace.c ..\common\utf8.c ..\common\cmdline.c ..\common\program.c ..\common\vpath.c
-HDRS     = ..\common\utf8.h ..\common\cmdline.h ..\common\program.h include\arith.h include\command.h include\interp.h include\builtin.h include\executer.h include\parser.h include\variables.h include\cwd.h include\jobs.h include\brace.h ..\common\vpath.h
+SRCS     = src\main.c src\arith.c src\command.c src\interp.c src\parser.c src\list.c src\executer.c src\builtin.c src\glob.c src\variables.c src\cwd.c src\jobs.c src\brace.c ..\common\utf8.c ..\common\cmdline.c ..\common\program.c ..\common\vpath.c ..\common\sessions.c
+HDRS     = ..\common\utf8.h ..\common\cmdline.h ..\common\program.h ..\common\sessions.h include\arith.h include\command.h include\interp.h include\builtin.h include\executer.h include\parser.h include\variables.h include\cwd.h include\jobs.h include\brace.h ..\common\vpath.h
 INCLUDES = /Iinclude
+LIBS     = advapi32.lib
 
 !INCLUDE ..\common.mk
