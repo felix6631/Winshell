@@ -104,6 +104,9 @@
 | `dircolors` | 완료 (`-b -c -p`, 내장 데이터베이스는 GNU 8.32의 것; `TERM` 줄, 키워드와 `.확장자`/`*글롭`, 쉘 인용; `SHELL`이 없으면 Bourne 쉘로 봄) |
 | `install` | 완료 (`-b --backup -S -c -C -d -D -m -p -t -T -v`, `-o`/`-g`는 이름만 검사; `-s`와 SELinux 옵션은 받기만 함; 모드는 chmod처럼 읽기 전용 속성으로만 남음) |
 | `chmod` | 완료 (`-c -f -v -R --reference --preserve-root`; 8진수와 기호 모드 계산은 GNU와 같음; Windows가 가진 것은 읽기 전용 속성뿐이라 쓰기 비트가 하나도 없으면 읽기 전용, 하나라도 있으면 쓰기 가능이 되고 나머지는 계산해 알려 주기만 함; 디렉터리는 바뀌지 않음; 특수 비트(`s` `t`)는 저장되지 않음) |
+| `chgrp` | 완료 (chown과 같은 방식: 파일의 그룹은 현재 사용자의 기본 그룹으로 보이고, 다른 그룹으로 바꾸는 것은 거절) |
+| `chown` | 완료 (`-c -f -v -h -R -H -L -P --from --reference --preserve-root`, `OWNER[:GROUP]`; Windows의 파일은 모두 현재 사용자 소유로 보이므로(stat과 같음) 그 사용자를 쓰면 "retained", 다른 사용자는 "Operation not permitted"로 거절) |
+| `fmt` | 완료 (`-c -p -s -t -u -w -g`, 옛 형식 `-WIDTH`; GNU와 같은 비용 계산으로 줄을 나눔(문장 끝, 짧은 마지막 낱말, 괄호 등), 5000자/1000낱말이 넘는 문단의 분할까지 같음; 탭은 GNU처럼 들여쓰기에 씀; CR LF는 줄 끝으로 받음) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
 
@@ -261,7 +264,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chmod`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -367,6 +370,9 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `chmod_test` | `chmod`: 8진수와 기호 모드, 읽기 전용 속성(stat이 보여 주는 모드), `-R`, `--reference`, `-c -v -f`, 오류 |
 | `install_test` | `install`: 복사와 덮어쓰기, 디렉터리 대상 `-t -T`, `-D -d`, `-m`, 백업, `-C -p`, 오류 |
 | `dircolors_test` | `dircolors`: 쉘 문법, TERM 줄, 키워드와 코드, 인용, 내장 데이터베이스, 오류 |
+| `fmt_test` | `fmt`: 문단 채우기, 폭과 목표 폭, 문장 끝과 공백, 들여쓰기, `-u -s -c -t -p`, 탭, 여러 파일, 오류 |
+| `chown_test` | `chown`: 현재 사용자(retained), 다른 사용자 거절, `-R`, `--reference`, 없는 이름과 파일, 오류 |
+| `chgrp_test` | `chgrp`: 기본 그룹(retained), 다른 그룹 거절, `--reference`, 없는 이름과 파일, 오류 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -479,6 +485,9 @@ Winshell/
 ├─ chmod/        chmod 명령
 ├─ install/      install 명령
 ├─ dircolors/    dircolors 명령
+├─ fmt/          fmt 명령
+├─ chown/        chown 명령
+├─ chgrp/        chgrp 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)

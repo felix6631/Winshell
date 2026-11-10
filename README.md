@@ -123,7 +123,7 @@ Winshell은 활발히 개발 중입니다.
 <details>
 <summary>구현 예정 명령 펼치기</summary>
 
-chgrp, chown, dir, fmt, mkfifo,
+dir, mkfifo,
 mknod, pinky, pr, ptx, stdbuf, uptime, vdir,
 who
 

@@ -129,7 +129,7 @@ Winshell is under active development.
 <details>
 <summary>Show the planned commands</summary>
 
-chgrp, chown, dir, fmt, install, mkfifo,
+dir, install, mkfifo,
 mknod, pinky, pr, ptx, stdbuf, uptime, vdir,
 who
 
