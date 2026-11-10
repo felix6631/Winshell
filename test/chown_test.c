@@ -50,7 +50,7 @@ int main(void) {
     run_result_free(&r);
 
     printf("another owner\n");
-    message("Administrator f.txt", "changing ownership of 'f.txt': Operation not permitted", 1);
+    message("54321 f.txt", "changing ownership of 'f.txt': Operation not permitted", 1);
     message("12345 f.txt", "changing ownership of 'f.txt': Operation not permitted", 1);
 
     printf("errors\n");
