@@ -108,6 +108,7 @@
 | `chown` | 완료 (`-c -f -v -h -R -H -L -P --from --reference --preserve-root`, `OWNER[:GROUP]`; Windows의 파일은 모두 현재 사용자 소유로 보이므로(stat과 같음) 그 사용자를 쓰면 "retained", 다른 사용자는 "Operation not permitted"로 거절) |
 | `fmt` | 완료 (`-c -p -s -t -u -w -g`, 옛 형식 `-WIDTH`; GNU와 같은 비용 계산으로 줄을 나눔(문장 끝, 짧은 마지막 낱말, 괄호 등), 5000자/1000낱말이 넘는 문단의 분할까지 같음; 탭은 GNU처럼 들여쓰기에 씀; CR LF는 줄 끝으로 받음) |
 | `pr` | 완료 (`+FIRST[:LAST]`/`--pages`, `-COLUMN`, `-a -c -d -D -e -f -F -h -i -J -l -m -n -N -o -r -s -S -t -T -v -w -W`; 쪽마다 5줄 머리글(날짜, 파일 이름 또는 `-h`, `Page N`)·56줄 본문·5줄 꼬리글, 열은 GNU처럼 탭으로 맞춤, 폼 피드는 쪽 나눔; 입력은 통째로 읽음(끝나지 않는 표준 입력은 처리하지 못함); `-D`는 `%e %k %l %P %s %F %T %R %D %h %n %t %z` 등을 포함한 strftime; CR은 폭 0인 문자로 GNU와 같이 그대로 통과; 알려진 차이: 아래로 채우는 열에서 `-s`와 `-n`을 함께 쓸 때, 그리고 번호가 붙은 좁은 열 안의 탭은 GNU와 위치가 다를 수 있음) |
+| `ptx` | 완료 (`-A -G -F -M -O -R -S -T -W -b -f -g -i -o -r -t -w`, `--format=roff|tex`; 모든 낱말이 키워드이고 한 줄에 키워드와 앞뒤 문맥이 나옴; 필드(tail, before, keyword+after, head)에 안 들어가는 문맥은 `/` 표시와 함께 반대쪽으로 옮겨 감, GNU의 필드 계산(`maximum_word_length` 창, 공백 건너뛰기 등)과 같음; 기본은 문장 끝(`. ` 뒤 공백 두 칸이나 줄 끝)으로 문맥을 나누고, `-G`/`-r`은 줄 단위; 사용자 정규식은 Emacs 문법(`+ ? *`은 연산자); 알려진 차이: 여러 파일에서 같은 키워드가 나올 때의 순서(GNU는 버퍼 주소로 정함)와 `-b` 파일로 낱말이 아주 길어지는 경우) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
 
@@ -265,7 +266,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pr`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pr`, `printenv`, `printf`, `ps`, `ptx`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -375,6 +376,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `chown_test` | `chown`: 현재 사용자(retained), 다른 사용자 거절, `-R`, `--reference`, 없는 이름과 파일, 오류 |
 | `chgrp_test` | `chgrp`: 기본 그룹(retained), 다른 그룹 거절, `--reference`, 없는 이름과 파일, 오류 |
 | `pr_test` | `pr`: 쪽 모양과 쪽 길이, 열(아래로/가로/`-m`), 번호·들여쓰기·구분자·폭, 탭과 제어 문자, 폼 피드, 쪽 범위, 오류 |
+| `ptx_test` | `ptx`: 평문·roff·TeX 형식, 필드와 반대쪽으로 옮겨 가는 문맥, 참조(`-A -r -R`), 폭과 간격, 잘림 표시, 무시/한정 목록, 대소문자, 구분 문자, 낱말·문장 정규식, `-G`, 오류 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -491,6 +493,7 @@ Winshell/
 ├─ chown/        chown 명령
 ├─ chgrp/        chgrp 명령
 ├─ pr/           pr 명령
+├─ ptx/          ptx 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)
