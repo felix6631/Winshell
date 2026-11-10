@@ -5,6 +5,9 @@
 **A bash-style shell and GNU-style coreutils that run natively on Windows.**<br>
 Written from scratch in plain C on top of the Win32 API.
 
+The ultimate goal is **a layer that AI agents can use instead of a POSIX emulator** (MSYS, Cygwin, WSL):<br>
+the commands an agent sends to bash should give the same results natively on Windows as they do on GNU/Linux.
+
 **English** | [한국어](README.md)
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
@@ -29,13 +32,13 @@ for f in report*.txt; do n=$(wc -l < "$f"); echo "$f: $n lines"; done
 - **No emulation layer.** Unlike MSYS2 or Cygwin, there is no POSIX emulation DLL underneath: every command is a standalone
   executable that calls the Win32 API directly. They only use DLLs that ship with Windows (`KERNEL32` and friends) and link the
   C runtime statically, so no Visual C++ redistributable is needed either. Each executable is 110–260 KB.
-- **Same output as GNU.** 29 tools are checked **byte for byte against the real GNU tools** over 3,000+ combinations of options
+- **Same output as GNU.** 94 tools are checked **byte for byte against the real GNU tools** over thousands of combinations of options
   and inputs (`nmake gnu`). `diff` uses the same Myers algorithm as GNU diff, so it picks the same answer when several are equally short.
 - **A shell that understands Windows.** Both `/c/Users/me` and `C:\Users\me` work, CRLF files keep their line endings,
   and non-ASCII file names and globs like `[가-힣]` match characters, not bytes.
 - **A real shell language.** Pipes and redirection, plus `if`/`while`/`for`/`case`, functions with `local`, `$(...)`, `$((...))`,
   `${NAME:-value}`, `trap`, `read` and scripts.
-- **Readable code.** About 39k lines of C (tests included), with its own regex engine, date parser and option parser.
+- **Readable code.** About 70k lines of C (tests included), with its own regex engine, date parser and option parser.
   A good place to learn how a shell and coreutils actually work.
 
 ### How it compares
@@ -77,15 +80,18 @@ fact 10        # 3628800
 
 ## Commands
 
-The shell (`shell`) and 43 commands. Every supported option is listed in the [reference](docs/REFERENCE.en.md#implemented).
+The shell (`shell`) and 109 commands. Every supported option is listed in the [reference](docs/REFERENCE.en.md#implemented).
 
 | Group | Commands |
 | --- | --- |
-| Files and directories | `ls` `cp` `mv` `rm` `mkdir` `rmdir` `touch` `find` `realpath` `basename` `dirname` `pwd` |
-| Text processing | `cat` `head` `tail` `grep` `sed` `sort` `uniq` `cut` `tr` `wc` `nl` `paste` `tac` `tee` `comm` `diff` |
-| Output and arithmetic | `echo` `printf` `expr` `date` |
-| Scripting helpers | `test` `[` `true` `false` `xargs` `env` `printenv` `which` `sleep` |
-| Processes and system | `ps` `kill` `arch` |
+| File and directory | `ls` `dir` `vdir` `cp` `mv` `rm` `mkdir` `rmdir` `ln` `link` `unlink` `touch` `find` `du` `df` `stat` `install` `mktemp` `readlink` `realpath` `basename` `dirname` `pathchk` `pwd` `truncate` `shred` `sync` `dd` `split` `csplit` |
+| Permissions and special files | `chmod` `chown` `chgrp` `mkfifo` `mknod` |
+| Text processing | `cat` `head` `tail` `grep` `sed` `sort` `uniq` `cut` `tr` `wc` `nl` `paste` `tac` `tee` `comm` `join` `diff` `fmt` `fold` `expand` `unexpand` `pr` `ptx` `od` `shuf` `tsort` `numfmt` |
+| Checksums and encodings | `md5sum` `sha1sum` `sha224sum` `sha256sum` `sha384sum` `sha512sum` `b2sum` `cksum` `sum` `base32` `base64` |
+| Output and arithmetic | `echo` `printf` `yes` `seq` `expr` `factor` `date` `dircolors` |
+| Scripting helpers | `test` `[` `true` `false` `xargs` `env` `printenv` `which` `sleep` `nohup` `nice` `stdbuf` |
+| Processes and system | `ps` `kill` `arch` `uname` `hostname` `hostid` `nproc` |
+| Users and sessions | `id` `whoami` `groups` `logname` `users` `who` `pinky` `uptime` `tty` |
 
 <details>
 <summary><b>Implementation highlights</b></summary>
@@ -104,7 +110,7 @@ The shell (`shell`) and 43 commands. Every supported option is listed in the [re
 ## Tests
 
 ```bat
-nmake test      :: run the 38 test programs in parallel
+nmake test      :: run the 100 test programs in parallel
 nmake asan      :: rebuild every tool and test with AddressSanitizer and run them
 nmake gnu       :: compare the output with GNU (needs bash from MSYS2 or Git for Windows; about 30 seconds)
 ```

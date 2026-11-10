@@ -5,6 +5,9 @@
 **Windows에서 네이티브로 도는 bash 스타일 쉘과 GNU 스타일 coreutils.**<br>
 순수 C와 Win32 API만으로, 처음부터 직접 만들었습니다.
 
+궁극적인 목표는 **AI 에이전트가 POSIX 에뮬레이터(MSYS, Cygwin, WSL) 대신 쓸 수 있는 계층**입니다.<br>
+에이전트가 bash로 던지는 명령이 Windows 네이티브에서 GNU/Linux와 같은 결과를 내도록 만들고 있습니다.
+
 [English](README.en.md) | **한국어**
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
@@ -28,12 +31,12 @@ for f in 보고서*.txt; do n=$(wc -l < "$f"); echo "$f: ${n}줄"; done
 
 - **에뮬레이션 계층 없음.** MSYS2나 Cygwin처럼 POSIX 에뮬레이션 DLL 위에서 도는 것이 아니라, 모든 명령이 Win32 API를 직접 부르는 독립 실행 파일입니다.
   Windows 기본 DLL(`KERNEL32` 등)만 쓰고 CRT를 정적 링크하므로 Visual C++ 재배포 패키지도 필요 없습니다. 실행 파일 하나가 110–260KB입니다.
-- **GNU와 같은 결과.** 29개 도구를 3천여 가지 옵션·입력 조합으로 실제 GNU 도구와 **출력 바이트 단위로 대조**합니다(`nmake gnu`).
+- **GNU와 같은 결과.** 94개 도구를 수천 가지 옵션·입력 조합으로 실제 GNU 도구와 **출력 바이트 단위로 대조**합니다(`nmake gnu`).
   `diff` 는 GNU diff와 같은 Myers 알고리즘을 써서, 같은 답이 여럿일 때도 GNU와 같은 것을 고릅니다.
 - **Windows를 이해하는 쉘.** `/c/Users/me` 와 `C:\Users\me` 를 둘 다 쓸 수 있고, CRLF 파일을 다뤄도 줄 끝이 그대로 남으며,
   한글 파일명과 `[가-힣]` 같은 글롭이 바이트가 아니라 글자 단위로 동작합니다.
 - **진짜 쉘 언어.** 파이프와 리다이렉션은 물론 `if`/`while`/`for`/`case`, 함수와 `local`, `$(...)`, `$((...))`, `${NAME:-값}`, `trap`, `read`, 스크립트 실행까지 지원합니다.
-- **읽을 수 있는 코드.** 정규식 엔진, 날짜 해석기, 옵션 파서까지 모두 직접 구현한 약 3.9만 줄(테스트 포함)의 C 코드입니다. 쉘과 coreutils가 어떻게 동작하는지 공부하기에도 좋습니다.
+- **읽을 수 있는 코드.** 정규식 엔진, 날짜 해석기, 옵션 파서까지 모두 직접 구현한 약 7만 줄(테스트 포함)의 C 코드입니다. 쉘과 coreutils가 어떻게 동작하는지 공부하기에도 좋습니다.
 
 ### 다른 선택지와 비교
 
@@ -72,15 +75,18 @@ fact 10        # 3628800
 
 ## 명령어
 
-쉘(`shell`)과 43개의 명령이 있습니다. 명령별 지원 옵션은 [레퍼런스](docs/REFERENCE.md#구현-현황)에 정리되어 있습니다.
+쉘(`shell`)과 109개의 명령이 있습니다. 명령별 지원 옵션은 [레퍼런스](docs/REFERENCE.md#구현-현황)에 정리되어 있습니다.
 
 | 분류 | 명령 |
 | --- | --- |
-| 파일과 디렉터리 | `ls` `cp` `mv` `rm` `mkdir` `rmdir` `touch` `find` `realpath` `basename` `dirname` `pwd` |
-| 텍스트 처리 | `cat` `head` `tail` `grep` `sed` `sort` `uniq` `cut` `tr` `wc` `nl` `paste` `tac` `tee` `comm` `diff` |
-| 출력과 계산 | `echo` `printf` `expr` `date` |
-| 스크립트 도우미 | `test` `[` `true` `false` `xargs` `env` `printenv` `which` `sleep` |
-| 프로세스와 시스템 | `ps` `kill` `arch` |
+| 파일과 디렉터리 | `ls` `dir` `vdir` `cp` `mv` `rm` `mkdir` `rmdir` `ln` `link` `unlink` `touch` `find` `du` `df` `stat` `install` `mktemp` `readlink` `realpath` `basename` `dirname` `pathchk` `pwd` `truncate` `shred` `sync` `dd` `split` `csplit` |
+| 권한과 특수 파일 | `chmod` `chown` `chgrp` `mkfifo` `mknod` |
+| 텍스트 처리 | `cat` `head` `tail` `grep` `sed` `sort` `uniq` `cut` `tr` `wc` `nl` `paste` `tac` `tee` `comm` `join` `diff` `fmt` `fold` `expand` `unexpand` `pr` `ptx` `od` `shuf` `tsort` `numfmt` |
+| 체크섬과 인코딩 | `md5sum` `sha1sum` `sha224sum` `sha256sum` `sha384sum` `sha512sum` `b2sum` `cksum` `sum` `base32` `base64` |
+| 출력과 계산 | `echo` `printf` `yes` `seq` `expr` `factor` `date` `dircolors` |
+| 스크립트 도우미 | `test` `[` `true` `false` `xargs` `env` `printenv` `which` `sleep` `nohup` `nice` `stdbuf` |
+| 프로세스와 시스템 | `ps` `kill` `arch` `uname` `hostname` `hostid` `nproc` |
+| 사용자와 세션 | `id` `whoami` `groups` `logname` `users` `who` `pinky` `uptime` `tty` |
 
 <details>
 <summary><b>구현 하이라이트</b></summary>
@@ -99,7 +105,7 @@ fact 10        # 3628800
 ## 테스트
 
 ```bat
-nmake test      :: 38개 테스트 프로그램을 병렬로 실행
+nmake test      :: 100개 테스트 프로그램을 병렬로 실행
 nmake asan      :: 모든 도구와 테스트를 AddressSanitizer 로 다시 빌드해서 실행
 nmake gnu       :: GNU 도구와 출력 대조 (MSYS2 나 Git for Windows 의 bash 필요, 약 30초)
 ```

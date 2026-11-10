@@ -555,6 +555,8 @@ the build structure in line with the directories.
 
 ## Design goals
 
+- **Ultimate goal:** a layer that AI agents can use instead of a POSIX emulator (MSYS, Cygwin, WSL). An agent expects the GNU output it has seen in its training data, so the tools do the same job the same way (output bytes and exit codes are compared with GNU in `test/gnu/`), adapt only what Windows cannot do, and write down every adaptation.
+
 - **Virtual root directory:** like a UNIX filesystem there is a logical root directory `/`, and each drive is placed beneath it as a single lower case letter.
   - `C:\Users\me` is `/c/Users/me`. Only the drives are below `/`, and `cd /`, `pwd` and `cat /` all follow that.
   - Windows paths such as `C:\Users\me` keep working everywhere. UNC paths such as `\\server\share` are outside of the virtual tree and are passed to Windows unchanged.
