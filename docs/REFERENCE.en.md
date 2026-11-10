@@ -107,6 +107,7 @@ The options of every command, the shell language, building and testing, and the 
 | `chgrp` | Done (as chown: the group of a file is shown as the primary group of the current user, and changing it to another one is refused) |
 | `chown` | Done (`-c -f -v -h -R -H -L -P --from --reference --preserve-root`, `OWNER[:GROUP]`; every file on Windows is shown as owned by the current user (as stat does), so naming that user is "retained" and another one is refused with "Operation not permitted") |
 | `fmt` | Done (`-c -p -s -t -u -w -g` and the old `-WIDTH`; the lines are broken by the same costs as GNU (sentence ends, a short last word, parentheses and so on), also for paragraphs of more than 5000 characters or 1000 words; tabs are used for indentation as GNU does; CR LF ends a line) |
+| `pr` | Done (`+FIRST[:LAST]`/`--pages`, `-COLUMN`, `-a -c -d -D -e -f -F -h -i -J -l -m -n -N -o -r -s -S -t -T -v -w -W`; every page has a header of five lines (the date, the file name or the `-h` text, `Page N`), 56 lines of text and a trailer of five lines; columns are padded with tabs as GNU does; a form feed ends a page; the input is read completely (standard input that does not end cannot be handled); `-D` is a strftime including `%e %k %l %P %s %F %T %R %D %h %n %t %z`; a CR is a character of no width and passes as it does in GNU pr; known differences: with columns filled down, `-s` together with `-n`, and tabs inside narrow numbered columns, can be placed differently from GNU) |
 
 For what is still to come, see the [roadmap in the README](../README.en.md#roadmap).
 
@@ -282,7 +283,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pr`, `printenv`, `printf`, `ps`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -391,6 +392,7 @@ The test programs are divided by feature (`test\`).
 | `fmt_test` | `fmt`: filling paragraphs, width and goal, sentence ends and spacing, indentation, `-u -s -c -t -p`, tabs, several files, errors |
 | `chown_test` | `chown`: the current user (retained), another user refused, `-R`, `--reference`, names and files that do not exist, errors |
 | `chgrp_test` | `chgrp`: the primary group (retained), another group refused, `--reference`, names and files that do not exist, errors |
+| `pr_test` | `pr`: the shape of a page and its length, columns (down, across, `-m`), numbers, margins, separators and widths, tabs and control characters, form feeds, page ranges, errors |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -506,6 +508,7 @@ Winshell/
 ├─ fmt/          fmt command
 ├─ chown/        chown command
 ├─ chgrp/        chgrp command
+├─ pr/           pr command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)

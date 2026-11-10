@@ -124,7 +124,7 @@ Winshell은 활발히 개발 중입니다.
 <summary>구현 예정 명령 펼치기</summary>
 
 dir, mkfifo,
-mknod, pinky, pr, ptx, stdbuf, uptime, vdir,
+mknod, pinky, ptx, stdbuf, uptime, vdir,
 who
 
 대상 제외(Windows에서 의미가 없거나 대응 개념이 없음): chcon, chroot, runcon, stty, coreutils(멀티콜 바이너리)
