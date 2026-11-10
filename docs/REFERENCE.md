@@ -117,6 +117,9 @@
 | `mknod` | 완료 (`-m -Z --context`, 종류 `b c u p`; **장치 파일과 FIFO는 만들지 못함**: TYPE과 MAJOR/MINOR의 개수·형식 검사, `invalid device type`, 오류 메시지는 GNU와 같고 이름은 `File exists`/`No such file or directory`/`Operation not supported`로 끝남) |
 | `stdbuf` | 완료 (`-i -o -e`; **다른 프로그램의 버퍼링은 바꿀 수 없어서 명령을 그대로 실행**함: MODE(`L`, `0`, `10K`, `1MiB`, `5MB` …) 검사와 `line buffering stdin is meaningless`, 오류 상태 125, 명령을 못 찾으면 127은 GNU와 같음; 경고 없이 조용히 실행) |
 | `ptx` | 완료 (`-A -G -F -M -O -R -S -T -W -b -f -g -i -o -r -t -w`, `--format=roff|tex`; 모든 낱말이 키워드이고 한 줄에 키워드와 앞뒤 문맥이 나옴; 필드(tail, before, keyword+after, head)에 안 들어가는 문맥은 `/` 표시와 함께 반대쪽으로 옮겨 감, GNU의 필드 계산(`maximum_word_length` 창, 공백 건너뛰기 등)과 같음; 기본은 문장 끝(`. ` 뒤 공백 두 칸이나 줄 끝)으로 문맥을 나누고, `-G`/`-r`은 줄 단위; 사용자 정규식은 Emacs 문법(`+ ? *`은 연산자); 알려진 차이: 여러 파일에서 같은 키워드가 나올 때의 순서(GNU는 버퍼 주소로 정함)와 `-b` 파일로 낱말이 아주 길어지는 경우) |
+| `stty` | 부분 (`size`, `-a`, `-g`, `-F`, `isig` `icanon` `echo` 와 그 부정, `raw` `cooked` `cbreak` `sane`; Windows 콘솔에는 termios가 없어서 나머지 설정은 GNU처럼 이름과 인자를 검사한 뒤 거절; `-g` 는 `winshell:입력:출력` 형식) |
+| `basenc` | 완료 (`--base64 --base64url --base32 --base32hex --base16 --base2msbf --base2lsbf --z85 -d -i -w`; `base64`/`base32`와 같은 소스(`common/basecode.c`)) |
+| `timeout` | 완료 (`-s -k -v --foreground --preserve-status`, 124/125/126/127/137; 시그널이 없는 Windows에 맞춰 `KILL` 은 즉시 종료, `STOP` 계열은 일시 중지, `CHLD` `URG` `WINCH` `CONT` `0` 은 아무 일도 안 함, 나머지는 Ctrl+Break와 창 닫기 요청(둘 다 안 되면 종료); `--foreground` 가 아니면 잡(job)으로 실행해 자식 프로세스까지 종료) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
 
@@ -274,7 +277,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dir`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mkfifo`, `mknod`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pinky`, `pr`, `printenv`, `printf`, `ps`, `ptx`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `stdbuf`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `uptime`, `users`, `vdir`, `wc`, `which`, `who`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `basenc`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dir`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mkfifo`, `mknod`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pinky`, `pr`, `printenv`, `printf`, `ps`, `ptx`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `stdbuf`, `stty`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `timeout`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `uptime`, `users`, `vdir`, `wc`, `which`, `who`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -388,6 +391,9 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `chgrp_test` | `chgrp`: 기본 그룹(retained), 다른 그룹 거절, `--reference`, 없는 이름과 파일, 오류 |
 | `pr_test` | `pr`: 쪽 모양과 쪽 길이, 열(아래로/가로/`-m`), 번호·들여쓰기·구분자·폭, 탭과 제어 문자, 폼 피드, 쪽 범위, 오류 |
 | `ptx_test` | `ptx`: 평문·roff·TeX 형식, 필드와 반대쪽으로 옮겨 가는 문맥, 참조(`-A -r -R`), 폭과 간격, 잘림 표시, 무시/한정 목록, 대소문자, 구분 문자, 낱말·문장 정규식, `-G`, 오류 |
+| `timeout_test` | `timeout`: 제때 끝나는 명령, 시간 초과(124/137/--preserve-status), 시간·시그널 검사, 실행할 수 없는 명령 |
+| `basenc_test` | `basenc`: 모든 인코딩의 인코딩·디코딩, `-w`, 잘못된 입력에서 오류 전에 쓰는 것, `-i`, 옵션 검사 |
+| `stty_test` | `stty`: 터미널이 아닐 때의 메시지, 설정 이름과 인자 검사, 출력 형식 충돌 |
 
 - 모든 테스트가 통과하면 `nmake test` 가 0으로 끝나고, 실패하면 어느 프로그램인지와 실패한 검사의 위치, 기대값/실제값을 출력합니다.
 - 테스트 프로그램과 작업 파일은 `test\out\` 에 만들어집니다(git 추적 제외). 개별 테스트는 `test\out\<이름>.exe` 로 직접 실행할 수 있습니다.
@@ -513,6 +519,9 @@ Winshell/
 ├─ mkfifo/       mkfifo 명령
 ├─ mknod/        mknod 명령
 ├─ stdbuf/       stdbuf 명령
+├─ timeout/      timeout 명령
+├─ basenc/       basenc 명령
+├─ stty/         stty 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)

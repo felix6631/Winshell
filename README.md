@@ -75,18 +75,18 @@ fact 10        # 3628800
 
 ## 명령어
 
-쉘(`shell`)과 109개의 명령이 있습니다. 명령별 지원 옵션은 [레퍼런스](docs/REFERENCE.md#구현-현황)에 정리되어 있습니다.
+쉘(`shell`)과 112개의 명령이 있습니다. 명령별 지원 옵션은 [레퍼런스](docs/REFERENCE.md#구현-현황)에 정리되어 있습니다.
 
 | 분류 | 명령 |
 | --- | --- |
 | 파일과 디렉터리 | `ls` `dir` `vdir` `cp` `mv` `rm` `mkdir` `rmdir` `ln` `link` `unlink` `touch` `find` `du` `df` `stat` `install` `mktemp` `readlink` `realpath` `basename` `dirname` `pathchk` `pwd` `truncate` `shred` `sync` `dd` `split` `csplit` |
 | 권한과 특수 파일 | `chmod` `chown` `chgrp` `mkfifo` `mknod` |
 | 텍스트 처리 | `cat` `head` `tail` `grep` `sed` `sort` `uniq` `cut` `tr` `wc` `nl` `paste` `tac` `tee` `comm` `join` `diff` `fmt` `fold` `expand` `unexpand` `pr` `ptx` `od` `shuf` `tsort` `numfmt` |
-| 체크섬과 인코딩 | `md5sum` `sha1sum` `sha224sum` `sha256sum` `sha384sum` `sha512sum` `b2sum` `cksum` `sum` `base32` `base64` |
+| 체크섬과 인코딩 | `md5sum` `sha1sum` `sha224sum` `sha256sum` `sha384sum` `sha512sum` `b2sum` `cksum` `sum` `base32` `base64` `basenc` |
 | 출력과 계산 | `echo` `printf` `yes` `seq` `expr` `factor` `date` `dircolors` |
-| 스크립트 도우미 | `test` `[` `true` `false` `xargs` `env` `printenv` `which` `sleep` `nohup` `nice` `stdbuf` |
+| 스크립트 도우미 | `test` `[` `true` `false` `xargs` `env` `printenv` `which` `sleep` `nohup` `nice` `stdbuf` `timeout` |
 | 프로세스와 시스템 | `ps` `kill` `arch` `uname` `hostname` `hostid` `nproc` |
-| 사용자와 세션 | `id` `whoami` `groups` `logname` `users` `who` `pinky` `uptime` `tty` |
+| 사용자와 세션 | `id` `whoami` `groups` `logname` `users` `who` `pinky` `uptime` `tty` `stty` |
 
 <details>
 <summary><b>구현 하이라이트</b></summary>
@@ -124,12 +124,12 @@ Winshell은 활발히 개발 중입니다.
 
 - **쉘**: Ctrl+Z 로 작업 멈추기, `trap` 의 다른 신호
 - **호환성**: Windows XP까지 동작하는 것이 목표입니다(아직 검증 전). UTF-8 동작은 Windows 10 1903 이상에서 적용됩니다.
-- **coreutils**: 대상에서 제외한 명령을 빼고 모두 구현했습니다. Windows에 대응하는 개념이 없는 `mkfifo`, `mknod`, `stdbuf`는 옵션과 오류를 GNU처럼 검사하되 실제 동작은 하지 못합니다(문서 참고).
+- **coreutils**: 대상에서 제외한 명령을 빼고 모두 구현했습니다. Windows에 대응하는 개념이 없는 `mkfifo`, `mknod`, `stdbuf`는 옵션과 오류를 GNU처럼 검사하되 실제 동작은 하지 못하고, `stty`는 콘솔이 가진 `isig` `icanon` `echo`와 크기만 다룹니다(문서 참고).
 
 <details>
 <summary>대상에서 제외한 명령 펼치기</summary>
 
-대상 제외(Windows에서 의미가 없거나 대응 개념이 없음): chcon, chroot, runcon, stty, coreutils(멀티콜 바이너리)
+대상 제외(Windows에서 의미가 없거나 대응 개념이 없음): chcon, chroot, runcon, coreutils(멀티콜 바이너리)
 
 </details>
 

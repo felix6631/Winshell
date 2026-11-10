@@ -7,4 +7,7 @@
  */
 int basecode_main(const char* program, const char* version, int bits, int argc, char* argv[]);
 
+/** basenc: the same and base64url, base32hex, base16, bit strings and Z85, chosen by an option. Returns the exit status. */
+int basenc_main(int argc, char* argv[]);
+
 #endif //BASECODE_H

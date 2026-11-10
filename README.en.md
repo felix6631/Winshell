@@ -80,18 +80,18 @@ fact 10        # 3628800
 
 ## Commands
 
-The shell (`shell`) and 109 commands. Every supported option is listed in the [reference](docs/REFERENCE.en.md#implemented).
+The shell (`shell`) and 112 commands. Every supported option is listed in the [reference](docs/REFERENCE.en.md#implemented).
 
 | Group | Commands |
 | --- | --- |
 | File and directory | `ls` `dir` `vdir` `cp` `mv` `rm` `mkdir` `rmdir` `ln` `link` `unlink` `touch` `find` `du` `df` `stat` `install` `mktemp` `readlink` `realpath` `basename` `dirname` `pathchk` `pwd` `truncate` `shred` `sync` `dd` `split` `csplit` |
 | Permissions and special files | `chmod` `chown` `chgrp` `mkfifo` `mknod` |
 | Text processing | `cat` `head` `tail` `grep` `sed` `sort` `uniq` `cut` `tr` `wc` `nl` `paste` `tac` `tee` `comm` `join` `diff` `fmt` `fold` `expand` `unexpand` `pr` `ptx` `od` `shuf` `tsort` `numfmt` |
-| Checksums and encodings | `md5sum` `sha1sum` `sha224sum` `sha256sum` `sha384sum` `sha512sum` `b2sum` `cksum` `sum` `base32` `base64` |
+| Checksums and encodings | `md5sum` `sha1sum` `sha224sum` `sha256sum` `sha384sum` `sha512sum` `b2sum` `cksum` `sum` `base32` `base64` `basenc` |
 | Output and arithmetic | `echo` `printf` `yes` `seq` `expr` `factor` `date` `dircolors` |
-| Scripting helpers | `test` `[` `true` `false` `xargs` `env` `printenv` `which` `sleep` `nohup` `nice` `stdbuf` |
+| Scripting helpers | `test` `[` `true` `false` `xargs` `env` `printenv` `which` `sleep` `nohup` `nice` `stdbuf` `timeout` |
 | Processes and system | `ps` `kill` `arch` `uname` `hostname` `hostid` `nproc` |
-| Users and sessions | `id` `whoami` `groups` `logname` `users` `who` `pinky` `uptime` `tty` |
+| Users and sessions | `id` `whoami` `groups` `logname` `users` `who` `pinky` `uptime` `tty` `stty` |
 
 <details>
 <summary><b>Implementation highlights</b></summary>
@@ -130,12 +130,12 @@ Winshell is under active development.
 
 - **Shell**: stopping a job with Ctrl+Z, more signals for `trap`
 - **Compatibility**: the goal is to run as far back as Windows XP (not verified yet). UTF-8 behaviour needs Windows 10 version 1903 or later.
-- **coreutils**: all the commands are done except the ones that are out of scope. `mkfifo`, `mknod` and `stdbuf` have no counterpart on Windows: they check their options and operands as GNU does but cannot do what they are for (see the reference).
+- **coreutils**: all the commands are done except the ones that are out of scope. `mkfifo`, `mknod` and `stdbuf` have no counterpart on Windows: they check their options and operands as GNU does but cannot do what they are for, and `stty` only handles what a console has: `isig`, `icanon`, `echo` and the size (see the reference).
 
 <details>
 <summary>Show the commands that are out of scope</summary>
 
-Out of scope (meaningless or no counterpart on Windows): chcon, chroot, runcon, stty, coreutils (the multi-call binary)
+Out of scope (meaningless or no counterpart on Windows): chcon, chroot, runcon, coreutils (the multi-call binary)
 
 </details>
 

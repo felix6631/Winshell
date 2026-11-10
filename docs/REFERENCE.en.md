@@ -117,6 +117,9 @@ The options of every command, the shell language, building and testing, and the 
 | `mknod` | Done (`-m -Z --context`, types `b c u p`; **no device files and no FIFOs can be made**: the TYPE and the number and form of MAJOR and MINOR are checked, `invalid device type` and the other messages are those of GNU, and the name ends with `File exists`, `No such file or directory` or `Operation not supported`) |
 | `stdbuf` | Done (`-i -o -e`; **the buffering of another program cannot be changed, so the command is run as it is**: the MODE (`L`, `0`, `10K`, `1MiB`, `5MB` ...) is checked, with `line buffering stdin is meaningless`, the status 125 for an error of stdbuf and 127 for a command that is not found, as in GNU; it runs silently, without a warning) |
 | `ptx` | Done (`-A -G -F -M -O -R -S -T -W -b -f -g -i -o -r -t -w`, `--format=roff|tex`; every word is a keyword and a line shows it with the text before and after; what does not fit a field (tail, before, keyword+after, head) goes to the other side with a `/` mark, with the field arithmetic of GNU (the window of `maximum_word_length`, skipping white space and so on); sentences end at `. ` followed by two blanks or a line end, with `-G` and `-r` a line is the context; user expressions are in the syntax of Emacs (`+ ? *` are operators); known differences: the order of equal keywords from different files (GNU orders them by buffer addresses) and words that become very long with `-b`) |
+| `stty` | Partial (`size`, `-a`, `-g`, `-F`, `isig` `icanon` `echo` and their negations, `raw` `cooked` `cbreak` `sane`; a Windows console has no termios, so the other settings are checked as GNU checks them (names, arguments) and then refused; `-g` writes `winshell:INPUT:OUTPUT`) |
+| `basenc` | Done (`--base64 --base64url --base32 --base32hex --base16 --base2msbf --base2lsbf --z85 -d -i -w`; the same source as `base64`/`base32`, `common/basecode.c`) |
+| `timeout` | Done (`-s -k -v --foreground --preserve-status`, the statuses 124/125/126/127/137; Windows has no signals: `KILL` ends the command at once, the `STOP` family suspends it, `CHLD` `URG` `WINCH` `CONT` `0` do nothing, any other signal is a Ctrl+Break and a request to close the windows (the command is ended when neither works); unless `--foreground` the command runs in a job so that its children end with it) |
 
 For what is still to come, see the [roadmap in the README](../README.en.md#roadmap).
 
@@ -292,7 +295,7 @@ nmake clean    :: remove build output (bin\, obj\)
 
 ### How the build works
 
-- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dir`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mkfifo`, `mknod`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pinky`, `pr`, `printenv`, `printf`, `ps`, `ptx`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `stdbuf`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `uptime`, `users`, `vdir`, `wc`, `which`, `who`, `whoami`, `xargs`, `yes`).
+- The top-level `Makefile` creates `bin\` and then invokes the `Makefile` of each sub-project (`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `basenc`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dir`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mkfifo`, `mknod`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pinky`, `pr`, `printenv`, `printf`, `ps`, `ptx`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `stdbuf`, `stty`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `timeout`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `uptime`, `users`, `vdir`, `wc`, `which`, `who`, `whoami`, `xargs`, `yes`).
 - Each sub-project's `Makefile` builds the sources in its own directory into `bin\<name>.exe`.
 - `shell.exe` only uses the executables located in `bin\` by default.
 
@@ -406,6 +409,9 @@ The test programs are divided by feature (`test\`).
 | `chgrp_test` | `chgrp`: the primary group (retained), another group refused, `--reference`, names and files that do not exist, errors |
 | `pr_test` | `pr`: the shape of a page and its length, columns (down, across, `-m`), numbers, margins, separators and widths, tabs and control characters, form feeds, page ranges, errors |
 | `ptx_test` | `ptx`: plain, roff and TeX formats, the fields and the context that goes to the other side, references (`-A -r -R`), widths and gaps, the truncation mark, ignore and only lists, case, break characters, word and sentence expressions, `-G`, errors |
+| `timeout_test` | `timeout`: commands that end in time, time out (124/137/--preserve-status), the checks of durations and signals, commands that cannot be run |
+| `basenc_test` | `basenc`: every encoding both ways, `-w`, what is written before an error in invalid input, `-i`, the checks of the options |
+| `stty_test` | `stty`: the messages without a terminal, the checks of the names and arguments of settings, the exclusive output styles |
 
 - `nmake test` ends with 0 when everything passes; a failure names the program, the location of the check and the expected and actual values.
 - Test programs and work files are created in `test\out\` (not tracked by git). A single test can be run as `test\out\<name>.exe`.
@@ -531,6 +537,9 @@ Winshell/
 ├─ mkfifo/       mkfifo command
 ├─ mknod/        mknod command
 ├─ stdbuf/       stdbuf command
+├─ timeout/      timeout command
+├─ basenc/       basenc command
+├─ stty/         stty command
 ├─ common/         code shared by several commands (vpath: virtual path conversion, fsutil: copy and remove, textutil: text input and lines, args: option parser, regex: regular expressions, vec: growing arrays)
 ├─ test/           tests (nmake test)
 └─ bin/            build output (not tracked by git)
