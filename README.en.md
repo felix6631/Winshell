@@ -129,9 +129,8 @@ Winshell is under active development.
 <details>
 <summary>Show the planned commands</summary>
 
-dir, install, mkfifo,
-mknod, pinky, stdbuf, uptime, vdir,
-who
+mkfifo,
+mknod, pinky, stdbuf, uptime, who
 
 Out of scope (meaningless or no counterpart on Windows): chcon, chroot, runcon, stty, coreutils (the multi-call binary)
 

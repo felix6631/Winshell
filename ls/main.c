@@ -12,7 +12,16 @@
 #include "vec.h"
 
 #define VERSION "0.1"
+/* dir and vdir are this program with another name and other defaults (dir: -C -b, vdir: -l -b) */
+#ifndef PROGRAM
 #define PROGRAM "ls"
+#endif
+#ifndef LS_DEFAULT_FORMAT
+#define LS_DEFAULT_FORMAT 0          /* 0 as ls, 1 columns, 2 long */
+#endif
+#ifndef LS_DEFAULT_ESCAPE
+#define LS_DEFAULT_ESCAPE 0
+#endif
 
 /*
  * ls lists files and directories.
@@ -45,6 +54,7 @@ typedef struct {
     int sortSize;       // -S
     int sortTime;       // -t
     int sortNone;       // -U
+    int escape;         // -b  C style escapes for the characters that are not printable, and for blanks and backslashes
 } Options;
 
 /** What a listing carries from one directory to the next. */
@@ -68,11 +78,12 @@ typedef struct {
 } EntryList;
 
 static void print_usage(void) {
-    puts("Usage: ls [OPTION]... [FILE]...\n"
+    puts("Usage: " PROGRAM " [OPTION]... [FILE]...\n"
          "List information about the FILEs (the current directory by default).\n"
          "\n"
          "  -a, --all                  do not ignore entries starting with .\n"
          "  -A, --almost-all           do not list implied . and ..\n"
+         "  -b, --escape               print C-style escapes for nongraphic characters\n"
          "  -C                         list entries by columns\n"
          "  -d, --directory            list directories themselves, not their contents\n"
          "  -F, --classify             append indicator (one of */@) to entries\n"
@@ -316,9 +327,54 @@ static void owner_and_group(const char* path, char* owner, size_t ownerSize, cha
     LocalFree(descriptor);
 }
 
+/** The name as it is shown: with -b a backslash, a blank or a control character is written as an escape. */
+static size_t escaped_name(const Options* opts, const char* name, char* out, size_t size) {
+    size_t used = 0;
+
+    if (!opts->escape) {
+        used = strlen(name);
+        if (out != NULL && size > 0) {
+            snprintf(out, size, "%s", name);
+        }
+        return used;
+    }
+    for (; *name != '\0'; name++) {
+        unsigned char c = (unsigned char)*name;
+        char piece[8];
+        size_t n;
+
+        switch (c) {
+        case '\\': strcpy(piece, "\\\\"); break;
+        case ' ': strcpy(piece, "\\ "); break;
+        case '\a': strcpy(piece, "\\a"); break;
+        case '\b': strcpy(piece, "\\b"); break;
+        case '\f': strcpy(piece, "\\f"); break;
+        case '\n': strcpy(piece, "\\n"); break;
+        case '\r': strcpy(piece, "\\r"); break;
+        case '\t': strcpy(piece, "\\t"); break;
+        case '\v': strcpy(piece, "\\v"); break;
+        default:
+            if (c < 32 || c == 127)
+                snprintf(piece, sizeof piece, "\\%03o", c);
+            else
+                snprintf(piece, sizeof piece, "%c", c);
+        }
+        n = strlen(piece);
+        if (out != NULL && used + n < size)
+            memcpy(out + used, piece, n);
+        used += n;
+    }
+    if (out != NULL && used < size)
+        out[used] = '\0';
+    return used;
+}
+
 static void print_name(const Options* opts, const Entry* e) {
     char mark = indicator(opts, e);
-    fputs(e->name, stdout);
+    char shown[MAX_PATH * 4];
+
+    escaped_name(opts, e->name, shown, sizeof shown);
+    fputs(shown, stdout);
     if (mark != '\0')
         putchar(mark);
 }
@@ -394,7 +450,20 @@ static int stdout_is_console(void) {
 }
 
 static size_t shown_length(const Options* opts, const Entry* e) {
-    return strlen(e->name) + (indicator(opts, e) != '\0' ? 1 : 0);
+    return escaped_name(opts, e->name, NULL, 0) + (indicator(opts, e) != '\0' ? 1 : 0);
+}
+
+/** Moves from column from to column to the way ls does it: tabs (of 8) where they fit, blanks for the rest. */
+static void indent(size_t from, size_t to) {
+    while (from < to) {
+        if (to / 8 > (from + 1) / 8) {
+            putchar('\t');
+            from += 8 - from % 8;
+        } else {
+            putchar(' ');
+            from++;
+        }
+    }
 }
 
 /** Lists the entries by columns, filled top to bottom, as ls does on a terminal. */
@@ -429,6 +498,8 @@ static void print_columns(const Options* opts, const EntryList* list, int width)
     rows = (n + columns - 1) / columns;
 
     for (row = 0; row < rows; row++) {
+        size_t position = 0;
+
         for (col = 0; col < columns; col++) {
             size_t index = col * rows + row;
             size_t length;
@@ -436,8 +507,10 @@ static void print_columns(const Options* opts, const EntryList* list, int width)
                 break;
             print_name(opts, &list->items[index]);
             length = shown_length(opts, &list->items[index]);
-            if (col + 1 < columns && (col + 1) * rows + row < n)
-                printf("%*s", (int)(widths[col] - length + 2), "");
+            if (col + 1 < columns && (col + 1) * rows + row < n) {
+                indent(position + length, position + widths[col] + 2);
+                position += widths[col] + 2;
+            }
         }
         putchar('\n');
     }
@@ -627,6 +700,7 @@ enum { OPT_COLOR = 256 };
 static const ArgsOption optionList[] = {
     { 'a', 'a', "all",            ARGS_NONE },
     { 'A', 'A', "almost-all",     ARGS_NONE },
+    { 'b', 'b', "escape",         ARGS_NONE },
     { 'C', 'C', NULL,             ARGS_NONE },
     { 'd', 'd', "directory",      ARGS_NONE },
     { 'F', 'F', "classify",       ARGS_NONE },
@@ -651,6 +725,7 @@ static int on_option(int id, const char* value, void* context) {
     (void)value;
     switch (id) {
         case 'a': opts->all = 1; break;
+        case 'b': opts->escape = 1; break;
         case 'A': opts->almostAll = 1; break;
         case 'C': opts->forceColumns = 1; opts->oneColumn = 0; opts->longFormat = 0; break;
         case 'd': opts->directory = 1; break;
@@ -679,15 +754,17 @@ int main(int argc, char* argv[]) {
     Listing listing;
 
     memset(&options, 0, sizeof options);
+    options.escape = LS_DEFAULT_ESCAPE;
+    options.forceColumns = LS_DEFAULT_FORMAT == 1;
+    options.longFormat = LS_DEFAULT_FORMAT == 2;
     listing.opts = opts;
     listing.firstBlock = 1;
     listing.exitStatus = 0;
 
+    _setmode(_fileno(stdout), _O_BINARY);
     result = args_parse(&spec, argc, argv, on_option, &options, &operands, &operandCount);
     if (result != ARGS_OK)
         return ARGS_STATUS(spec, result);
-
-    _setmode(_fileno(stdout), _O_BINARY);
 
     if (operandCount == 0)
         operands[operandCount++] = ".";

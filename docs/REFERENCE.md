@@ -27,7 +27,9 @@
 | `xargs` | 완료 (`-0 -a -d -E -e -I -i -L -l -n -P -p -r -s -t -x --show-limits`; 따옴표와 역슬래시 해석, 줄 끝 공백으로 이어지는 줄, 명령줄 길이 제한 30000자, `-P` 병렬 실행; 종료 상태 0/123/124/126/127/1) |
 | `grep` | 완료 (`-E -F -G -e -f -i -v -w -x -c -l -L -m -n -H -h -o -q -s -b -r -A -B -C -NUM -a -I -z -Z --include --exclude --exclude-dir`; 기본/확장 정규식(역참조 포함), 가장 왼쪽의 가장 긴 일치, UTF-8 문자 단위; `-P` 와 색은 미지원) |
 | `head` | 완료 (`-n -c -q -v -NUM`, `-n -K` 는 끝의 K줄만 빼고) |
-| `ls` | 완료 (`-a -A -C -d -F -h -l -p -r -R -S -t -U -1`, `/` 는 드라이브 목록) |
+| `ls` | 완료 (`-a -A -b -C -d -F -h -l -p -r -R -S -t -U -1`, `/` 는 드라이브 목록; `-b`는 공백·역슬래시·제어 문자를 이스케이프로 씀) |
+| `dir` | 완료 (`ls -C -b`와 같음: 콘솔이 아니어도 열로 나열하고 이름의 공백과 역슬래시를 이스케이프; `ls`와 같은 소스) |
+| `vdir` | 완료 (`ls -l -b`와 같음: 긴 형식; `ls`와 같은 소스) |
 | `kill` | 완료 (`-s -n -SIGNAL -l -L`; Windows 에는 시그널이 없어 0 은 확인만, STOP/TSTP/CONT 는 중지/재개, KILL 은 즉시 종료(상태 137), CHLD/URG/WINCH 는 무시, 나머지는 창에 WM_CLOSE 를 보내고 창이 없으면 종료(상태 128+번호); 프로세스 그룹은 지원하지 않음) |
 | `mkdir` | 완료 (`-p -v -m`; `-m` 은 받기만 함) |
 | `mv` | 완료 (`-f -i -n -t -v`, 다른 드라이브로는 복사 후 삭제) |
@@ -266,7 +268,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pr`, `printenv`, `printf`, `ps`, `ptx`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dir`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pr`, `printenv`, `printf`, `ps`, `ptx`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `users`, `vdir`, `wc`, `which`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -288,6 +290,8 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `basic_test` | `echo`, `arch`, `pwd` |
 | `cat_test` | `cat`: 바이트 보존, 옵션, CRLF |
 | `ls_test` | `ls`: 정렬, 숨김, 긴 형식, 가상 루트 |
+| `dir_test` | `dir`: 열 출력, 이스케이프, 옵션, 오류; `ls -b` |
+| `vdir_test` | `vdir`: 긴 형식, 이스케이프, 옵션 |
 | `fileops_test` | `rm`, `cp`, `mv`: 파일과 트리, 읽기 전용, 루트 보호 |
 | `dirs_test` | `mkdir`, `rmdir`, `touch` |
 | `text_test` | `head`, `tail`, `wc` |
@@ -494,6 +498,8 @@ Winshell/
 ├─ chgrp/        chgrp 명령
 ├─ pr/           pr 명령
 ├─ ptx/          ptx 명령
+├─ dir/          dir 명령
+├─ vdir/         vdir 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)
