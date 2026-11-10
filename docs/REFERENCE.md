@@ -113,6 +113,9 @@
 | `chown` | 완료 (`-c -f -v -h -R -H -L -P --from --reference --preserve-root`, `OWNER[:GROUP]`; Windows의 파일은 모두 현재 사용자 소유로 보이므로(stat과 같음) 그 사용자를 쓰면 "retained", 다른 사용자는 "Operation not permitted"로 거절) |
 | `fmt` | 완료 (`-c -p -s -t -u -w -g`, 옛 형식 `-WIDTH`; GNU와 같은 비용 계산으로 줄을 나눔(문장 끝, 짧은 마지막 낱말, 괄호 등), 5000자/1000낱말이 넘는 문단의 분할까지 같음; 탭은 GNU처럼 들여쓰기에 씀; CR LF는 줄 끝으로 받음) |
 | `pr` | 완료 (`+FIRST[:LAST]`/`--pages`, `-COLUMN`, `-a -c -d -D -e -f -F -h -i -J -l -m -n -N -o -r -s -S -t -T -v -w -W`; 쪽마다 5줄 머리글(날짜, 파일 이름 또는 `-h`, `Page N`)·56줄 본문·5줄 꼬리글, 열은 GNU처럼 탭으로 맞춤, 폼 피드는 쪽 나눔; 입력은 통째로 읽음(끝나지 않는 표준 입력은 처리하지 못함); `-D`는 `%e %k %l %P %s %F %T %R %D %h %n %t %z` 등을 포함한 strftime; CR은 폭 0인 문자로 GNU와 같이 그대로 통과; 알려진 차이: 아래로 채우는 열에서 `-s`와 `-n`을 함께 쓸 때, 그리고 번호가 붙은 좁은 열 안의 탭은 GNU와 위치가 다를 수 있음) |
+| `mkfifo` | 완료 (`-m -Z --context`; **Windows 파일 시스템에는 FIFO가 없어서 파일을 만들지는 못함**: 옵션·이름·모드 검사는 GNU와 같고, 이름마다 `File exists`, `No such file or directory`, 그 밖에는 `Operation not supported`로 끝나며 종료 상태 1) |
+| `mknod` | 완료 (`-m -Z --context`, 종류 `b c u p`; **장치 파일과 FIFO는 만들지 못함**: TYPE과 MAJOR/MINOR의 개수·형식 검사, `invalid device type`, 오류 메시지는 GNU와 같고 이름은 `File exists`/`No such file or directory`/`Operation not supported`로 끝남) |
+| `stdbuf` | 완료 (`-i -o -e`; **다른 프로그램의 버퍼링은 바꿀 수 없어서 명령을 그대로 실행**함: MODE(`L`, `0`, `10K`, `1MiB`, `5MB` …) 검사와 `line buffering stdin is meaningless`, 오류 상태 125, 명령을 못 찾으면 127은 GNU와 같음; 경고 없이 조용히 실행) |
 | `ptx` | 완료 (`-A -G -F -M -O -R -S -T -W -b -f -g -i -o -r -t -w`, `--format=roff|tex`; 모든 낱말이 키워드이고 한 줄에 키워드와 앞뒤 문맥이 나옴; 필드(tail, before, keyword+after, head)에 안 들어가는 문맥은 `/` 표시와 함께 반대쪽으로 옮겨 감, GNU의 필드 계산(`maximum_word_length` 창, 공백 건너뛰기 등)과 같음; 기본은 문장 끝(`. ` 뒤 공백 두 칸이나 줄 끝)으로 문맥을 나누고, `-G`/`-r`은 줄 단위; 사용자 정규식은 Emacs 문법(`+ ? *`은 연산자); 알려진 차이: 여러 파일에서 같은 키워드가 나올 때의 순서(GNU는 버퍼 주소로 정함)와 `-b` 파일로 낱말이 아주 길어지는 경우) |
 
 구현 예정 목록은 [README의 로드맵](../README.md#로드맵)을 참고하세요.
@@ -271,7 +274,7 @@ nmake clean    :: 빌드 결과물(bin\, obj\)을 삭제합니다
 
 ### 빌드 구조
 
-- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dir`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pinky`, `pr`, `printenv`, `printf`, `ps`, `ptx`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `uptime`, `users`, `vdir`, `wc`, `which`, `who`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
+- 최상위 `Makefile`은 `bin\` 디렉터리를 만든 뒤, 각 서브 프로젝트(`shell`, `arch`, `b2sum`, `base32`, `base64`, `basename`, `cat`, `chgrp`, `chmod`, `chown`, `cksum`, `comm`, `cp`, `csplit`, `cut`, `date`, `dd`, `df`, `diff`, `dir`, `dircolors`, `dirname`, `du`, `echo`, `env`, `expand`, `expr`, `factor`, `false`, `find`, `fmt`, `fold`, `grep`, `groups`, `head`, `hostid`, `hostname`, `id`, `install`, `join`, `kill`, `link`, `ln`, `logname`, `ls`, `md5sum`, `mkdir`, `mkfifo`, `mknod`, `mktemp`, `mv`, `nice`, `nl`, `nohup`, `nproc`, `numfmt`, `od`, `paste`, `pathchk`, `pinky`, `pr`, `printenv`, `printf`, `ps`, `ptx`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sha1sum`, `sha224sum`, `sha256sum`, `sha384sum`, `sha512sum`, `shred`, `shuf`, `sleep`, `sort`, `split`, `stat`, `stdbuf`, `sum`, `sync`, `tac`, `tail`, `tee`, `test_cmd`, `touch`, `tr`, `true`, `truncate`, `tsort`, `tty`, `uname`, `unexpand`, `uniq`, `unlink`, `uptime`, `users`, `vdir`, `wc`, `which`, `who`, `whoami`, `xargs`, `yes`)의 `Makefile`을 호출합니다.
 - 각 서브 프로젝트의 `Makefile`은 자기 디렉터리의 소스를 빌드하여 `bin\<이름>.exe`를 만듭니다.
 - `shell.exe`는 기본적으로 `bin\` 에 있는 실행 파일만을 사용합니다.
 
@@ -507,6 +510,9 @@ Winshell/
 ├─ pinky/        pinky 명령
 ├─ uptime/       uptime 명령
 ├─ who/          who 명령
+├─ mkfifo/       mkfifo 명령
+├─ mknod/        mknod 명령
+├─ stdbuf/       stdbuf 명령
 ├─ common/         여러 명령이 함께 쓰는 코드 (vpath: 가상 경로 변환, fsutil: 복사/삭제, textutil: 텍스트 입력과 줄 나누기, args: 옵션 파서, regex: 정규식, vec: 자라는 배열)
 ├─ test/           테스트 (nmake test)
 └─ bin/            빌드 결과물 (git 추적 제외)

@@ -118,13 +118,10 @@ Winshell은 활발히 개발 중입니다.
 
 - **쉘**: Ctrl+Z 로 작업 멈추기, `trap` 의 다른 신호
 - **호환성**: Windows XP까지 동작하는 것이 목표입니다(아직 검증 전). UTF-8 동작은 Windows 10 1903 이상에서 적용됩니다.
-- **coreutils**
+- **coreutils**: 대상에서 제외한 명령을 빼고 모두 구현했습니다. Windows에 대응하는 개념이 없는 `mkfifo`, `mknod`, `stdbuf`는 옵션과 오류를 GNU처럼 검사하되 실제 동작은 하지 못합니다(문서 참고).
 
 <details>
-<summary>구현 예정 명령 펼치기</summary>
-
-mkfifo,
-mknod, stdbuf
+<summary>대상에서 제외한 명령 펼치기</summary>
 
 대상 제외(Windows에서 의미가 없거나 대응 개념이 없음): chcon, chroot, runcon, stty, coreutils(멀티콜 바이너리)
 

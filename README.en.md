@@ -124,13 +124,10 @@ Winshell is under active development.
 
 - **Shell**: stopping a job with Ctrl+Z, more signals for `trap`
 - **Compatibility**: the goal is to run as far back as Windows XP (not verified yet). UTF-8 behaviour needs Windows 10 version 1903 or later.
-- **coreutils**
+- **coreutils**: all the commands are done except the ones that are out of scope. `mkfifo`, `mknod` and `stdbuf` have no counterpart on Windows: they check their options and operands as GNU does but cannot do what they are for (see the reference).
 
 <details>
-<summary>Show the planned commands</summary>
-
-mkfifo,
-mknod, stdbuf
+<summary>Show the commands that are out of scope</summary>
 
 Out of scope (meaningless or no counterpart on Windows): chcon, chroot, runcon, stty, coreutils (the multi-call binary)
 
