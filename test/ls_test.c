@@ -120,8 +120,8 @@ static void test_ls(void) {
     CHECK_INT(r.exitCode, 2);
     run_result_free(&r);
 
-    run_command("ls", "-x", NULL, &r);
-    CHECK(strstr(r.err, "invalid option -- 'x'") != NULL);
+    run_command("ls", "-Y", NULL, &r);
+    CHECK(strstr(r.err, "invalid option -- 'Y'") != NULL);
     CHECK_INT(r.exitCode, 2);
     run_result_free(&r);
 

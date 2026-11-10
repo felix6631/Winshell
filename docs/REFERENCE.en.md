@@ -27,7 +27,7 @@ The options of every command, the shell language, building and testing, and the 
 | `xargs` | Done (`-0 -a -d -E -e -I -i -L -l -n -P -p -r -s -t -x --show-limits`; quotes and backslashes, lines continued by a trailing blank, a command line limit of 30000 characters, parallel runs with `-P`; exit status 0/123/124/126/127/1) |
 | `grep` | Done (`-E -F -G -e -f -i -v -w -x -c -l -L -m -n -H -h -o -q -s -b -r -A -B -C -NUM -a -I -z -Z --include --exclude --exclude-dir`; basic and extended expressions (with back references), leftmost-longest matches, UTF-8 characters; `-P` and colours are not supported) |
 | `head` | Done (`-n -c -q -v -NUM`, `-n -K` leaves out the last K lines) |
-| `ls` | Done (`-a -A -b -C -d -F -h -l -p -r -R -S -t -U -1`, `/` lists the drives; `-b` writes blanks, backslashes and control characters as escapes) |
+| `ls` | Done (`-a -A -b -B -c -C -d -f -F -g -G -h -H -i -I -k -l -L -m -n -N -o -p -q -Q -r -R -s -S -t -T -u -U -v -w -x -X -Z -1`, `--author --block-size --color --file-type --format --full-time --group-directories-first --hide --indicator-style --quoting-style --si --sort --time --time-style`; `/` lists the drives. Windows: link count, inode and allocated size are the real ones, `-n` shows the RID of the SID, sorting ignores case, `-Z` is always `?`, `-D` is ignored) |
 | `dir` | Done (as `ls -C -b`: columns also when the output is not a console, blanks and backslashes in names written as escapes; the same source as `ls`) |
 | `vdir` | Done (as `ls -l -b`: the long format; the same source as `ls`) |
 | `mkdir` | Done (`-p -v -m`; `-m` is accepted and ignored) |
@@ -313,7 +313,7 @@ The test programs are divided by feature (`test\`).
 | `args_test` | unit tests of `common/args.c`, the option parser of the tools: grouping, values, abbreviations, number options, errors |
 | `basic_test` | `echo`, `arch`, `pwd` |
 | `cat_test` | `cat`: bytes kept, options, CR LF |
-| `ls_test` | `ls`: sorting, hidden names, the long format, the virtual root |
+| `ls_test` | `ls`: sorting, hidden names, the long format, the virtual root, quoting, colours and the options |
 | `dir_test` | `dir`: column output, escapes, options, errors; `ls -b` |
 | `vdir_test` | `vdir`: the long format, escapes, options |
 | `fileops_test` | `rm`, `cp`, `mv`: files and trees, read-only files, the protection of roots |

@@ -27,7 +27,7 @@
 | `xargs` | 완료 (`-0 -a -d -E -e -I -i -L -l -n -P -p -r -s -t -x --show-limits`; 따옴표와 역슬래시 해석, 줄 끝 공백으로 이어지는 줄, 명령줄 길이 제한 30000자, `-P` 병렬 실행; 종료 상태 0/123/124/126/127/1) |
 | `grep` | 완료 (`-E -F -G -e -f -i -v -w -x -c -l -L -m -n -H -h -o -q -s -b -r -A -B -C -NUM -a -I -z -Z --include --exclude --exclude-dir`; 기본/확장 정규식(역참조 포함), 가장 왼쪽의 가장 긴 일치, UTF-8 문자 단위; `-P` 와 색은 미지원) |
 | `head` | 완료 (`-n -c -q -v -NUM`, `-n -K` 는 끝의 K줄만 빼고) |
-| `ls` | 완료 (`-a -A -b -C -d -F -h -l -p -r -R -S -t -U -1`, `/` 는 드라이브 목록; `-b`는 공백·역슬래시·제어 문자를 이스케이프로 씀) |
+| `ls` | 완료 (`-a -A -b -B -c -C -d -f -F -g -G -h -H -i -I -k -l -L -m -n -N -o -p -q -Q -r -R -s -S -t -T -u -U -v -w -x -X -Z -1`, `--author --block-size --color --file-type --format --full-time --group-directories-first --hide --indicator-style --quoting-style --si --sort --time --time-style`; `/` 는 드라이브 목록. Windows 대응: 링크 수·inode·할당 크기는 실제 값, 소유자 `-n`은 SID의 RID, 정렬은 대소문자 무시, `-Z`는 항상 `?`, `-D`는 무시) |
 | `dir` | 완료 (`ls -C -b`와 같음: 콘솔이 아니어도 열로 나열하고 이름의 공백과 역슬래시를 이스케이프; `ls`와 같은 소스) |
 | `vdir` | 완료 (`ls -l -b`와 같음: 긴 형식; `ls`와 같은 소스) |
 | `kill` | 완료 (`-s -n -SIGNAL -l -L`; Windows 에는 시그널이 없어 0 은 확인만, STOP/TSTP/CONT 는 중지/재개, KILL 은 즉시 종료(상태 137), CHLD/URG/WINCH 는 무시, 나머지는 창에 WM_CLOSE 를 보내고 창이 없으면 종료(상태 128+번호); 프로세스 그룹은 지원하지 않음) |
@@ -295,7 +295,7 @@ nmake gnu       :: GNU 도구와 출력 바이트를 대조합니다 (bash 와 G
 | `args_test` | `common/args.c` 단위 테스트: 도구의 옵션 파서(묶음, 값, 줄임말, 숫자 옵션, 오류) |
 | `basic_test` | `echo`, `arch`, `pwd` |
 | `cat_test` | `cat`: 바이트 보존, 옵션, CRLF |
-| `ls_test` | `ls`: 정렬, 숨김, 긴 형식, 가상 루트 |
+| `ls_test` | `ls`: 정렬, 숨김, 긴 형식, 가상 루트, 인용·색·옵션 전반 |
 | `dir_test` | `dir`: 열 출력, 이스케이프, 옵션, 오류; `ls -b` |
 | `vdir_test` | `vdir`: 긴 형식, 이스케이프, 옵션 |
 | `fileops_test` | `rm`, `cp`, `mv`: 파일과 트리, 읽기 전용, 루트 보호 |
