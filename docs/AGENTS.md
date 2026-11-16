@@ -34,10 +34,12 @@ Lists (`;` `&&` `||` `!`), pipes (every stage is a subshell, as in bash), `if` `
 functions (`name()` and `function name`), `$(...)` and backticks, `$((...))` and `(( ))`, `[ ]` and `[[ ]]` (patterns, `=~` with
 `BASH_REMATCH`, file tests), here documents (`<<EOF`, `<<-`, `<<'EOF'`), here-strings, `<(command)`, `$'...'`, brace expansion,
 `${var:-x}` and the other expansions (`# ## % %% / // ^^ ,, : !name`), arrays, `trap` (EXIT, ERR, INT), `set -e -u -o pipefail`,
-`eval`, `source`, `getopts`, `read`, `readonly`, `declare` (`-r -x`), `type`, `command -v`, background jobs (`&`, `wait`, `jobs`).
+`eval`, `exec COMMAND`, `source` (and `return` in it), `getopts`, `read`, `readonly`, `declare` (`-r -x -i -A`), associative arrays,
+`${@:N}`, `"$*"` with IFS, `case` with `;&` and `;;&`, `type`, `command -v`, background jobs (`&`, `wait`, `jobs`).
 
-Not done (yet): associative arrays and `declare -i`, `exec 3>file`, `case ;;&`, `printf %q`, `"$*"` with another IFS, `shopt`
-options, `return` from a sourced file, Ctrl+Z job control, `set -x` output, signals other than INT in `trap`.
+Not done (yet): file descriptors above 2 (`exec 3>file`, `>&3`), `printf %q` (the `printf` program is GNU's, which has no `%q`),
+`shopt` options (accepted, nothing happens), glob order as the C locale has it (`B.txt a.txt`; here case is ignored), Ctrl+Z job
+control, `set -x` output, signals other than INT in `trap`.
 Run `bash test/shell_compare.sh` (needs MSYS bash) to see what still differs from bash on the patterns in `test/shell/cases.txt`.
 
 ## Commands

@@ -55,6 +55,8 @@ int interp_capture_call(int (*run)(void* context), void* context, char** output,
 int interp_read_line(char** line);
 /** Non-zero when the line the last interp_read_line gave ended with the input, with no line end (read then fails). */
 extern int interp_lastLineUnterminated;
+/** Set before interp_run_file for the script of the command line: `return` in it is an error (in a sourced file it ends the file). */
+extern int interp_mainScript;
 void interp_set_line_reader(char* (*reader)(void));
 void interp_input_redirected(int delta);
 

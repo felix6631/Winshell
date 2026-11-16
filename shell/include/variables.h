@@ -52,9 +52,22 @@ void var_array_unset(const char* name, long index);
 /** Calls fn for every element of every array (an empty array once, with index -1 and no value). */
 void var_each_array(void (*fn)(const char* name, long index, const char* value, void* context), void* context);
 
+/** declare -i NAME: what is assigned to the variable is an arithmetic expression. */
+void var_set_integer(const char* name);
+int var_is_integer(const char* name);
+
 /** readonly NAME: the variable can no longer be set or unset (a message and a failure instead). */
 void var_set_readonly(const char* name);
 int var_is_readonly(const char* name);
+
+/**
+ * Associative arrays (declare -A): an array whose subscripts are strings. Underneath it is an indexed array; each key has an
+ * index of its own, which var_assoc_index finds (or makes, with create). var_assoc_key tells the key of an index.
+ */
+int var_declare_assoc(const char* name);
+int var_is_assoc(const char* name);
+int var_assoc_index(const char* name, const char* key, int create, long* index);
+const char* var_assoc_key(const char* name, long index);
 
 /** unset NAME: removes the variable, whichever kind it is. */
 void var_unset(const char* name);

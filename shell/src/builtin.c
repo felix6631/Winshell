@@ -343,7 +343,7 @@ static int builtin_unset(char* const argv[]) {
                 name[bracket - argv[i]] = '\0';
                 memcpy(subscript, bracket + 1, end - 1);
                 subscript[end - 1] = '\0';
-                if (winshell_eval_index(subscript, &index) == 0)
+                if (winshell_subscript_index(name, subscript, 0, &index) == 0)
                     var_array_unset(name, index);
                 else
                     status = 1;
@@ -462,7 +462,7 @@ static int builtin_readonly(char* const argv[]) {
 }
 
 static int builtin_declare(char* const argv[]) {
-    int i, status = 0, readonly = 0, exported = 0, print = 0;
+    int i, status = 0, readonly = 0, exported = 0, print = 0, integer = 0, assoc = 0;
 
     for (i = 1; argv[i] != NULL && argv[i][0] == '-' && argv[i][1] != '\0'; i++) {
         const char* f;
@@ -472,6 +472,10 @@ static int builtin_declare(char* const argv[]) {
                 readonly = 1;
             else if (*f == 'x')
                 exported = 1;
+            else if (*f == 'i')
+                integer = 1;
+            else if (*f == 'A')
+                assoc = 1;
             else if (*f == 'p')
                 print = 1;
         }
@@ -499,6 +503,10 @@ static int builtin_declare(char* const argv[]) {
             }
             continue;
         }
+        if (assoc && var_declare_assoc(name) != 0)
+            status = 1;
+        if (integer)
+            var_set_integer(name);
         if (command_in_function()) {
             if (command_local(name, equals != NULL ? equals + 1 : NULL) != 0)
                 status = 1;
@@ -685,7 +693,7 @@ static int builtin_getopts(char* const argv[]) {
 
 int builtin_exists(const char* name) {
     static const char* const names[] = { "cd", "export", "unset", "exit", "quit", "source", ".", ":", "break",
-                                         "continue", "read", "return", "local", "trap", "jobs", "wait", "shift", "fg", "bg", "disown", "set", "eval", "let", "readonly", "declare", "typeset", "type", "command", "getopts", "shopt" };
+                                         "continue", "read", "return", "local", "trap", "jobs", "wait", "shift", "fg", "bg", "disown", "set", "eval", "let", "readonly", "declare", "typeset", "type", "command", "getopts", "shopt", "exec" };
     size_t i;
 
     for (i = 0; i < sizeof names / sizeof names[0]; i++)
@@ -840,6 +848,47 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
     }
     if (strcmp(name, "getopts") == 0) {
         *status = builtin_getopts(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "exec") == 0) {
+        // exec COMMAND ARG...: the command takes the place of the shell: it runs, and the shell ends with its status
+        char* const* argv = command->argv;
+        size_t i, length = 1;
+        char* text;
+
+        if (argv[1] == NULL) {
+            *status = 0;
+            return 1;
+        }
+        for (i = 1; argv[i] != NULL; i++) {
+            char* quoted = quote_word(argv[i]);
+
+            if (quoted == NULL) {
+                *status = 1;
+                return 1;
+            }
+            length += strlen(quoted) + 1;
+            free(quoted);
+        }
+        text = malloc(length);
+        if (text == NULL) {
+            *status = 1;
+            return 1;
+        }
+        text[0] = 0;
+        for (i = 1; argv[i] != NULL; i++) {
+            char* quoted = quote_word(argv[i]);
+
+            if (i > 1)
+                strcat(text, " ");
+            strcat(text, quoted);
+            free(quoted);
+        }
+        command_bypass_functions(1);
+        *status = interp_run_line(text, exitShell, *status);
+        command_bypass_functions(0);
+        free(text);
+        *exitShell = 1;
         return 1;
     }
     if (strcmp(name, "shopt") == 0) {

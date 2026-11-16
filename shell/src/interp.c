@@ -166,7 +166,7 @@ static int try_array_assignment(const char* text, int* status) {
             return 0;                       // more than an assignment: an ordinary command
         }
         value = pipeline.commands[0].assignments[0] + strlen("__ws_value=");
-        if (subscript != NULL && winshell_eval_index(subscript, &index) != 0) {
+        if (subscript != NULL && winshell_subscript_index(name, subscript, 1, &index) != 0) {
             winshell_freePipeline(&pipeline);
             free(subscript);
             *status = 1;
@@ -430,8 +430,11 @@ static void set_parameter_values(const char* name, const char* const* arguments,
     winshell_positionals_set(arguments, count);     // last: the arguments may be the strings of the old list
 }
 
+int interp_mainScript;
+
 int interp_run_file(const char* path, const char* const* arguments, int argumentCount, int setParameters,
                     int* exitShell, int status) {
+    int mainScript = interp_mainScript;
     char native[VPATH_MAX];
     FILE* file;
     char* text = NULL;
@@ -439,6 +442,7 @@ int interp_run_file(const char* path, const char* const* arguments, int argument
     Parameters saved;
     int got;
 
+    interp_mainScript = 0;
     if (vpath_to_native(path, native, sizeof native) != 0 || (file = fopen(native, "rb")) == NULL) {
         fprintf(stderr, "shell: %s: No such file or directory\n", path);
         return 127;
@@ -475,7 +479,8 @@ int interp_run_file(const char* path, const char* const* arguments, int argument
                 text[to++] = text[from];
         text[to] = '\0';
     }
-    status = command_run_text(text + offset, exitShell, status);
+    // the script of the command line is not sourced: return in it is an error; in a file that source reads it ends the file
+    status = mainScript ? command_run_text(text + offset, exitShell, status) : command_run_script(text + offset, exitShell, status);
 
     if (setParameters)
         restore_parameters(&saved);

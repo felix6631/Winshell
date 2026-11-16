@@ -1,6 +1,7 @@
 #include "variables.h"
 #include "vec.h"
 #include "vpath.h"
+#include "arith.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -483,9 +484,40 @@ static int set_plain(const char* name, const char* value) {
 
 static int export_plain(const char* name, const char* value);
 
+#define INTEGER_MAX 64
+static char* integerNames[INTEGER_MAX];
+static size_t integerCount;
+
+int var_is_integer(const char* name) {
+    size_t i;
+
+    for (i = 0; i < integerCount; i++)
+        if (strcmp(integerNames[i], name) == 0)
+            return 1;
+    return 0;
+}
+
+void var_set_integer(const char* name) {
+    if (!var_is_integer(name) && integerCount < INTEGER_MAX)
+        integerNames[integerCount++] = _strdup(name);
+}
+
 int var_set(const char* name, const char* value) {
     char* converted = _stricmp(name, "PATH") == 0 ? windows_path_list(value) : NULL;
-    int status = set_plain(name, converted != NULL ? converted : value);
+    char number[32];
+    int status;
+
+    if (var_is_integer(name) && !var_is_readonly(name)) {
+        // declare -i: what is assigned is an arithmetic expression (n=n+2)
+        long long result = 0;
+        char error[128];
+
+        if (arith_eval(value, &result, error, sizeof error) != 0)
+            result = 0;
+        snprintf(number, sizeof number, "%lld", result);
+        value = number;
+    }
+    status = set_plain(name, converted != NULL ? converted : value);
 
     free(converted);
     return status;
@@ -537,9 +569,111 @@ void var_each_local(void (*fn)(const char* name, const char* value, void* contex
             fn(entries[i].name, entries[i].value, context);
 }
 
+typedef struct {
+    char*  name;
+    char** keys;
+    long*  indices;
+    size_t count;
+    long   next;
+} Assoc;
+
+static Assoc* assocs;
+static size_t assocCount;
+
+static Assoc* find_assoc(const char* name) {
+    size_t i;
+
+    for (i = 0; i < assocCount; i++)
+        if (strcmp(assocs[i].name, name) == 0)
+            return &assocs[i];
+    return NULL;
+}
+
+int var_is_assoc(const char* name) {
+    return find_assoc(name) != NULL;
+}
+
+int var_declare_assoc(const char* name) {
+    Assoc* grown;
+
+    if (find_assoc(name) != NULL)
+        return 0;
+    if (var_array_assign(name, NULL, 0) != 0)
+        return -1;
+    grown = realloc(assocs, (assocCount + 1) * sizeof *grown);
+    if (grown == NULL)
+        return -1;
+    assocs = grown;
+    memset(&assocs[assocCount], 0, sizeof assocs[assocCount]);
+    assocs[assocCount].name = _strdup(name);
+    assocCount++;
+    return 0;
+}
+
+int var_assoc_index(const char* name, const char* key, int create, long* index) {
+    Assoc* assoc = find_assoc(name);
+    size_t i;
+    char** keys;
+    long* indices;
+
+    if (assoc == NULL)
+        return -1;
+    for (i = 0; i < assoc->count; i++) {
+        if (strcmp(assoc->keys[i], key) == 0) {
+            *index = assoc->indices[i];
+            return 0;
+        }
+    }
+    if (!create) {
+        *index = -2147483647L;              // no element has this index
+        return 0;
+    }
+    keys = realloc(assoc->keys, (assoc->count + 1) * sizeof *keys);
+    if (keys == NULL)
+        return -1;
+    assoc->keys = keys;
+    indices = realloc(assoc->indices, (assoc->count + 1) * sizeof *indices);
+    if (indices == NULL)
+        return -1;
+    assoc->indices = indices;
+    assoc->keys[assoc->count] = _strdup(key);
+    assoc->indices[assoc->count] = assoc->next;
+    *index = assoc->next++;
+    assoc->count++;
+    return 0;
+}
+
+const char* var_assoc_key(const char* name, long index) {
+    Assoc* assoc = find_assoc(name);
+    size_t i;
+
+    if (assoc == NULL)
+        return NULL;
+    for (i = 0; i < assoc->count; i++)
+        if (assoc->indices[i] == index)
+            return assoc->keys[i];
+    return NULL;
+}
+
+static void forget_assoc(const char* name) {
+    Assoc* assoc = find_assoc(name);
+    size_t i;
+
+    if (assoc == NULL)
+        return;
+    for (i = 0; i < assoc->count; i++)
+        free(assoc->keys[i]);
+    free(assoc->keys);
+    free(assoc->indices);
+    free(assoc->name);
+    *assoc = assocs[--assocCount];
+}
+
 void var_unset(const char* name) {
     Entry* entry;
     ArrayVar* array;
+
+    forget_assoc(name);
 
     if (var_is_readonly(name)) {
         fprintf(stderr, "unset: %s: cannot unset: readonly variable\n", name);

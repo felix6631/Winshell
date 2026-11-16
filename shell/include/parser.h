@@ -79,6 +79,8 @@ char* winshell_expand_text(const char* text);
 size_t winshell_subscript_end(const char* text);
 size_t winshell_paren_end(const char* text);
 int winshell_eval_index(const char* text, long* index);
+/** The index of the element NAME[subscript]: arithmetic for an array, the key for an associative one (create makes it). */
+int winshell_subscript_index(const char* name, const char* subscript, int create, long* index);
 
 /** The status last given to winshell_setLastStatus. */
 int winshell_lastStatus(void);

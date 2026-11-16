@@ -286,6 +286,13 @@ static void test_agent_scripts(void) {
     expect_script("a3.sh", "mkdir bin2\ncat > bin2/mytool <<'EOF'\necho mytool\nEOF\nexport PATH=\"$PWD/bin2:$PATH\"\nmytool\necho /?\n", "",
                   "mytool\n/?\n", 0);
     expect_script("a4.sh", "yes | head -2\ncmd /c echo via\n", "", "y\ny\nvia\n", 0);
+    expect_script("m1.sh", "declare -A m; m[a b]=1; m[c]=2; m[c]=3\necho \"${m[a b]} ${m[c]} ${#m[@]}\"\nfor k in \"${!m[@]}\"; do echo \"$k=${m[$k]}\"; done\nunset m[c]; echo \"${m[@]}\"\n", "",
+                  "1 3 2\na b=1\nc=3\n1\n", 0);
+    expect_script("m2.sh", "declare -i n=3; n=n+2; echo $n\nIFS=,; set -- a b c; echo \"$*\"; unset IFS\nf() { echo \"${@:2}\"; echo \"${*:2:1}\"; }; f x y z\n", "",
+                  "5\na,b,c\ny z\ny\n", 0);
+    expect_script("m3.sh", "case a in a) echo 1;;& *) echo 2;; esac\ncase a in a) echo A;& b) echo B;; c) echo C;; esac\n", "",
+                  "1\n2\nA\nB\n", 0);
+    expect_script("m4.sh", "echo 'echo in; return 4; echo no' > r.sh\n. ./r.sh\necho $?\nexec echo replaced\necho not reached\n", "", "in\n4\nreplaced\n", 0);
     expect_script("d5.sh", "f() { while getopts \"ab:\" o; do case $o in a) echo A;; b) echo B=$OPTARG;; esac; done; }\nf -a -b val\nOPTIND=1\nf -ab x\n", "",
                   "A\nB=val\nA\nB=x\n", 0);
 }

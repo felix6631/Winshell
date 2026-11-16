@@ -43,6 +43,7 @@ typedef struct {
     char** patterns;
     size_t patternCount;
     List   body;
+    int    terminator;          // 0 for ;; (done), 1 for ;& (run the next body), 2 for ;;& (test the next patterns)
 } CaseClause;
 
 struct Node {
@@ -165,8 +166,8 @@ static int skip_separators(Parser* p, int afterCommand) {
     for (;;) {
         char c = p->text[p->pos];
 
-        if (c == ';' && p->text[p->pos + 1] == ';')
-            return 0;                   // ;; ends the clause of a case: the caller looks for it
+        if (c == ';' && (p->text[p->pos + 1] == ';' || p->text[p->pos + 1] == '&'))
+            return 0;                   // ;; ;;& and ;& end the clause of a case: the caller looks for it
         if (c == ';') {
             if (!semicolonAllowed)
                 return syntax(p, "Syntax error near unexpected token '%s'", ";");
@@ -380,7 +381,7 @@ static int parse_list(Parser* p, List* list, const char* const* stops) {
             return -1;
         if (p->text[p->pos] == '\0' || is_stop(p, stops))
             return 0;
-        if (p->text[p->pos] == ';' && p->text[p->pos + 1] == ';')
+        if (p->text[p->pos] == ';' && (p->text[p->pos + 1] == ';' || p->text[p->pos + 1] == '&'))
             return 0;                   // the end of a clause of a case
         if (p->text[p->pos] == ')' && p->subshellDepth > 0)
             return 0;
@@ -830,9 +831,15 @@ static int parse_case(Parser* p, Node* node) {
 
         if (parse_list(p, &clause->body, toEsac) != 0)
             return -1;
-        if (p->text[p->pos] == ';' && p->text[p->pos + 1] == ';')
+        if (p->text[p->pos] == ';' && p->text[p->pos + 1] == ';' && p->text[p->pos + 2] == '&') {
+            clause->terminator = 2;
+            p->pos += 3;
+        } else if (p->text[p->pos] == ';' && p->text[p->pos + 1] == ';') {
             p->pos += 2;
-        else if (!at_word(p, "esac")) {
+        } else if (p->text[p->pos] == ';' && p->text[p->pos + 1] == '&') {
+            clause->terminator = 1;
+            p->pos += 2;
+        } else if (!at_word(p, "esac")) {
             if (p->text[p->pos] == '\0')
                 return incomplete(p, "Syntax error: unexpected end of input (expected 'esac')");
             return syntax(p, "Syntax error: expected ';;' or 'esac'%s", NULL);
@@ -1555,8 +1562,10 @@ int command_unset_function(const char* name) {
     return 0;
 }
 
+static int sourceDepth;                 // files being run (a script, source): return may end them
+
 int command_return(int status) {
-    if (callDepth == 0) {
+    if (callDepth == 0 && sourceDepth == 0) {
         fprintf(stderr, "return: can only `return' from a function\n");
         return 1;
     }
@@ -1704,7 +1713,7 @@ static int run_case(Runner* r, const Node* node, int status) {
     char* pattern = NULL;
     char* word = expand_case_word(node->text, &pattern);
     size_t i, k;
-    int result = 0;
+    int result = 0, forced = 0;
 
     free(pattern);
     if (word == NULL)
@@ -1722,9 +1731,12 @@ static int run_case(Runner* r, const Node* node, int status) {
             free(text);
             free(literal);
         }
-        if (matched) {
+        if (matched || forced) {
             result = run_list(r, &clause->body, status);
-            break;
+            forced = 0;
+            if (clause->terminator == 0 || *r->exitShell || pendingLevels > 0)
+                break;
+            forced = clause->terminator == 1;       // ;& runs the next body as it is, ;;& goes on testing
         }
     }
     free(word);
@@ -3045,6 +3057,8 @@ static int run_text_plain(const char* text, int* exitShell, int status) {
         pendingLevels = 0;
         status = run_list(&runner, &list, status);
         free_list(&list);
+        if (pendingReturn && callDepth == 0)
+            break;                      // return in a file that is being sourced: the rest of it is not run
     }
     if (!*exitShell)
         InterlockedExchange(&interruptRequested, 0);
@@ -3083,6 +3097,20 @@ static char* strip_continuations(const char* text) {
         return NULL;
     }
     return out;
+}
+
+int command_run_script(const char* text, int* exitShell, int status) {
+    int result;
+
+    sourceDepth++;
+    result = command_run_text(text, exitShell, status);
+    sourceDepth--;
+    if (pendingReturn && callDepth == 0) {
+        result = returnStatus;
+        pendingReturn = 0;
+        pendingLevels = 0;
+    }
+    return result;
 }
 
 int command_run_text(const char* text, int* exitShell, int status) {

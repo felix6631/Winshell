@@ -382,6 +382,7 @@ int main(int argc, char* argv[]) {
         status = interp_run_line(operands[0], &exitShell, 0);
     } else if (operandCount >= 1 && !o.stdinMode) {
         // shell FILE [ARGUMENT]...
+        interp_mainScript = 1;
         status = interp_run_file(operands[0], (const char* const*)operands + 1, operandCount - 1, 1, &exitShell, 0);
     } else {
         DWORD consoleMode;

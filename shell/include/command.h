@@ -28,6 +28,9 @@ int command_run_text(const char* text, int* exitShell, int status);
 /** Whether text can be run as it is: 0 complete (or a syntax error, which waiting would not cure), 1 when more input is needed. */
 int command_incomplete(const char* text);
 
+/** command_run_text for the text of a file (a script, source): `return` ends the file, with its status. */
+int command_run_script(const char* text, int* exitShell, int status);
+
 /**
  * break [N] and continue [N] (builtins): leave N enclosing loops, or go to the next round of the Nth.
  * Returns 0, or 1 after a message when no loop is running.

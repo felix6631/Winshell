@@ -220,6 +220,34 @@ static const char* variable_value(const char* name, char* scratch, size_t size) 
         return scratch;
     }
 
+    if (name[0] == '*' && name[1] == '\0') {
+        // "$*": the parameters joined with the first character of IFS (a blank when IFS is not set, nothing when it is empty)
+        static char* joined;
+        static size_t joinedCapacity;
+        const char* ifs = var_get("IFS");
+        char separator = ifs == NULL ? ' ' : ifs[0];
+        size_t length = 1;
+        int i;
+
+        for (i = 0; i < positionalCount; i++)
+            length += strlen(positionals[i]) + 1;
+        if (length > joinedCapacity) {
+            char* grown = realloc(joined, length);
+
+            if (grown == NULL)
+                return NULL;
+            joined = grown;
+            joinedCapacity = length;
+        }
+        joined[0] = '\0';
+        for (i = 0; i < positionalCount; i++) {
+            if (i > 0 && separator != '\0')
+                strncat(joined, &separator, 1);
+            strcat(joined, positionals[i]);
+        }
+        return joined;
+    }
+
     value = var_get(name);
     if (value != NULL)
         return value;
@@ -1303,6 +1331,20 @@ char* winshell_expand_text(const char* text) {
     return expand_text(text, &nomem);
 }
 
+int winshell_subscript_index(const char* name, const char* subscript, int create, long* index) {
+    char* key;
+    int status;
+
+    if (!var_is_assoc(name))
+        return winshell_eval_index(subscript, index);
+    key = winshell_expand_text(subscript);
+    if (key == NULL)
+        return -1;
+    status = var_assoc_index(name, key, create, index);
+    free(key);
+    return status;
+}
+
 int winshell_eval_index(const char* text, long* index) {
     char* expanded = winshell_expand_text(text);
     long long value;
@@ -1488,8 +1530,10 @@ static int lex_array_special(Lexer* L, const char* body, size_t length) {
                 L->error = LEX_NOMEM;
             } else {
                 for (i = 0; i < count; i++) {
+                    const char* key = var_assoc_key(name, indices[i]);
+
                     snprintf(number, sizeof number, "%ld", indices[i]);
-                    texts[i] = _strdup(number);
+                    texts[i] = _strdup(key != NULL ? key : number);
                 }
                 lexer_words(L, (const char* const*)texts, count, p[nameLength + 1] == '@');
                 for (i = 0; i < count; i++)
@@ -1513,7 +1557,7 @@ static int lex_array_special(Lexer* L, const char* body, size_t length) {
         }
         memcpy(subscript, p + nameLength + 1, end - 1);
         subscript[end - 1] = '\0';
-        if (winshell_eval_index(subscript, &index) != 0) {
+        if (winshell_subscript_index(name, subscript, 0, &index) != 0) {
             free(subscript);
             L->error = LEX_SYNTAX;
             return 1;
@@ -1661,7 +1705,7 @@ static int lex_braced(Lexer* L) {
             }
             memcpy(subscript, rest + 1, end - 1);
             subscript[end - 1] = '\0';
-            if (winshell_eval_index(subscript, &index) != 0) {
+            if (winshell_subscript_index(name, subscript, 0, &index) != 0) {
                 free(subscript);
                 L->error = LEX_SYNTAX;
                 return 1;
@@ -1757,6 +1801,30 @@ static int lex_braced(Lexer* L) {
             free(expanded);
         }
         free(text);
+        if ((name[0] == '@' || name[0] == '*') && name[1] == '\0') {
+            // ${@:N} ${@:N:M} ${*:N}: some of the parameters (N counts from 1; a negative N from the end)
+            long n = winshell_positional_count(), first = offset, last;
+            const char** slice;
+            long k, used = 0;
+
+            if (first < 0)
+                first += n + 1;
+            if (first < 1)
+                first = 1;
+            last = !hasCount ? n : (count < 0 ? n + count : first + count - 1);
+            if (last > n)
+                last = n;
+            slice = calloc((size_t)(n > 0 ? n : 1) + 1, sizeof *slice);
+            if (slice == NULL) {
+                L->error = LEX_NOMEM;
+                return 1;
+            }
+            for (k = first; k <= last; k++)
+                slice[used++] = winshell_positional((int)k);
+            lexer_words(L, slice, (size_t)used, name[0] == '@');
+            free(slice);
+            return 1;
+        }
         if (offset < 0)
             offset += (long)length;
         if (offset < 0 || (size_t)offset > length) {
