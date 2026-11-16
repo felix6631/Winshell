@@ -87,6 +87,24 @@ static void test_scripts(void) {
     run_shell("--bogus", "", &r);
     CHECK_INT(r.exitCode, 2);
     run_result_free(&r);
+
+    // the options as bash reads them, standard input as a script without a prompt, programs found in PATH
+    expect_c("-lc \"echo login\"", "login\n", 0);
+    expect_c("-ec \"echo a; false; echo b\"", "a\n", 1);
+    expect_c("-euo pipefail -c \"false | true; echo no\"", "", 1);
+    expect_c("--login --noprofile -c \"echo ok\"", "ok\n", 0);
+    expect_c("-- -c", "", 127);
+    run_shell("-s a b", "echo \"$1 $2\"\n", &r);
+    CHECK_STR(r.out, "a b\n");
+    run_result_free(&r);
+    run_shell("", "echo one\nexit 4\n", &r);
+    CHECK_INT(r.exitCode, 4);
+    CHECK(strchr(r.out, '>') == NULL);                       // no prompt: standard input is not a console
+    run_result_free(&r);
+    expect_c("-c \"cmd /c echo viapath\"", "viapath\n", 0);
+    run_shell("-c", "", &r);
+    CHECK_INT(r.exitCode, 2);
+    run_result_free(&r);
 }
 
 static void test_substitution(void) {

@@ -161,6 +161,11 @@ static void print_usage(void) {
     puts("Usage: shell                         read commands from the terminal or from standard input\n"
          "       shell FILE [ARGUMENT]...      run the commands of FILE; $0 is FILE, $1.. its arguments\n"
          "       shell -c COMMAND [NAME [ARGUMENT]...]   run COMMAND ($0 is NAME)\n"
+         "       shell -s [ARGUMENT]...        read the commands from standard input; the arguments are $1..\n"
+         "\n"
+         "  Options are read as bash reads them and may be written together (-ec, -lc, -euo pipefail):\n"
+         "  -c -s -e -u -o NAME (errexit nounset pipefail), --login --noprofile --norc --posix and -- are\n"
+         "  accepted; -l -i -x -v -f -h -m -B -H and the other letters are accepted and do nothing.\n"
          "\n"
          "  --help      display this help and exit\n"
          "  --version   output version information and exit\n"
@@ -174,13 +179,17 @@ static int interactive_loop(void) {
     int status = 0, exitShell = 0;
     DWORD mode;
 
-    jobs_set_interactive(GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode));
+    int prompting = GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) != 0;
+
+    jobs_set_interactive(prompting);
     while (!exitShell) {
         char* input;
 
         jobs_report_finished();
-        printf(" > ");
-        fflush(stdout);
+        if (prompting) {
+            printf(" > ");
+            fflush(stdout);
+        }
 
         InterlockedExchange(&interrupted, 0);
         input = read_line();
@@ -205,7 +214,7 @@ static int interactive_loop(void) {
             char* more;
             char* joined;
 
-            if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode)) {
+            if (prompting) {
                 printf("> ");
                 fflush(stdout);
             }
@@ -230,40 +239,158 @@ static int interactive_loop(void) {
     return status;
 }
 
+/** What the command line asked for. */
+typedef struct {
+    int         commandMode;        // -c: the first operand is the commands
+    int         stdinMode;          // -s: the commands come from standard input, the operands are the parameters
+    int         errexit;            // -e
+    int         nounset;            // -u
+    int         pipefail;           // -o pipefail
+    int         bad;                // a message was printed
+    int         version, help;
+    int         first;              // the index of the first operand
+} Options;
+
+static void set_option_word(const char* word, int on, Options* o) {
+    if (strcmp(word, "errexit") == 0)
+        o->errexit = on;
+    else if (strcmp(word, "nounset") == 0)
+        o->nounset = on;
+    else if (strcmp(word, "pipefail") == 0)
+        o->pipefail = on;
+    // the other options of bash (xtrace, posix, noclobber, ...) are accepted and do nothing
+}
+
+/**
+ * The options in front of the operands, as bash reads them: single letters that can be written together (-ec, -lc,
+ * -euo pipefail), -o NAME, --login --noprofile --norc --posix --help --version, and -- to end them.
+ */
+static void parse_options(int argc, char* argv[], Options* o) {
+    int i;
+
+    memset(o, 0, sizeof *o);
+    for (i = 1; i < argc; i++) {
+        const char* a = argv[i];
+        int on;
+
+        if (strcmp(a, "--") == 0) {
+            i++;
+            break;
+        }
+        if (strcmp(a, "-") == 0)
+            break;
+        if (a[0] != '-' && a[0] != '+')
+            break;
+        if (strcmp(a, "--help") == 0) {
+            o->help = 1;
+            continue;
+        }
+        if (strcmp(a, "--version") == 0) {
+            o->version = 1;
+            continue;
+        }
+        if (strcmp(a, "--login") == 0 || strcmp(a, "--noprofile") == 0 || strcmp(a, "--norc") == 0 || strcmp(a, "--posix") == 0 ||
+            strcmp(a, "--noediting") == 0 || strcmp(a, "--restricted") == 0 || strcmp(a, "--verbose") == 0)
+            continue;
+        if (a[0] == '-' && a[1] == '-') {
+            fprintf(stderr, "shell: %s: invalid option\n", a);
+            o->bad = 1;
+            return;
+        }
+        on = a[0] == '-';
+        for (a++; *a != '\0'; a++) {
+            switch (*a) {
+            case 'c': o->commandMode = on; break;
+            case 's': o->stdinMode = on; break;
+            case 'e': o->errexit = on; break;
+            case 'u': o->nounset = on; break;
+            case 'o':
+                if (i + 1 < argc) {
+                    set_option_word(argv[++i], on, o);
+                } else {
+                    fprintf(stderr, "shell: -o: option requires an argument\n");
+                    o->bad = 1;
+                    return;
+                }
+                break;
+            case 'l': case 'i': case 'x': case 'v': case 'f': case 'h': case 'm': case 'B': case 'H': case 'n': case 'a':
+            case 'b': case 'k': case 'p': case 'r': case 't': case 'C': case 'E': case 'P': case 'T':
+                break;
+            default:
+                fprintf(stderr, "shell: -%c: invalid option\n", *a);
+                o->bad = 1;
+                return;
+            }
+        }
+    }
+    o->first = i;
+}
+
+/** Applies -e, -u and -o pipefail through the builtin, so that the options mean what `set` means. */
+static void apply_options(const Options* o) {
+    char* errexit[] = { "set", "-e", NULL };
+    char* nounset[] = { "set", "-u", NULL };
+    char* pipefail[] = { "set", "-o", "pipefail", NULL };
+
+    if (o->errexit)
+        command_set(errexit);
+    if (o->nounset)
+        command_set(nounset);
+    if (o->pipefail)
+        command_set(pipefail);
+}
+
 int main(int argc, char* argv[]) {
     int status = 0, exitShell = 0;
+    Options o;
+    int operandCount;
+    char** operands;
 
-    if (argc >= 2 && strcmp(argv[1], "--help") == 0) {
+    parse_options(argc, argv, &o);
+    if (o.help) {
         print_usage();
         return 0;
     }
-    if (argc >= 2 && strcmp(argv[1], "--version") == 0) {
+    if (o.version) {
         puts("shell 0.1");
         return 0;
     }
+    if (o.bad)
+        return 2;
+    operands = argv + o.first;
+    operandCount = argc - o.first;
 
     winshell_terminalInit();
     interp_init();
     interp_set_line_reader(read_line);
+    apply_options(&o);
 
-    if (argc >= 3 && strcmp(argv[1], "-c") == 0) {
+    if (o.commandMode) {
         // shell -c COMMAND [NAME [ARGUMENT]...]
-        const char* name = argc >= 4 ? argv[3] : "shell";
-        const char* const* arguments = (const char* const*)(argc >= 5 ? argv + 4 : argv + argc);
-        int count = argc >= 5 ? argc - 4 : 0;
+        const char* name;
+        const char* const* arguments;
+        int count;
+
+        if (operandCount < 1) {
+            fprintf(stderr, "shell: -c: option requires an argument\n");
+            return 2;
+        }
+        name = operandCount >= 2 ? operands[1] : "shell";
+        arguments = (const char* const*)(operandCount >= 3 ? operands + 2 : operands + operandCount);
+        count = operandCount >= 3 ? operandCount - 2 : 0;
         interp_set_parameters(name, arguments, count);
-        status = interp_run_line(argv[2], &exitShell, 0);
-    } else if (argc >= 2 && strcmp(argv[1], "-c") != 0 && argv[1][0] != '-') {
+        status = interp_run_line(operands[0], &exitShell, 0);
+    } else if (operandCount >= 1 && !o.stdinMode) {
         // shell FILE [ARGUMENT]...
-        status = interp_run_file(argv[1], (const char* const*)argv + 2, argc - 2, 1, &exitShell, 0);
-    } else if (argc >= 2) {
-        fprintf(stderr, "shell: %s: invalid option\n", argv[1]);
-        return 2;
+        status = interp_run_file(operands[0], (const char* const*)operands + 1, operandCount - 1, 1, &exitShell, 0);
     } else {
         DWORD consoleMode;
+        int console = GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &consoleMode);
 
+        if (o.stdinMode && operandCount > 0)
+            interp_set_parameters("shell", (const char* const*)operands, operandCount);
         // a shell that reads from a console is a session: who and the others list it (the record goes with the process)
-        if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &consoleMode) || getenv("WINSHELL_TEST_SESSION") != NULL) {
+        if (console || getenv("WINSHELL_TEST_SESSION") != NULL) {
             int number = session_open();
 
             if (number >= 0) {

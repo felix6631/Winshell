@@ -62,7 +62,7 @@ nmake
 bin\shell.exe
 ```
 
-쉘은 자기 옆의 `bin\` 에서만 명령을 찾으므로 `PATH` 를 바꿀 필요가 없고, Windows의 `find`, `sort` 와 섞이지도 않습니다.
+쉘은 자기 옆의 `bin\` 에서 먼저 명령을 찾고(그래서 Windows의 `find`, `sort` 와 섞이지 않습니다), 없으면 `PATH` 에서 찾습니다(`git`, `python`, `npm` 같은 프로그램과 `.cmd`/`.bat` 파일). AI 에이전트가 쓰는 방법은 [에이전트 안내](docs/AGENTS.md)를 보세요.
 
 ```sh
 fact() {
@@ -116,6 +116,7 @@ nmake gnu       :: GNU 도구와 출력 대조 (MSYS2 나 Git for Windows 의 ba
 ## 문서
 
 - [레퍼런스](docs/REFERENCE.md): 명령별 옵션, 쉘 문법, 빌드 구조, 테스트, 디렉터리 구조, 설계 방향
+- [에이전트 안내](docs/AGENTS.md): AI 에이전트가 이 쉘을 쓰는 방법 (영어)
 - [새 명령어 추가하기](docs/REFERENCE.md#새-명령어-추가하기): `nmake new NAME=<이름>` 한 줄로 뼈대, 테스트, GNU 대조 파일이 만들어집니다
 
 ## 로드맵

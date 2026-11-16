@@ -67,7 +67,7 @@ nmake
 bin\shell.exe
 ```
 
-The shell only looks for commands in the `bin\` next to it, so there is no `PATH` to change and no clash with Windows' own `find` and `sort`.
+The shell looks for commands in the `bin\` next to it first (so there is no clash with Windows' own `find` and `sort`) and then in `PATH` (`git`, `python`, `npm`, `.cmd` and `.bat` files). How an AI agent uses it is on the [agents page](docs/AGENTS.md).
 
 ```sh
 fact() {
@@ -122,6 +122,7 @@ Besides the unit tests there are **property tests** (LF, CRLF and mixed line end
 ## Documentation
 
 - [Reference](docs/REFERENCE.en.md): the options of every command, the shell language, the build, the tests, the layout and the design
+- [Agents](docs/AGENTS.md): how an AI agent uses the shell
 - [Adding a new command](docs/REFERENCE.en.md#adding-a-new-command): `nmake new NAME=<name>` creates the skeleton, the test and the GNU comparison in one go
 
 ## Roadmap

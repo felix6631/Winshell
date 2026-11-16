@@ -152,7 +152,29 @@ static HANDLE start_program(char* const argv[], HANDLE in, HANDLE out, HANDLE er
     if (program_find(argv[0], path, sizeof path) != 0)
         goto err_start;
 
-    command = cmdline_build(argv);
+    {
+        // a batch file is run by cmd.exe, which reads the name of the file from the command line: it has to be a Windows path
+        size_t length = strlen(path);
+        int isBatch = length > 4 && (_stricmp(path + length - 4, ".cmd") == 0 || _stricmp(path + length - 4, ".bat") == 0);
+
+        if (isBatch) {
+            size_t count = 0, i;
+            char** copy;
+
+            while (argv[count] != NULL)
+                count++;
+            copy = calloc(count + 1, sizeof *copy);
+            if (copy == NULL)
+                goto err_start;
+            for (i = 0; i < count; i++)
+                copy[i] = argv[i];
+            copy[0] = path;
+            command = cmdline_build(copy);
+            free(copy);
+        } else {
+            command = cmdline_build(argv);
+        }
+    }
     if (command == NULL)
         goto err_start;
 
