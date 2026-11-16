@@ -2508,7 +2508,340 @@ static int parse_complete(Parser* p, List* list) {
     }
 }
 
-int command_run_text(const char* text, int* exitShell, int status) {
+/* ---- here documents ------------------------------------------------------------------------- */
+
+/*
+ * `cmd <<DELIM`, `<<-DELIM`, `<<'DELIM'`: the lines up to the line that is DELIM are the input of the command. The text is
+ * rewritten before it is parsed: the operator becomes a here-string (`<<< "the lines"`, or `<<< 'the lines'` for a quoted
+ * DELIM, which expands nothing) and the lines, with the DELIM line, are taken out. An empty document becomes `< /dev/null`.
+ * Quotes and comments are looked at only to not take a << inside them for an operator; $((1<<2)) and ((x<<2)) are passed.
+ */
+
+typedef struct {
+    char*  data;
+    size_t length, capacity;
+} Text;
+
+static int text_put(Text* t, const char* s, size_t n) {
+    if (VEC_RESERVE(t->data, t->capacity, t->length + n + 1) != 0)
+        return -1;
+    memcpy(t->data + t->length, s, n);
+    t->length += n;
+    t->data[t->length] = '\0';
+    return 0;
+}
+
+typedef struct {
+    char*  delimiter;
+    int    strip;               // <<-: leading tabs are not part of the lines
+    int    literal;             // the delimiter was quoted: nothing is expanded
+    size_t operatorOffset;      // where "<<< " stands in the output
+} PendingDocument;
+
+/** The body as one word for a here-string. */
+static int document_word(Text* word, const char* body, size_t length, int literal) {
+    size_t i;
+
+    if (literal) {
+        if (text_put(word, "'", 1) != 0)
+            return -1;
+        for (i = 0; i < length; i++)
+            if (body[i] == '\'' ? text_put(word, "'\\''", 4) != 0 : text_put(word, body + i, 1) != 0)
+                return -1;
+        return text_put(word, "'", 1);
+    }
+    if (text_put(word, "\"", 1) != 0)
+        return -1;
+    for (i = 0; i < length; i++) {
+        char c = body[i];
+
+        if (c == '"') {
+            if (text_put(word, "\\\"", 2) != 0)
+                return -1;
+        } else if (c == '\\' && i + 1 < length) {
+            char next = body[i + 1];
+
+            if (next == '$' || next == '`' || next == '\\' || next == '\n') {
+                if (text_put(word, body + i, 2) != 0)
+                    return -1;
+                i++;
+            } else if (next == '"') {
+                if (text_put(word, "\\\\\\\"", 4) != 0)       // \" in the document is a backslash and a quote
+                    return -1;
+                i++;
+            } else if (text_put(word, "\\\\", 2) != 0) {      // another backslash is itself
+                return -1;
+            }
+        } else if (c == '\\') {
+            if (text_put(word, "\\\\", 2) != 0)
+                return -1;
+        } else if (text_put(word, &c, 1) != 0) {
+            return -1;
+        }
+    }
+    return text_put(word, "\"", 1);
+}
+
+/**
+ * Takes the lines of the documents that the operators of the line asked for, from *cursor (the start of the line after it),
+ * and puts their words into the output. Returns 0, or -1 when out of memory; *unterminated is set when a document had no end.
+ */
+static int read_documents(const char** cursor, PendingDocument* pending, size_t count, Text* out, int* unterminated) {
+    size_t d;
+    const char* p = *cursor;
+
+    for (d = count; d > 0; d--)
+        (void)d;
+    // bodies are read in the order of the operators, and put in from the last one so that the offsets stay right
+    {
+        Text* words = calloc(count, sizeof *words);
+        int* empty = calloc(count, sizeof *empty);
+        int failed = 0;
+
+        if (words == NULL || empty == NULL) {
+            free(words);
+            free(empty);
+            return -1;
+        }
+        for (d = 0; d < count && !failed; d++) {
+            Text body;
+            int found = 0;
+
+            memset(&body, 0, sizeof body);
+            while (*p != '\0') {
+                const char* end = strchr(p, '\n');
+                size_t length = end != NULL ? (size_t)(end - p) : strlen(p);
+                const char* line = p;
+                size_t lineLength = length;
+
+                if (pending[d].strip)
+                    while (lineLength > 0 && *line == '\t') {
+                        line++;
+                        lineLength--;
+                    }
+                if (lineLength > 0 && line[lineLength - 1] == '\r')
+                    lineLength--;
+                p = end != NULL ? end + 1 : p + length;
+                if (lineLength == strlen(pending[d].delimiter) && memcmp(line, pending[d].delimiter, lineLength) == 0) {
+                    found = 1;
+                    break;
+                }
+                if (text_put(&body, line, pending[d].strip ? (end != NULL ? (size_t)(end - line) : strlen(line)) : length) != 0 ||
+                    text_put(&body, "\n", 1) != 0)
+                    failed = 1;
+                if (failed)
+                    break;
+            }
+            if (!found)
+                *unterminated = 1;
+            if (!failed) {
+                empty[d] = body.length == 0;
+                // the here-string adds the last line end itself
+                if (body.length > 0)
+                    body.length--;
+                if (!empty[d] && document_word(&words[d], body.data, body.length, pending[d].literal) != 0)
+                    failed = 1;
+            }
+            free(body.data);
+        }
+        for (d = count; d > 0 && !failed; d--) {
+            size_t at = pending[d - 1].operatorOffset;
+
+            if (empty[d - 1]) {
+                // "<<< " becomes "< /dev/null"
+                Text fix;
+
+                memset(&fix, 0, sizeof fix);
+                if (text_put(&fix, out->data, at) != 0 || text_put(&fix, "< /dev/null", 11) != 0 ||
+                    text_put(&fix, out->data + at + 4, out->length - at - 4) != 0) {
+                    free(fix.data);
+                    failed = 1;
+                    break;
+                }
+                free(out->data);
+                *out = fix;
+            } else {
+                Text fix;
+
+                memset(&fix, 0, sizeof fix);
+                if (text_put(&fix, out->data, at + 4) != 0 || text_put(&fix, words[d - 1].data, words[d - 1].length) != 0 ||
+                    text_put(&fix, out->data + at + 4, out->length - at - 4) != 0) {
+                    free(fix.data);
+                    failed = 1;
+                    break;
+                }
+                free(out->data);
+                *out = fix;
+            }
+        }
+        for (d = 0; d < count; d++)
+            free(words[d].data);
+        free(words);
+        free(empty);
+        if (failed)
+            return -1;
+    }
+    *cursor = p;
+    return 0;
+}
+
+/**
+ * The text with its here documents turned into here-strings. Returns a malloc'ed copy (the text itself when it has no
+ * operator is also copied), or NULL when out of memory. *unterminated is set when a document is not closed.
+ */
+static char* rewrite_heredocs(const char* text, int* unterminated) {
+    Text out;
+    PendingDocument pending[16];
+    size_t pendingCount = 0, i;
+    char quote = '\0';
+    int arithmetic = 0;                 // inside $(( )) or (( ))
+    const char* p = text;
+    int atWordStart = 1;
+
+    memset(&out, 0, sizeof out);
+    *unterminated = 0;
+    if (text_put(&out, "", 0) != 0)
+        return NULL;
+    while (*p != '\0') {
+        char c = *p;
+
+        if (c == '\n' && quote == '\0' && pendingCount > 0) {
+            p++;
+            if (text_put(&out, "\n", 1) != 0)
+                goto fail;
+            if (read_documents(&p, pending, pendingCount, &out, unterminated) != 0)
+                goto fail;
+            for (i = 0; i < pendingCount; i++)
+                free(pending[i].delimiter);
+            pendingCount = 0;
+            atWordStart = 1;
+            continue;
+        }
+        if (quote == '\'') {
+            if (c == '\'')
+                quote = '\0';
+        } else if (quote == '"') {
+            if (c == '\\' && p[1] != '\0') {
+                if (text_put(&out, p, 2) != 0)
+                    goto fail;
+                p += 2;
+                continue;
+            }
+            if (c == '"')
+                quote = '\0';
+        } else if (c == '\\' && p[1] != '\0') {
+            if (text_put(&out, p, 2) != 0)
+                goto fail;
+            p += 2;
+            atWordStart = 0;
+            continue;
+        } else if (c == '\'' || c == '"') {
+            quote = c;
+        } else if (c == '#' && atWordStart) {
+            while (*p != '\0' && *p != '\n') {
+                if (text_put(&out, p, 1) != 0)
+                    goto fail;
+                p++;
+            }
+            continue;
+        } else if (c == '$' && p[1] == '(' && p[2] == '(') {
+            arithmetic++;
+            if (text_put(&out, p, 3) != 0)
+                goto fail;
+            p += 3;
+            atWordStart = 0;
+            continue;
+        } else if (c == '(' && p[1] == '(' && atWordStart) {
+            arithmetic++;
+            if (text_put(&out, p, 2) != 0)
+                goto fail;
+            p += 2;
+            continue;
+        } else if (c == ')' && p[1] == ')' && arithmetic > 0) {
+            arithmetic--;
+            if (text_put(&out, p, 2) != 0)
+                goto fail;
+            p += 2;
+            continue;
+        } else if (c == '<' && p[1] == '<' && p[2] != '<' && arithmetic == 0 && (p == text || p[-1] != '<') &&
+                   pendingCount < 16) {
+            const char* q = p + 2;
+            PendingDocument* d = &pending[pendingCount];
+            size_t length = 0;
+            char* word;
+            int literal = 0;
+
+            d->strip = 0;
+            if (*q == '-') {
+                d->strip = 1;
+                q++;
+            }
+            while (*q == ' ' || *q == '\t')
+                q++;
+            word = malloc(strlen(q) + 1);
+            if (word == NULL)
+                goto fail;
+            // the delimiter word, with its quotes taken off
+            while (*q != '\0' && *q != ' ' && *q != '\t' && *q != '\n' && *q != ';' && *q != '|' && *q != '&' && *q != ')' &&
+                   *q != '<' && *q != '>') {
+                if (*q == '\'' || *q == '"') {
+                    char mark = *q++;
+
+                    literal = 1;
+                    while (*q != '\0' && *q != mark)
+                        word[length++] = *q++;
+                    if (*q == mark)
+                        q++;
+                } else if (*q == '\\' && q[1] != '\0') {
+                    literal = 1;
+                    word[length++] = q[1];
+                    q += 2;
+                } else {
+                    word[length++] = *q++;
+                }
+            }
+            word[length] = '\0';
+            if (length == 0) {
+                free(word);                 // not a here document: let the parser report it
+            } else {
+                d->delimiter = word;
+                d->literal = literal;
+                d->operatorOffset = out.length;
+                if (text_put(&out, "<<< ", 4) != 0) {
+                    free(word);
+                    goto fail;
+                }
+                pendingCount++;
+                p = q;
+                atWordStart = 0;
+                continue;
+            }
+        }
+        if (text_put(&out, p, 1) != 0)
+            goto fail;
+        atWordStart = quote == '\0' && (c == ' ' || c == '\t' || c == '\n' || c == ';' || c == '|' || c == '&' || c == '(' || c == '{');
+        p++;
+    }
+    if (pendingCount > 0) {
+        // the operator was on the last line: the document is empty and not closed
+        const char* none = "";
+
+        *unterminated = 1;
+        if (read_documents(&none, pending, pendingCount, &out, unterminated) != 0)
+            goto fail;
+        for (i = 0; i < pendingCount; i++)
+            free(pending[i].delimiter);
+    }
+    return out.data;
+
+fail:
+    for (i = 0; i < pendingCount; i++)
+        free(pending[i].delimiter);
+    free(out.data);
+    return NULL;
+}
+
+static int run_text_plain(const char* text, int* exitShell, int status) {
     Parser p;
     Runner runner;
 
@@ -2540,7 +2873,19 @@ int command_run_text(const char* text, int* exitShell, int status) {
     return status;
 }
 
-int command_incomplete(const char* text) {
+int command_run_text(const char* text, int* exitShell, int status) {
+    int unterminated;
+    char* rewritten = strstr(text, "<<") != NULL ? rewrite_heredocs(text, &unterminated) : NULL;
+    int result;
+
+    if (rewritten == NULL)
+        return run_text_plain(text, exitShell, status);
+    result = run_text_plain(rewritten, exitShell, status);
+    free(rewritten);
+    return result;
+}
+
+static int incomplete_plain(const char* text) {
     Parser p;
 
     memset(&p, 0, sizeof p);
@@ -2557,4 +2902,16 @@ int command_incomplete(const char* text) {
             return p.error == ERROR_INCOMPLETE;     // a syntax error is not cured by waiting
     }
     return 0;
+}
+
+int command_incomplete(const char* text) {
+    int unterminated = 0;
+    char* rewritten = strstr(text, "<<") != NULL ? rewrite_heredocs(text, &unterminated) : NULL;
+    int result;
+
+    if (rewritten == NULL)
+        return incomplete_plain(text);
+    result = unterminated || incomplete_plain(rewritten);       // a document that is not closed waits for more lines
+    free(rewritten);
+    return result;
 }

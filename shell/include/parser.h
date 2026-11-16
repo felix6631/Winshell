@@ -40,6 +40,8 @@ typedef struct {
     LPSTR*   owned;     // strings created by glob expansion, which argv points into
     size_t   ownedCount;
     size_t   ownedCapacity;
+    LPSTR*   tempFiles;     // the files that hold here-strings (<<<): deleted when the pipeline is freed
+    size_t   tempCount;
 } Pipeline;
 
 /**

@@ -33,7 +33,8 @@ typedef enum {
     LEX_ASSIGN,       // NAME=value in front of the command
     LEX_DUP,          // 2>&1, 1>&2: fd becomes a copy of target
     LEX_BOTH,         // &>
-    LEX_BOTH_APPEND   // &>>
+    LEX_BOTH_APPEND,  // &>>
+    LEX_HERESTRING    // <<<
 } LexemeType;
 
 typedef struct {
@@ -393,6 +394,12 @@ static int lex_operator(Lexer* L) {
         L->commandWords = 0;
         L->expectFile = 0;
         L->read++;
+        return 1;
+    }
+    if (r[0] == '<' && r[1] == '<' && r[2] == '<') {
+        lexer_push(L, LEX_HERESTRING, 0, 0, 0);
+        L->expectFile = 1;
+        L->read += 3;
         return 1;
     }
     if (*r == '<') {
@@ -1864,6 +1871,7 @@ static const char* operator_name(LexemeType type) {
         case LEX_ERROR_APPEND: return "2>>";
         case LEX_BOTH:         return "&>";
         case LEX_BOTH_APPEND:  return "&>>";
+        case LEX_HERESTRING:   return "<<<";
         default:                 return "";
     }
 }
@@ -1964,6 +1972,39 @@ static int parse_redirection(Builder* b, const Lexeme* lexemes, size_t count, si
         case LEX_INPUT:
             command->input = file;
             return PARSE_OK;
+        case LEX_HERESTRING: {
+            // the word and a line end, in a file of its own that the command reads as its input
+            char directory[MAX_PATH], path[MAX_PATH + 32];
+            LPSTR* grown;
+            LPSTR kept;
+            HANDLE handle;
+            DWORD written;
+            size_t length = strlen(file);
+            static unsigned counter;
+
+            if (GetTempPathA(sizeof directory, directory) == 0)
+                strcpy(directory, ".\\");
+            snprintf(path, sizeof path, "%swinshell-%lu-%u.tmp", directory, (unsigned long)GetCurrentProcessId(), ++counter);
+            handle = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, NULL);
+            if (handle == INVALID_HANDLE_VALUE) {
+                fprintf(stderr, "Error: Cannot make the input of the command\n");
+                return PARSE_SYNTAX;
+            }
+            WriteFile(handle, file, (DWORD)length, &written, NULL);
+            WriteFile(handle, "\n", 1, &written, NULL);
+            CloseHandle(handle);
+            kept = _strdup(path);
+            grown = realloc(b->pipeline->tempFiles, (b->pipeline->tempCount + 1) * sizeof *grown);
+            if (kept == NULL || grown == NULL) {
+                free(kept);
+                DeleteFileA(path);
+                return PARSE_MEMORY;
+            }
+            b->pipeline->tempFiles = grown;
+            grown[b->pipeline->tempCount++] = kept;
+            command->input = kept;
+            return PARSE_OK;
+        }
         case LEX_APPEND:       append = 1; break;
         case LEX_ERROR:        fd = 2; break;
         case LEX_ERROR_APPEND: fd = 2; append = 1; break;
@@ -2075,6 +2116,11 @@ void winshell_freePipeline(Pipeline* pipeline) {
     }
     for (i = 0; i < pipeline->ownedCount; i++)
         free(pipeline->owned[i]);
+    for (i = 0; i < pipeline->tempCount; i++) {
+        DeleteFileA(pipeline->tempFiles[i]);
+        free(pipeline->tempFiles[i]);
+    }
+    free(pipeline->tempFiles);
     free(pipeline->owned);
     free(pipeline->commands);
     free(pipeline->buffer);
