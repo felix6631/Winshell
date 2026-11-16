@@ -100,7 +100,7 @@ static void test_rm(void) {
     // things that are never removed
     run_tool(d, "rm", ".", NULL, &r);
     CHECK_INT(r.exitCode, 1);
-    CHECK(strstr(r.err, "refusing to remove '.' or '..'") != NULL);
+    CHECK(strstr(r.err, "cannot remove '.': Is a directory") != NULL);
     run_result_free(&r);
 
     // The roots of file systems, in every spelling. These run with -i and the answer "n":

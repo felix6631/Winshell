@@ -30,7 +30,24 @@ typedef struct {
     int preserve;           // -p: keep times and attributes
     int recursive;          // -r
     int emptyDirs;          // -d (rm): remove empty directories
+    int update;             // -u (cp, mv): do not replace a destination that is newer
+    int backup;             // -b, --backup: 0 none, 1 simple (name~), 2 numbered (name.~1~), 3 numbered when there are some, else simple
+    const char* suffix;     // -S: the suffix of simple backups (NULL: ~, or SIMPLE_BACKUP_SUFFIX)
 } FsOptions;
+
+/** The reason for an error at a Windows path: a file in the middle of the path is "Not a directory". */
+const char* fs_path_error(const char* native, DWORD error);
+
+/**
+ * -b: moves the destination to its backup name (NAME~ or NAME.~N~). Returns 0, or 1 after a message. fs_backup_note is what a
+ * verbose line adds afterwards (" (backup: 'b~')"), empty when no backup was made since fs_backup_reset.
+ */
+int fs_make_backup(const FsOptions* options, const char* dstDisplay, const char* dstNative);
+const char* fs_backup_note(void);
+void fs_backup_reset(void);
+
+/** Parses the CONTROL of --backup (none, off, numbered, t, existing, nil, simple, never). Returns 0..3, or -1. */
+int fs_backup_control(const char* control);
 
 /** Text of an errno-like reason for a Windows error code. */
 const char* fs_strerror(DWORD error);

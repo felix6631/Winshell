@@ -5,6 +5,7 @@
 #include "vpath.h"
 #include "fsutil.h"
 #include "args.h"
+#include "modebits.h"
 
 #define VERSION "0.1"
 #define PROGRAM "mkdir"
@@ -13,7 +14,8 @@ static void print_usage(void) {
     puts("Usage: mkdir [OPTION]... DIRECTORY...\n"
          "Create the DIRECTORY(ies), if they do not already exist.\n"
          "\n"
-         "  -m, --mode=MODE   accepted and ignored: Windows has no permission bits\n"
+         "  -m, --mode=MODE   checked and then ignored: Windows has no permission bits\n"
+         "  -Z, --context[=CTX]   accepted and ignored (no SELinux)\n"
          "  -p, --parents     no error if existing, make parent directories as needed\n"
          "  -v, --verbose     print a message for each created directory\n"
          "      --help        display this help and exit\n"
@@ -59,6 +61,26 @@ static void display_prefix(const char* display, size_t remaining, char* out, siz
     out[length] = '\0';
 }
 
+/** The reason a directory cannot be made at the Windows path: a parent that is a file is "Not a directory". */
+static const char* reason_for(const char* native, DWORD error) {
+    char parent[VPATH_MAX];
+    char* separator;
+    DWORD attributes;
+
+    if (error == ERROR_PATH_NOT_FOUND || error == ERROR_DIRECTORY) {
+        snprintf(parent, sizeof parent, "%s", native);
+        while (strlen(parent) > 3 && vpath_is_separator(parent[strlen(parent) - 1]))
+            parent[strlen(parent) - 1] = '\0';
+        // look up the path for the nearest parent that exists: a file there is the cause
+        while ((separator = strrchr(parent, '\\')) != NULL && separator > parent + 2) {
+            *separator = '\0';
+            if (fs_attributes(parent, &attributes) == 0)
+                return (attributes & FILE_ATTRIBUTE_DIRECTORY) ? create_error(error) : "Not a directory";
+        }
+    }
+    return create_error(error);
+}
+
 static int directory_exists(const char* native) {
     DWORD attributes;
     return fs_attributes(native, &attributes) == 0 && (attributes & FILE_ATTRIBUTE_DIRECTORY);
@@ -90,7 +112,7 @@ static int make_directory(const char* display, const char* native, int parents, 
 
     if (!parents) {
         if (!CreateDirectoryA(native, NULL)) {
-            fprintf(stderr, PROGRAM ": cannot create directory '%s': %s\n", display, create_error(GetLastError()));
+            fprintf(stderr, PROGRAM ": cannot create directory '%s': %s\n", display, reason_for(native, GetLastError()));
             return 1;
         }
         if (verbose)
@@ -126,8 +148,11 @@ static int make_directory(const char* display, const char* native, int parents, 
         if (!directory_exists(path)) {
             DWORD attributes;
             if (fs_attributes(path, &attributes) == 0) {
-                // something that is not a directory is in the way
-                fprintf(stderr, PROGRAM ": cannot create directory '%s': File exists\n", display);
+                // something that is not a directory is in the way: a file in the middle of the path is "Not a directory"
+                char shown[VPATH_MAX];
+
+                display_prefix(display, remaining, shown, sizeof shown);
+                fprintf(stderr, PROGRAM ": cannot create directory '%s': %s\n", shown, remaining > 0 ? "Not a directory" : "File exists");
                 return 1;
             }
             if (!CreateDirectoryA(path, NULL)) {
@@ -147,12 +172,13 @@ static int make_directory(const char* display, const char* native, int parents, 
     return 0;
 }
 
-enum { OPT_PARENTS = 1, OPT_VERBOSE, OPT_MODE };
+enum { OPT_PARENTS = 1, OPT_VERBOSE, OPT_MODE, OPT_CONTEXT };
 
 static const ArgsOption optionList[] = {
     { OPT_PARENTS, 'p', "parents", ARGS_NONE },
     { OPT_VERBOSE, 'v', "verbose", ARGS_NONE },
-    { OPT_MODE,    'm', "mode",    ARGS_REQUIRED },     // ignored: Windows has no mode bits
+    { OPT_MODE,    'm', "mode",    ARGS_REQUIRED },     // checked, then ignored: Windows has no mode bits
+    { OPT_CONTEXT, 'Z', "context", ARGS_OPTIONAL },     // ignored: no SELinux
     { 0 }
 };
 
@@ -160,12 +186,14 @@ static const ArgsSpec spec = { PROGRAM, VERSION, print_usage, optionList, 1, 0, 
 
 typedef struct {
     int parents, verbose;
+    const char* mode;
 } Options;
 
 static int on_option(int id, const char* value, void* context) {
     Options* o = context;
-    (void)value;
 
+    if (id == OPT_MODE)
+        o->mode = value;
     if (id == OPT_PARENTS)
         o->parents = 1;
     else if (id == OPT_VERBOSE)
@@ -174,7 +202,7 @@ static int on_option(int id, const char* value, void* context) {
 }
 
 int main(int argc, char* argv[]) {
-    Options o = { 0, 0 };
+    Options o = { 0, 0, NULL };
     const char** operands;
     int operandCount, status = 0, i, result;
 
@@ -182,10 +210,26 @@ int main(int argc, char* argv[]) {
     if (result != ARGS_OK)
         return ARGS_STATUS(spec, result);
 
+    if (o.mode != NULL) {
+        ModeChange* changes = mode_compile(o.mode);
+
+        if (changes == NULL) {
+            fprintf(stderr, PROGRAM ": invalid mode '%s'\n", o.mode);
+            return 1;
+        }
+        mode_free(changes);
+    }
     for (i = 0; i < operandCount; i++) {
         const char* arg = operands[i];
         char native[VPATH_MAX];
-        int kind = vpath_to_native(arg, native, sizeof native);
+        int kind;
+
+        if (arg[0] == '\0') {
+            fprintf(stderr, PROGRAM ": cannot create directory '': No such file or directory\n");
+            status = 1;
+            continue;
+        }
+        kind = vpath_to_native(arg, native, sizeof native);
 
         if (kind == VPATH_ROOT) {
             if (o.parents)

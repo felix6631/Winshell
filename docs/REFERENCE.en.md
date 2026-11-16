@@ -16,7 +16,7 @@ The options of every command, the shell language, building and testing, and the 
 | `dirname` | Done (`-z`; several names) |
 | `cat` | Done (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `comm` | Done (`-1 -2 -3`, `--check-order`, `--nocheck-order`, `--output-delimiter`, `--total`, `-z`; byte comparison (C locale), a CR LF is a line ending and a line is written as it was read; an order violation is reported once as GNU does, status 1) |
-| `cp` | Done (`-a -f -i -n -p -r -R -t -v`) |
+| `cp` | Done (`-a -b -d -f -i -l -n -p -r -R -S -t -T -u -v`, `--backup[=CONTROL]` `--parents` `--strip-trailing-slashes`; `-d` and `-l` are accepted only: nothing is linked, the files are copied) |
 | `cut` | Done (`-b -c -f -d -s --complement --output-delimiter`) |
 | `echo` | Done (`-n`, `-e`, `-E`, `--help`, `--version`) |
 | `expr` | Done (`| & < <= = == != >= > + - * / % :`, `match substr index length +`, `( )`; integers of any size, numeric comparison when both are integers, UTF-8 characters, exit status 0/1/2/3) |
@@ -30,14 +30,14 @@ The options of every command, the shell language, building and testing, and the 
 | `ls` | Done (`-a -A -b -B -c -C -d -f -F -g -G -h -H -i -I -k -l -L -m -n -N -o -p -q -Q -r -R -s -S -t -T -u -U -v -w -x -X -Z -1`, `--author --block-size --color --file-type --format --full-time --group-directories-first --hide --indicator-style --quoting-style --si --sort --time --time-style`; `/` lists the drives. Windows: link count, inode and allocated size are the real ones, `-n` shows the RID of the SID, sorting ignores case, `-Z` is always `?`, `-D` is ignored) |
 | `dir` | Done (as `ls -C -b`: columns also when the output is not a console, blanks and backslashes in names written as escapes; the same source as `ls`) |
 | `vdir` | Done (as `ls -l -b`: the long format; the same source as `ls`) |
-| `mkdir` | Done (`-p -v -m`; `-m` is accepted and ignored) |
-| `mv` | Done (`-f -i -n -t -v`, to another drive it copies and then removes) |
+| `mkdir` | Done (`-p -v -m -Z`; `-m` is checked and then ignored, `-Z` is accepted only) |
+| `mv` | Done (`-b -f -i -n -S -t -T -u -v`, `--backup[=CONTROL]` `--strip-trailing-slashes`; to another drive it copies and then removes) |
 | `env` | Done (`-i`, `-u`, `-0`, `-C`, `NAME=VALUE`, running a command; found in the directory of `env.exe` or by a virtual path) |
 | `printenv` | Done (`-0`, names, status 1 for a missing one) |
 | `kill` | Done (`-s -n -SIGNAL -l -L`; Windows has no signals: 0 only checks, STOP/TSTP/CONT suspend and resume, KILL ends at once (status 137), CHLD/URG/WINCH do nothing, any other closes the windows with WM_CLOSE or ends a process without windows (status 128+number); no process groups) |
 | `ps` | Done (selection `-e -A -a -x -p --ppid -u -C -N`, BSD style `aux`; formats `-f u -o NAME=HEADING`, `--sort`, `--no-headers`; by default the processes of this console; columns pid ppid user comm args time etime start tty nlwp rss vsz pcpu pmem c ni; unknown values show `-`/`?`; status 1 when nothing was selected) |
 | `pwd` | Done (`-L`, `-P`, prints the virtual path) |
-| `rm` | Done (`-f -i -r -R -d -v`, `/` and the roots of drives and shares are never removed, not even with `--no-preserve-root`) |
+| `rm` | Done (`-f -i -I -r -R -d -v`, `--interactive[=WHEN]` `--one-file-system`, `/` and the roots of drives and shares are never removed, not even with `--no-preserve-root`) |
 | `rmdir` | Done (`-p -v --ignore-fail-on-non-empty`) |
 | `sleep` | Done (`NUMBER[s|m|h|d]...` added up, fractions allowed) |
 | `sort` | Done (`-b -d -f -g -i -n -r -s -u -c -C -k -t -o`; byte order as in the C locale; `-h -M -V -z` are not supported) |
@@ -46,7 +46,7 @@ The options of every command, the shell language, building and testing, and the 
 | `tee` | Done (`-a`; reports a file that fails and goes on; passes data on as it arrives) |
 | `nl` | Done (`a t n` for `-b -h -f`, `-n -w -s -v -i -l -p -d`; the `p` regular-expression style is not supported) |
 | `paste` | Done (`-d -s -z`; `- -` takes the lines of standard input in turn) |
-| `touch` | Done (`-a -c -d -m -r -t`; `-d` uses the same reader of dates as `date -d` (`common/datetime.c`): `@SECONDS`, ISO dates and times, month names, `yesterday`, `3 days ago`, zones) |
+| `touch` | Done (`-a -c -d -h -m -r -t`, `--time=WORD`; `-d` uses the same reader of dates as `date -d` (`common/datetime.c`): `@SECONDS`, ISO dates and times, month names, `yesterday`, `3 days ago`, zones) |
 | `test_cmd` | Done (installed as `test` and `[`: strings `= == != < >`, integers `-eq -ne -lt -le -gt -ge`, files `-e -f -d -s -r -w -x -L -h -c -nt -ot -ef -O -G -N -t`, `! ( ) -a -o`; as in GNU one to four arguments are read by their number; `[` wants its `]`; exit status 0/1/2; `-r -w -x` mean can be opened / not read-only / a directory or a PATHEXT extension on Windows) |
 | `true` | Done (ignores its arguments, 0) |
 | `false` | Done (ignores its arguments, 1) |

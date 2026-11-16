@@ -2198,7 +2198,7 @@ static int on_option(int id, const char* value, void* context) {
     case 'Z': opt.context = 1; break;
     case 'D': break;                    // there is no Emacs to tell the places of the names to
     case '1':                           // -1 changes nothing after -l
-        if (opt.format != FMT_LONG || !opt.formatSet)
+        if (!((opt.formatSet && opt.format == FMT_LONG) || (!opt.formatSet && LS_DEFAULT_FORMAT == 2)))
             set_format(FMT_SINGLE);
         break;
     default: break;

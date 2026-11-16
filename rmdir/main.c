@@ -53,15 +53,25 @@ static int is_drive_root(const char* native) {
 }
 
 /** Removes one directory. Returns 0, or 1 after reporting. */
-static int remove_one(const char* display, const char* native, int ignoreNonEmpty, int verbose) {
+static int remove_one(const char* display, const char* native, int ignoreNonEmpty, int verbose, int parent) {
     DWORD attributes, error;
+    const char* what = parent ? "failed to remove directory" : "failed to remove";
+    size_t shownLength = strlen(display);
+
+    // . cannot be removed (GNU: Invalid argument); the directory the process stands in must not go either
+    while (shownLength > 1 && vpath_is_separator(display[shownLength - 1]))
+        shownLength--;
+    if ((shownLength == 1 && display[0] == '.') || (shownLength > 1 && display[shownLength - 1] == '.' && vpath_is_separator(display[shownLength - 2]))) {
+        fprintf(stderr, PROGRAM ": %s '%s': Invalid argument\n", what, display);
+        return 1;
+    }
 
     if (fs_attributes(native, &attributes) != 0) {
-        fprintf(stderr, PROGRAM ": failed to remove '%s': %s\n", display, fs_strerror(GetLastError()));
+        fprintf(stderr, PROGRAM ": %s '%s': %s\n", what, display, fs_strerror(GetLastError()));
         return 1;
     }
     if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
-        fprintf(stderr, PROGRAM ": failed to remove '%s': Not a directory\n", display);
+        fprintf(stderr, PROGRAM ": %s '%s': Not a directory\n", what, display);
         return 1;
     }
 
@@ -79,7 +89,7 @@ static int remove_one(const char* display, const char* native, int ignoreNonEmpt
         SetFileAttributesA(native, attributes);     // it stays as it was
     if (error == ERROR_DIR_NOT_EMPTY && ignoreNonEmpty)
         return 0;
-    fprintf(stderr, PROGRAM ": failed to remove '%s': %s\n", display, fs_strerror(error));
+    fprintf(stderr, PROGRAM ": %s '%s': %s\n", what, display, fs_strerror(error));
     return 1;
 }
 
@@ -142,7 +152,7 @@ int main(int argc, char* argv[]) {
         }
         strcpy(display, arg);
 
-        if (remove_one(display, native, o.ignoreNonEmpty, o.verbose) != 0) {
+        if (remove_one(display, native, o.ignoreNonEmpty, o.verbose, 0) != 0) {
             status = 1;
             continue;
         }
@@ -155,7 +165,7 @@ int main(int argc, char* argv[]) {
             if (is_drive_root(native) || strcmp(display, "/") == 0 || display[0] == '\0' ||
                 strcmp(display, ".") == 0 || strcmp(display, "..") == 0)
                 break;
-            if (remove_one(display, native, o.ignoreNonEmpty, o.verbose) != 0) {
+            if (remove_one(display, native, o.ignoreNonEmpty, o.verbose, 1) != 0) {
                 status = 1;
                 break;
             }

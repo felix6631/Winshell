@@ -185,9 +185,96 @@ static int is_link_attributes(DWORD attributes) {
  * -n or when -i is answered with no, made writable when it is read-only and -f was given.
  * Returns 0 to go on, 1 for an error (reported), 2 to copy nothing.
  */
+/** What a verbose line adds after the move of a destination to its backup: " (backup: 'b~')". */
+static char backupNote[PATH_BUFFER + 32];
+
+int fs_backup_control(const char* control) {
+    static const struct { const char* name; int mode; } names[] = {
+        { "none", 0 }, { "off", 0 }, { "numbered", 2 }, { "t", 2 }, { "existing", 3 }, { "nil", 3 }, { "simple", 1 }, { "never", 1 }
+    };
+    size_t i, length = strlen(control);
+    int found = -1, count = 0;
+
+    for (i = 0; i < sizeof names / sizeof names[0]; i++) {
+        if (strncmp(names[i].name, control, length) == 0 && length > 0) {
+            if (strlen(names[i].name) == length)
+                return names[i].mode;
+            if (found != names[i].mode)
+                count++;
+            found = names[i].mode;
+        }
+    }
+    return count == 1 ? found : -1;
+}
+
+const char* fs_path_error(const char* native, DWORD error) {
+    char parent[PATH_BUFFER];
+    char* separator;
+    DWORD attributes;
+
+    if (error == ERROR_PATH_NOT_FOUND || error == ERROR_DIRECTORY) {
+        snprintf(parent, sizeof parent, "%s", native);
+        while ((separator = strrchr(parent, '\\')) != NULL && separator > parent + 2) {
+            *separator = '\0';
+            if (fs_attributes(parent, &attributes) == 0)
+                return (attributes & FILE_ATTRIBUTE_DIRECTORY) ? fs_strerror(error) : "Not a directory";
+        }
+    }
+    return fs_strerror(error);
+}
+
+const char* fs_backup_note(void) {
+    return backupNote;
+}
+
+void fs_backup_reset(void) {
+    backupNote[0] = '\0';
+}
+
+/** Moves the destination to its backup name (-b). Returns 0, or 1 after a message. */
+int fs_make_backup(const FsOptions* o, const char* dstDisplay, const char* dstNative) {
+    char backupNative[PATH_BUFFER], backupDisplay[PATH_BUFFER];
+    const char* suffix = o->suffix != NULL ? o->suffix : getenv("SIMPLE_BACKUP_SUFFIX");
+    int mode = o->backup, n;
+    DWORD probe;
+
+    if (suffix == NULL || suffix[0] == '\0')
+        suffix = "~";
+    if (mode == 3) {
+        WIN32_FIND_DATAA data;
+        char pattern[PATH_BUFFER];
+        HANDLE find;
+
+        snprintf(pattern, sizeof pattern, "%s.~*~", dstNative);
+        find = FindFirstFileA(pattern, &data);
+        mode = find != INVALID_HANDLE_VALUE ? 2 : 1;
+        if (find != INVALID_HANDLE_VALUE)
+            FindClose(find);
+    }
+    if (mode == 2) {
+        for (n = 1;; n++) {
+            snprintf(backupNative, sizeof backupNative, "%s.~%d~", dstNative, n);
+            if (fs_attributes(backupNative, &probe) != 0)
+                break;
+        }
+        snprintf(backupDisplay, sizeof backupDisplay, "%s.~%d~", dstDisplay, n);
+    } else {
+        snprintf(backupNative, sizeof backupNative, "%s%s", dstNative, suffix);
+        snprintf(backupDisplay, sizeof backupDisplay, "%s%s", dstDisplay, suffix);
+    }
+    if (!MoveFileExA(dstNative, backupNative, MOVEFILE_REPLACE_EXISTING)) {
+        fprintf(stderr, "%s: cannot backup '%s': %s\n", o->program, dstDisplay, fs_strerror(GetLastError()));
+        return 1;
+    }
+    snprintf(backupNote, sizeof backupNote, " (backup: '%s')", backupDisplay);
+    return 0;
+}
+
 static int prepare_copy_destination(const FsOptions* o, const char* srcDisplay, const char* srcNative,
                                     const char* dstDisplay, const char* dstNative) {
     DWORD dstAttributes;
+
+    backupNote[0] = '\0';
 
     if (fs_attributes(dstNative, &dstAttributes) != 0)
         return 0;
@@ -201,8 +288,17 @@ static int prepare_copy_destination(const FsOptions* o, const char* srcDisplay, 
     }
     if (o->noClobber)
         return 2;
+    if (o->update) {
+        WIN32_FILE_ATTRIBUTE_DATA src, dst;
+
+        if (GetFileAttributesExA(srcNative, GetFileExInfoStandard, &src) && GetFileAttributesExA(dstNative, GetFileExInfoStandard, &dst) &&
+            CompareFileTime(&src.ftLastWriteTime, &dst.ftLastWriteTime) <= 0)
+            return 2;
+    }
     if (o->interactive && !fs_confirm("%s: overwrite '%s'? ", o->program, dstDisplay))
         return 2;
+    if (o->backup != 0 && fs_make_backup(o, dstDisplay, dstNative) != 0)
+        return 1;
     if (dstAttributes & FILE_ATTRIBUTE_READONLY) {
         if (!o->force) {
             report(o, "cannot create regular file", dstDisplay, "Permission denied");
@@ -269,7 +365,7 @@ static int copy_file(const FsOptions* o, const char* srcDisplay, const char* src
     copy_attributes(o, srcAttributes, dstNative);
 
     if (o->verbose)
-        printf("'%s' -> '%s'\n", srcDisplay, dstDisplay);
+        printf("'%s' -> '%s'%s\n", srcDisplay, dstDisplay, backupNote);
     return 0;
 }
 

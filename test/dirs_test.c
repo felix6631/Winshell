@@ -74,7 +74,7 @@ static void test_mkdir(void) {
     run_result_free(&r);
     run_tool(d, "mkdir", "-p f.txt\\sub", NULL, &r);
     CHECK_INT(r.exitCode, 1);
-    CHECK(strstr(r.err, "File exists") != NULL);
+    CHECK(strstr(r.err, "Not a directory") != NULL);
     run_result_free(&r);
 
     // the mode has no meaning here and is skipped, in all of its spellings
@@ -216,7 +216,7 @@ static void test_rmdir(void) {
     CHECK_INT(r.exitCode, 1);
     CHECK(!path_exists_in(d, "qa\\qb"));
     CHECK(path_exists_in(d, "qa\\keep.txt"));
-    CHECK(strstr(r.err, "failed to remove 'qa': Directory not empty") != NULL);
+    CHECK(strstr(r.err, "failed to remove directory 'qa': Directory not empty") != NULL);
     run_result_free(&r);
 
     // roots

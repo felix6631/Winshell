@@ -119,9 +119,22 @@ static int parse_stamp(const char* text, FILETIME* out) {
     return fields_to_filetime(year, month, day, hour, minute, second, 0, out);
 }
 
-static const char* error_text(DWORD error) {
+/** The reason for an error at a Windows path: a file in the middle of the path is "Not a directory". */
+static const char* error_text_at(const char* native, DWORD error) {
+    char parent[VPATH_MAX];
+    char* separator;
+    DWORD attributes;
+
     if (error == ERROR_INVALID_NAME)
         return "Invalid argument";
+    if (error == ERROR_PATH_NOT_FOUND || error == ERROR_DIRECTORY) {
+        snprintf(parent, sizeof parent, "%s", native);
+        while ((separator = strrchr(parent, '\\')) != NULL && separator > parent + 2) {
+            *separator = '\0';
+            if (fs_attributes(parent, &attributes) == 0)
+                return (attributes & FILE_ATTRIBUTE_DIRECTORY) ? fs_strerror(error) : "Not a directory";
+        }
+    }
     return fs_strerror(error);
 }
 
@@ -143,13 +156,13 @@ static int touch_one(const char* display, const char* native, int noCreate, cons
             h = CreateFileA(native, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
                             OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         if (h == INVALID_HANDLE_VALUE) {
-            fprintf(stderr, PROGRAM ": cannot touch '%s': %s\n", display, error_text(GetLastError()));
+            fprintf(stderr, PROGRAM ": cannot touch '%s': %s\n", display, error_text_at(native, GetLastError()));
             return 1;
         }
     }
 
     if (!SetFileTime(h, NULL, access, modification)) {
-        fprintf(stderr, PROGRAM ": setting times of '%s': %s\n", display, error_text(GetLastError()));
+        fprintf(stderr, PROGRAM ": setting times of '%s': %s\n", display, error_text_at(native, GetLastError()));
         CloseHandle(h);
         return 1;
     }
@@ -157,7 +170,7 @@ static int touch_one(const char* display, const char* native, int noCreate, cons
     return 0;
 }
 
-enum { OPT_ACCESS = 1, OPT_MODIFICATION, OPT_NO_CREATE, OPT_DATE, OPT_STAMP, OPT_REFERENCE };
+enum { OPT_ACCESS = 1, OPT_MODIFICATION, OPT_NO_CREATE, OPT_DATE, OPT_STAMP, OPT_REFERENCE, OPT_TIME, OPT_NO_DEREFERENCE };
 
 static const ArgsOption optionList[] = {
     { OPT_ACCESS,       'a', NULL,         ARGS_NONE },
@@ -166,6 +179,8 @@ static const ArgsOption optionList[] = {
     { OPT_DATE,         'd', "date",       ARGS_REQUIRED },
     { OPT_STAMP,        't', NULL,         ARGS_REQUIRED },
     { OPT_REFERENCE,    'r', "reference",  ARGS_REQUIRED },
+    { OPT_TIME,         0,   "time",       ARGS_REQUIRED },
+    { OPT_NO_DEREFERENCE, 'h', "no-dereference", ARGS_NONE },
     { 0 }
 };
 
@@ -185,6 +200,18 @@ static int on_option(int id, const char* value, void* context) {
         case OPT_MODIFICATION: o->onlyModification = 1; break;
         case OPT_NO_CREATE:    o->noCreate = 1; break;
         case OPT_REFERENCE:    o->referenceFile = value; break;
+        case OPT_NO_DEREFERENCE: break;
+        case OPT_TIME:
+            if (strcmp(value, "atime") == 0 || strcmp(value, "access") == 0 || strcmp(value, "use") == 0) {
+                o->onlyAccess = 1;
+            } else if (strcmp(value, "mtime") == 0 || strcmp(value, "modify") == 0) {
+                o->onlyModification = 1;
+            } else {
+                fprintf(stderr, PROGRAM ": invalid argument '%s' for '--time'\nValid arguments are:\n  - 'atime', 'access', 'use'\n"
+                                "  - 'mtime', 'modify'\nTry '" PROGRAM " --help' for more information.\n", value);
+                return -1;
+            }
+            break;
         default: {
             int bad = id == OPT_DATE ? parse_date(value, &o->given) : parse_stamp(value, &o->given);
             if (bad != 0) {
@@ -244,7 +271,18 @@ int main(int argc, char* argv[]) {
     for (i = 0; i < operandCount; i++) {
         const char* arg = operands[i];
         char native[VPATH_MAX];
-        int kind = vpath_to_native(arg, native, sizeof native);
+        int kind;
+
+        if (strcmp(arg, "-") == 0)
+            continue;                       // GNU touches standard output: there is nothing to touch on Windows
+        if (arg[0] == '\0') {
+            if (!o.noCreate) {
+                fprintf(stderr, PROGRAM ": cannot touch '': No such file or directory\n");
+                status = 1;
+            }
+            continue;
+        }
+        kind = vpath_to_native(arg, native, sizeof native);
 
         if (kind == VPATH_ROOT || kind != 0) {
             if (!o.noCreate) {

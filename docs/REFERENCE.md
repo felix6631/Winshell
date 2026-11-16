@@ -16,7 +16,7 @@
 | `dirname` | 완료 (`-z`; 여러 이름) |
 | `cat` | 완료 (`-A -b -e -E -n -s -t -T -u -v`, `--help`, `--version`) |
 | `comm` | 완료 (`-1 -2 -3`, `--check-order`, `--nocheck-order`, `--output-delimiter`, `--total`, `-z`; 바이트 비교(C 로캘), CR LF 는 줄 끝으로 보고 읽은 그대로 씀; 정렬 순서 위반은 GNU 처럼 한 번 알리고 상태 1) |
-| `cp` | 완료 (`-a -f -i -n -p -r -R -t -v`) |
+| `cp` | 완료 (`-a -b -d -f -i -l -n -p -r -R -S -t -T -u -v`, `--backup[=CONTROL]` `--parents` `--strip-trailing-slashes`; `-d` 와 `-l` 은 받기만 함: 링크를 만들지 않고 복사) |
 | `cut` | 완료 (`-b -c -f -d -s --complement --output-delimiter`) |
 | `echo` | 완료 (`-n`, `-e`, `-E`, `--help`, `--version`) |
 | `expr` | 완료 (`| & < <= = == != >= > + - * / % :`, `match substr index length +`, `( )`; 정수는 크기 제한 없음, 비교는 둘 다 정수면 수치 비교, UTF-8 문자 단위, 종료 상태 0/1/2/3) |
@@ -31,13 +31,13 @@
 | `dir` | 완료 (`ls -C -b`와 같음: 콘솔이 아니어도 열로 나열하고 이름의 공백과 역슬래시를 이스케이프; `ls`와 같은 소스) |
 | `vdir` | 완료 (`ls -l -b`와 같음: 긴 형식; `ls`와 같은 소스) |
 | `kill` | 완료 (`-s -n -SIGNAL -l -L`; Windows 에는 시그널이 없어 0 은 확인만, STOP/TSTP/CONT 는 중지/재개, KILL 은 즉시 종료(상태 137), CHLD/URG/WINCH 는 무시, 나머지는 창에 WM_CLOSE 를 보내고 창이 없으면 종료(상태 128+번호); 프로세스 그룹은 지원하지 않음) |
-| `mkdir` | 완료 (`-p -v -m`; `-m` 은 받기만 함) |
-| `mv` | 완료 (`-f -i -n -t -v`, 다른 드라이브로는 복사 후 삭제) |
+| `mkdir` | 완료 (`-p -v -m -Z`; `-m` 은 모드를 검사한 뒤 무시, `-Z` 는 받기만 함) |
+| `mv` | 완료 (`-b -f -i -n -S -t -T -u -v`, `--backup[=CONTROL]` `--strip-trailing-slashes`; 다른 드라이브로는 복사 후 삭제) |
 | `env` | 완료 (`-i`, `-u`, `-0`, `-C`, `NAME=VALUE`, 명령 실행; 명령은 `env.exe` 의 디렉터리나 가상 경로에서 찾음) |
 | `printenv` | 완료 (`-0`, 이름 지정, 종료 상태 1) |
 | `ps` | 완료 (선택 `-e -A -a -x -p --ppid -u -C -N`, BSD 형식 `aux`; 형식 `-f u -o NAME=HEADING`, `--sort`, `--no-headers`; 기본은 같은 콘솔의 프로세스, 열은 pid ppid user comm args time etime start tty nlwp rss vsz pcpu pmem c ni; 알 수 없는 값은 `-`/`?`; 선택된 것이 없으면 상태 1) |
 | `pwd` | 완료 (`-L`, `-P`, 가상 경로로 출력) |
-| `rm` | 완료 (`-f -i -r -R -d -v`, `/`, 드라이브, 공유의 루트는 `--no-preserve-root` 로도 삭제 불가) |
+| `rm` | 완료 (`-f -i -I -r -R -d -v`, `--interactive[=WHEN]` `--one-file-system`, `/`, 드라이브, 공유의 루트는 `--no-preserve-root` 로도 삭제 불가) |
 | `rmdir` | 완료 (`-p -v --ignore-fail-on-non-empty`) |
 | `sleep` | 완료 (`NUMBER[s|m|h|d]...` 합산, 소수 허용) |
 | `sort` | 완료 (`-b -d -f -g -i -n -r -s -u -c -C -k -t -o`, 바이트 순서(C 로캘), `-h -M -V -z` 는 미지원) |
@@ -46,7 +46,7 @@
 | `tee` | 완료 (`-a`, 파일마다 오류를 보고하고 계속, 입력이 오는 대로 전달) |
 | `nl` | 완료 (`-b -h -f`의 `a t n`, `-n -w -s -v -i -l -p -d`; `p` 정규식 스타일은 미지원) |
 | `paste` | 완료 (`-d -s -z`, `- -` 로 표준 입력을 번갈아 읽음) |
-| `touch` | 완료 (`-a -c -d -m -r -t`; `-d` 는 `date -d` 와 같은 날짜 해석기(`common/datetime.c`)를 씀: `@초`, ISO 날짜와 시각, 월 이름, `yesterday`, `3 days ago`, 시간대) |
+| `touch` | 완료 (`-a -c -d -h -m -r -t`, `--time=WORD`; `-d` 는 `date -d` 와 같은 날짜 해석기(`common/datetime.c`)를 씀: `@초`, ISO 날짜와 시각, 월 이름, `yesterday`, `3 days ago`, 시간대) |
 | `test_cmd` | 완료 (`test` 와 `[` 로 설치됨: 문자열 `= == != < >`, 정수 `-eq -ne -lt -le -gt -ge`, 파일 `-e -f -d -s -r -w -x -L -h -c -nt -ot -ef -O -G -N -t`, `! ( ) -a -o`; GNU 처럼 인자 1~4개는 개수로 해석; `[` 는 `]` 를 요구; 종료 상태 0/1/2; `-r -w -x` 는 Windows 에서 열 수 있음/읽기 전용 아님/디렉터리 또는 PATHEXT 확장자) |
 | `true` | 완료 (인자를 무시하고 0) |
 | `false` | 완료 (인자를 무시하고 1) |

@@ -70,6 +70,15 @@ static int print_escaped(const char* s) {
                 putchar(value);
                 break;
             }
+            case '1': case '2': case '3': case '4': case '5': case '6': case '7': {
+                int value = *s - '0', digits = 1;      // \NNN, as GNU echo takes it
+                while (digits < 3 && s[1] >= '0' && s[1] <= '7') {
+                    value = value * 8 + (*++s - '0');
+                    digits++;
+                }
+                putchar(value);
+                break;
+            }
             case 'x': {
                 int value = 0, digits = 0;
                 if (hex_value(s[1]) < 0) {

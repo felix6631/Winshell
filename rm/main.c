@@ -89,11 +89,11 @@ static int is_filesystem_root(const char* native) {
     }
 }
 
-enum { OPT_FORCE = 1, OPT_INTERACTIVE, OPT_RECURSIVE, OPT_DIR, OPT_VERBOSE, OPT_ACCEPTED };
+enum { OPT_FORCE = 1, OPT_INTERACTIVE, OPT_RECURSIVE, OPT_DIR, OPT_VERBOSE, OPT_ACCEPTED, OPT_ONCE, OPT_INTERACTIVE_WHEN };
 
 static const ArgsOption optionList[] = {
     { OPT_FORCE,       'f', "force",            ARGS_NONE },
-    { OPT_INTERACTIVE, 'i', "interactive",      ARGS_NONE },
+    { OPT_INTERACTIVE, 'i', NULL,               ARGS_NONE },
     { OPT_RECURSIVE,   'r', "recursive",        ARGS_NONE },
     { OPT_RECURSIVE,   'R', NULL,               ARGS_NONE },
     { OPT_DIR,         'd', "dir",              ARGS_NONE },
@@ -101,6 +101,9 @@ static const ArgsOption optionList[] = {
     // accepted for compatibility; the roots are protected in any case
     { OPT_ACCEPTED,    0,   "no-preserve-root", ARGS_NONE },
     { OPT_ACCEPTED,    0,   "preserve-root",    ARGS_NONE },
+    { OPT_ACCEPTED,    0,   "one-file-system",  ARGS_NONE },
+    { OPT_ONCE,        'I', NULL,               ARGS_NONE },
+    { OPT_INTERACTIVE_WHEN, 0, "interactive",   ARGS_OPTIONAL },
     { 0 }
 };
 
@@ -116,6 +119,19 @@ static int on_option(int id, const char* value, void* context) {
         case OPT_RECURSIVE:   o->recursive = 1; break;
         case OPT_DIR:         o->emptyDirs = 1; break;
         case OPT_VERBOSE:     o->verbose = 1; break;
+        case OPT_ONCE:        break;                        // -I asks once before a big removal: nothing asks here
+        case OPT_INTERACTIVE_WHEN:
+            if (value == NULL || strcmp(value, "always") == 0 || strcmp(value, "yes") == 0 || strcmp(value, "force") == 0) {
+                o->interactive = 1;
+                o->force = 0;
+            } else if (strcmp(value, "never") == 0 || strcmp(value, "no") == 0 || strcmp(value, "none") == 0) {
+                o->interactive = 0;
+            } else if (strcmp(value, "once") != 0) {
+                fprintf(stderr, PROGRAM ": invalid argument '%s' for '--interactive'\nValid arguments are:\n  - 'never', 'no', 'none'\n"
+                                "  - 'once'\n  - 'always', 'yes'\nTry '" PROGRAM " --help' for more information.\n", value);
+                return -1;
+            }
+            break;
         default:              break;
     }
     return 0;
@@ -136,7 +152,16 @@ int main(int argc, char* argv[]) {
     for (i = 0; i < operandCount; i++) {
         const char* arg = operands[i];
         char native[VPATH_MAX], name[VPATH_MAX];
-        int kind = vpath_to_native(arg, native, sizeof native);
+        int kind;
+
+        if (arg[0] == '\0') {
+            if (!options.force) {
+                fprintf(stderr, PROGRAM ": cannot remove '': No such file or directory\n");
+                status = 1;
+            }
+            continue;
+        }
+        kind = vpath_to_native(arg, native, sizeof native);
 
         // the root of the virtual file system holds the drives; it is nothing that can be removed
         if (kind == VPATH_ROOT) {
@@ -158,9 +183,32 @@ int main(int argc, char* argv[]) {
 
         fs_basename(arg, name, sizeof name);
         if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
-            fprintf(stderr, PROGRAM ": refusing to remove '.' or '..' directory: skipping '%s'\n", arg);
+            if (options.recursive || options.emptyDirs)
+                fprintf(stderr, PROGRAM ": refusing to remove '.' or '..' directory: skipping '%s'\n", arg);
+            else
+                fprintf(stderr, PROGRAM ": cannot remove '%s': Is a directory\n", arg);
             status = 1;
             continue;
+        }
+        {
+            // a file in the middle of the path, or a slash after a file
+            DWORD attributes;
+            size_t n = strlen(arg);
+
+            if (fs_attributes(native, &attributes) != 0) {
+                DWORD error = GetLastError();
+
+                if (!options.force) {
+                    fprintf(stderr, PROGRAM ": cannot remove '%s': %s\n", arg, fs_path_error(native, error));
+                    status = 1;
+                }
+                continue;
+            }
+            if (n > 1 && (arg[n - 1] == '/' || arg[n - 1] == '\\') && !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                fprintf(stderr, PROGRAM ": cannot remove '%s': Not a directory\n", arg);
+                status = 1;
+                continue;
+            }
         }
 
         // drives, shares and volumes: also in spellings such as \ or \?\C:\ ; --no-preserve-root
