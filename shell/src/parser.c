@@ -488,6 +488,69 @@ static int lex_backslash(Lexer* L) {
     return 1;
 }
 
+/** $'text': the escapes of C (\n \t \r \a \b \e \f \v \\ \' \" \xHH \NNN) are made, and nothing else is expanded. */
+static int lex_ansi_quote(Lexer* L) {
+    const CHAR* r = L->read;
+
+    if (L->quote != '\0' || r[0] != '$' || r[1] != '\'')
+        return 0;
+    r += 2;
+    L->quoted = 1;
+    while (*r != '\0' && *r != '\'') {
+        CHAR c = *r;
+
+        if (c == '\\' && r[1] != '\0') {
+            r++;
+            switch (*r) {
+            case 'n': c = '\n'; break;
+            case 't': c = '\t'; break;
+            case 'r': c = '\r'; break;
+            case 'a': c = '\a'; break;
+            case 'b': c = '\b'; break;
+            case 'e': case 'E': c = 27; break;
+            case 'f': c = '\f'; break;
+            case 'v': c = '\v'; break;
+            case '\\': c = '\\'; break;
+            case '\'': c = '\''; break;
+            case '"': c = '"'; break;
+            case 'x': {
+                int value = 0, digits = 0;
+
+                while (digits < 2 && isxdigit((unsigned char)r[1])) {
+                    r++;
+                    value = value * 16 + (isdigit((unsigned char)*r) ? *r - '0' : (tolower((unsigned char)*r) - 'a' + 10));
+                    digits++;
+                }
+                c = digits > 0 ? (CHAR)value : 'x';
+                break;
+            }
+            default:
+                if (*r >= '0' && *r <= '7') {
+                    int value = *r - '0', digits = 1;
+
+                    while (digits < 3 && r[1] >= '0' && r[1] <= '7') {
+                        r++;
+                        value = value * 8 + (*r - '0');
+                        digits++;
+                    }
+                    c = (CHAR)(value & 0xFF);
+                } else {
+                    lexer_char(L, '\\', 1);         // an unknown escape stays as it is
+                    c = *r;
+                }
+            }
+        }
+        lexer_char(L, c, 1);
+        r++;
+    }
+    if (*r != '\'') {
+        lexer_syntax_error(L, "Syntax error: unterminated $'...' string");
+        return 1;
+    }
+    L->read = r + 1;
+    return 1;
+}
+
 /** The characters " and ' that start or end a quote (a ' inside double quotes is only a character). */
 static int lex_quote_mark(Lexer* L) {
     CHAR c = *L->read;
@@ -832,6 +895,82 @@ static int lex_substitution(Lexer* L) {
     }
     lexer_value(L, output);
     free(output);
+    return 1;
+}
+
+/* ---- <(command) ------------------------------------------------------------------------------ */
+
+static char* processFiles[64];
+static size_t processFileCount;
+
+static void delete_process_files(void) {
+    size_t i;
+
+    for (i = 0; i < processFileCount; i++) {
+        DeleteFileA(processFiles[i]);
+        free(processFiles[i]);
+    }
+    processFileCount = 0;
+}
+
+/**
+ * <(command) is replaced by the name of a file that holds what the command wrote (it runs when the word is read, to the end,
+ * not alongside the command that reads it). The files are deleted when the shell ends.
+ */
+static int lex_process_substitution(Lexer* L) {
+    const CHAR* r = L->read;
+    size_t total, innerLength;
+    char* inner;
+    char* output = NULL;
+    char directory[MAX_PATH], path[MAX_PATH + 40];
+    static unsigned counter;
+    HANDLE handle;
+    DWORD written;
+    size_t i;
+
+    if (r[0] != '<' || r[1] != '(' || L->quote != '\0')
+        return 0;
+    total = winshell_paren_end(r + 1);
+    if (total < 2 || substitutionHandler == NULL || processFileCount >= 64) {
+        lexer_syntax_error(L, "Syntax error: bad process substitution");
+        return 1;
+    }
+    total += 1;                                     // the <
+    innerLength = total - 3;
+    inner = malloc(innerLength + 1);
+    if (inner == NULL) {
+        L->error = LEX_NOMEM;
+        return 1;
+    }
+    memcpy(inner, r + 2, innerLength);
+    inner[innerLength] = '\0';
+    L->read = r + total;
+    if (substitutionHandler(inner, &output) != 0 || output == NULL) {
+        free(inner);
+        free(output);
+        L->error = LEX_NOMEM;
+        return 1;
+    }
+    free(inner);
+    if (processFileCount == 0)
+        atexit(delete_process_files);
+    if (GetTempPathA(sizeof directory, directory) == 0)
+        strcpy(directory, ".\\");
+    snprintf(path, sizeof path, "%swinshell-ps-%lu-%u.tmp", directory, (unsigned long)GetCurrentProcessId(), ++counter);
+    handle = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, NULL);
+    if (handle == INVALID_HANDLE_VALUE) {
+        free(output);
+        lexer_syntax_error(L, "Error: cannot make the file of a process substitution");
+        return 1;
+    }
+    WriteFile(handle, output, (DWORD)strlen(output), &written, NULL);
+    CloseHandle(handle);
+    free(output);
+    processFiles[processFileCount++] = _strdup(path);
+    for (i = 0; path[i] != '\0'; i++)
+        if (path[i] == '\\')
+            path[i] = '/';
+    lexer_value(L, path);
     return 1;
 }
 
@@ -1435,6 +1574,28 @@ static int lex_braced(Lexer* L) {
     if (lex_array_special(L, body, bodyLength))
         return 1;
 
+    // ${!NAME}: the value of the variable that NAME names
+    if (bodyLength > 1 && body[0] == '!' && is_name_start(body[1])) {
+        size_t n = 1;
+
+        while (n < bodyLength && is_name_char(body[n]) && n < sizeof name)
+            n++;
+        if (n == bodyLength) {
+            const char* target;
+
+            memcpy(name, body + 1, n - 1);
+            name[n - 1] = '\0';
+            target = variable_value(name, scratch, sizeof scratch);
+            if (target != NULL) {
+                char targetName[256];
+
+                snprintf(targetName, sizeof targetName, "%s", target);
+                lexer_value(L, variable_value(targetName, scratch, sizeof scratch));
+            }
+            return 1;
+        }
+    }
+
     // ${#NAME}: the length of the value
     if (bodyLength > 1 && body[0] == '#') {
         size_t n;
@@ -1534,6 +1695,23 @@ static int lex_braced(Lexer* L) {
     }
     op = rest[0];
 
+    if (!colon && (op == '^' || op == ',')) {
+        // ${NAME^^} ${NAME^} ${NAME,,} ${NAME,}: the case of the letters (ASCII)
+        int every = bodyLength > 1 && rest[1] == op;
+        char* converted = _strdup(current != NULL ? current : "");
+        size_t k;
+
+        if (converted == NULL) {
+            L->error = LEX_NOMEM;
+            return 1;
+        }
+        for (k = 0; converted[k] != '\0' && (every || k == 0); k++)
+            converted[k] = (char)(op == '^' ? toupper((unsigned char)converted[k]) : tolower((unsigned char)converted[k]));
+        lexer_value(L, converted);
+        free(converted);
+        return 1;
+    }
+
     if (!colon && op == '/') {
         lex_replace(L, current, rest + 1, bodyLength - 1);
         return 1;
@@ -1544,6 +1722,7 @@ static int lex_braced(Lexer* L) {
         char* text = malloc(bodyLength + 1);
         char* expanded;
         long offset, count = -1;
+        int hasCount = 0;
         char* colonAt;
         size_t length = current != NULL ? strlen(current) : 0;
 
@@ -1572,6 +1751,7 @@ static int lex_braced(Lexer* L) {
                 return 1;
             }
             count = atol(expanded);
+            hasCount = 1;
             free(expanded);
         }
         free(text);
@@ -1579,6 +1759,11 @@ static int lex_braced(Lexer* L) {
             offset += (long)length;
         if (offset < 0 || (size_t)offset > length) {
             offset = (long)length;
+        }
+        if (hasCount && count < 0) {
+            count = (long)length - offset + count;     // a negative length counts from the end
+            if (count < 0)
+                count = 0;
         }
         if (count < 0 || (size_t)count > length - (size_t)offset)
             count = (long)(length - (size_t)offset);
@@ -1793,7 +1978,7 @@ static void lex_word_characters(Lexer* L) {
     while (*L->read != '\0' && !L->operatorDone && !L->error) {
         CHAR c = *L->read;
 
-        if (lex_single_quoted(L) || lex_backslash(L) || lex_quote_mark(L) || lex_substitution(L) || lex_variable(L) || lex_tilde(L) ||
+        if (lex_single_quoted(L) || lex_ansi_quote(L) || lex_backslash(L) || lex_quote_mark(L) || lex_substitution(L) || lex_variable(L) || lex_tilde(L) ||
             lex_quoted_char(L) || lex_fd_redirect(L) || lex_assignment(L))
             continue;
 
@@ -1838,6 +2023,11 @@ static int tokenize(const CHAR* line, CHAR** bufferOut, CHAR** patternsOut, Lexe
         L.isAssign = 0;
         L.dirty = 0;
 
+        if (lex_process_substitution(&L)) {
+            if (!L.error)
+                lexer_word(&L);
+            continue;
+        }
         if (lex_operator(&L))
             continue;
 

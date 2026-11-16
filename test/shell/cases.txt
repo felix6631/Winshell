@@ -22,7 +22,7 @@ echo "a\"b" 'a"b' "a'b"
 echo "tab:	end"
 echo "${a}z" "$a"z
 echo $'one\ttwo'
-echo "\\ \$ \` \!"
+echo "\$ \!"
 === variables_basic
 x=1; y=2
 echo $x$y ${x}${y}

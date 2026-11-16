@@ -257,6 +257,10 @@ static void test_agent_scripts(void) {
                   "0\n1\n2\nbig\n5 6\n5\n", 0);
     expect_script("d4.sh", "eval 'a=1; b=2'\necho $a$b\nreadonly R=1\nR=2 2>/dev/null\necho $R\ncommand -v cd\ntype cd\n", "",
                   "12\n1\ncd\ncd is a shell builtin\n", 0);
+    expect_script("d6.sh", "function m { echo m; }\nm\nfor ((i=0; i<3; i++)); do echo $i; done\necho $'a\\tb'\ns=Hello-World\necho ${s^^} ${s,,} ${s:2} ${s: -3} ${s:0:-2}\nn=s; echo ${!n}\n", "",
+                  "m\n0\n1\n2\na\tb\nHELLO-WORLD hello-world llo-World rld Hello-Wor\nHello-World\n", 0);
+    expect_script("d7.sh", "cat <(echo from_proc)\nwhile read l; do echo \"[$l]\"; done < <(printf 'x\\ny\\n')\ndiff <(echo a) <(echo a) && echo same\n", "",
+                  "from_proc\n[x]\n[y]\nsame\n", 0);
     expect_script("d5.sh", "f() { while getopts \"ab:\" o; do case $o in a) echo A;; b) echo B=$OPTARG;; esac; done; }\nf -a -b val\nOPTIND=1\nf -ab x\n", "",
                   "A\nB=val\nA\nB=x\n", 0);
 }

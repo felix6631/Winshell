@@ -54,6 +54,7 @@ struct Node {
     char*    name;              // NODE_FOR: the variable; NODE_FUNCTION: the name of the function
     int      until;             // NODE_WHILE: until
     int      isSelect;          // NODE_FOR: select instead of for
+    char*    cfor[3];           // NODE_FOR: for ((init; condition; step)): the three parts, or NULL
     int      negate;            // ! in front of the command: its status is turned round
     int      hasElse;           // NODE_IF
     List     first;             // IF: the condition, WHILE: the condition
@@ -85,6 +86,9 @@ static void free_node(Node* node) {
         free_list(&node->clauses[i].body);
     }
     free(node->clauses);
+    free(node->cfor[0]);
+    free(node->cfor[1]);
+    free(node->cfor[2]);
     free(node->text);
     free(node->redirects);
     free(node->name);
@@ -541,6 +545,44 @@ static int parse_for(Parser* p, Node* node) {
     char word[128];
 
     skip_blanks(p);
+    if (p->text[p->pos] == '(' && p->text[p->pos + 1] == '(' && !node->isSelect) {
+        // for ((init; condition; step))
+        size_t length = winshell_paren_end(p->text + p->pos), part = 0, from, k;
+
+        if (length < 4 || p->text[p->pos + length - 2] != ')')
+            return syntax(p, "Syntax error: unterminated 'for ((' expression%s", NULL);
+        from = p->pos + 2;
+        for (k = from; k <= p->pos + length - 2; k++) {
+            if (k == p->pos + length - 2 || (p->text[k] == ';' && part < 2)) {
+                size_t n = k - from;
+
+                node->cfor[part] = malloc(n + 1);
+                if (node->cfor[part] == NULL) {
+                    p->error = ERROR_MEMORY;
+                    return -1;
+                }
+                memcpy(node->cfor[part], p->text + from, n);
+                node->cfor[part][n] = '\0';
+                part++;
+                from = k + 1;
+            }
+        }
+        if (part != 3)
+            return syntax(p, "Syntax error: 'for ((' needs three expressions%s", NULL);
+        p->pos += length;
+        node->name = _strdup("");
+        if (node->name == NULL) {
+            p->error = ERROR_MEMORY;
+            return -1;
+        }
+        if (expect_word(p, "do") != 0)
+            return -1;
+        if (parse_list(p, &node->second, toDone) != 0)
+            return -1;
+        if (node->second.count == 0)
+            return syntax(p, "Syntax error: missing command after 'do'%s", NULL);
+        return expect_word(p, "done");
+    }
     if (!plain_word(p, p->pos, word, sizeof word, &end) || !(isalpha((unsigned char)word[0]) || word[0] == '_'))
         return syntax(p, "Syntax error: 'for' needs a variable name%s", NULL);
     for (start = 0; word[start] != '\0'; start++)
@@ -840,18 +882,34 @@ static Node* parse_single(Parser* p) {
 
     // name() compound-command
     if (isalpha((unsigned char)p->text[p->pos]) || p->text[p->pos] == '_') {
-        size_t nameEnd = p->pos, k, definitionStart = p->pos;
+        size_t nameStart = p->pos, nameEnd, k, definitionStart = p->pos;
+        int keyword = 0, parens;
 
+        // function NAME [()] compound-command
+        if (at_word(p, "function")) {
+            size_t q = p->pos + 8;
+
+            while (is_blank(p->text[q]))
+                q++;
+            if (isalpha((unsigned char)p->text[q]) || p->text[q] == '_') {
+                nameStart = q;
+                keyword = 1;
+            }
+        }
+        nameEnd = nameStart;
         while (isalnum((unsigned char)p->text[nameEnd]) || p->text[nameEnd] == '_')
             nameEnd++;
         k = nameEnd;
         while (is_blank(p->text[k]))
             k++;
-        if (p->text[k] == '(') {
-            k++;
-            while (is_blank(p->text[k]))
+        parens = p->text[k] == '(';
+        if (parens || keyword) {
+            if (parens) {
                 k++;
-            if (p->text[k] == ')') {
+                while (is_blank(p->text[k]))
+                    k++;
+            }
+            if (!parens || p->text[k] == ')') {
                 Node* function;
                 Node* body;
 
@@ -861,15 +919,15 @@ static Node* parse_single(Parser* p) {
                     return NULL;
                 }
                 function->type = NODE_FUNCTION;
-                function->name = malloc(nameEnd - p->pos + 1);
+                function->name = malloc(nameEnd - nameStart + 1);
                 if (function->name == NULL) {
                     free_node(function);
                     p->error = ERROR_MEMORY;
                     return NULL;
                 }
-                memcpy(function->name, p->text + p->pos, nameEnd - p->pos);
-                function->name[nameEnd - p->pos] = '\0';
-                p->pos = k + 1;
+                memcpy(function->name, p->text + nameStart, nameEnd - nameStart);
+                function->name[nameEnd - nameStart] = '\0';
+                p->pos = parens ? k + 1 : k;
                 while (is_blank(p->text[p->pos]) || p->text[p->pos] == '\n')
                     p->pos++;
                 if (p->text[p->pos] == '\0') {
@@ -2380,6 +2438,27 @@ static int run_node_plain(Runner* r, const Node* node, int status) {
         size_t count = 0, i;
         Pipeline pipeline;
         char* command;
+
+        if (node->cfor[0] != NULL) {
+            // for ((init; condition; step)); an empty condition is always true
+            command_arithmetic(node->cfor[0]);
+            activeLoopDepth++;
+            while (!*r->exitShell) {
+                if (interrupt_ends_loop(r, result)) {
+                    result = 130;
+                    break;
+                }
+                if (node->cfor[1][0] != '\0' && node->cfor[1][strspn(node->cfor[1], " \t")] != '\0' &&
+                    command_arithmetic(node->cfor[1]) != 0)
+                    break;
+                result = run_list(r, &node->second, result);
+                if (after_round())
+                    break;
+                command_arithmetic(node->cfor[2]);
+            }
+            activeLoopDepth--;
+            return result;
+        }
 
         // the words: expanded like the arguments of a command (variables, substitutions, wildcards)
         command = malloc((node->text != NULL ? strlen(node->text) : 64) + 16);
