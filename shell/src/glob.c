@@ -383,6 +383,11 @@ static int expand_pattern(const char* pattern, StringList* results) {
     Context context;
 
     memset(&context, 0, sizeof context);
+    // /? and /[x] are the switches of Windows programs (nmake /?, cmd /c), not the drives /c and /d
+    if (pattern[0] == '/' && (strcmp(pattern, "/?") == 0 || (pattern[1] == '[' && strchr(pattern, '/') == pattern && strchr(pattern + 1, '/') == NULL))) {
+        *results = context.results;
+        return 0;
+    }
     walk(&context, "", pattern);
     if (context.failed) {
         list_free(&context.results);

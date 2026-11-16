@@ -1,5 +1,6 @@
 #include "variables.h"
 #include "vec.h"
+#include "vpath.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -373,6 +374,59 @@ const char* var_get(const char* name) {
     return entry != NULL ? entry->value : NULL;
 }
 
+/*
+ * PATH as a script of UNIX writes it ("$PWD/bin:/usr/local/bin:$PATH", the directories as /c/dir and a colon between them) is a
+ * list that Windows cannot read: it takes ; between directories and C:\dir. Like MSYS the list is turned into the Windows form
+ * when it is assigned. Returns a malloc'ed copy, or NULL when the value is a Windows list already (or on no memory).
+ */
+static int is_separator_at(const char* value, size_t i, size_t start) {
+    if (value[i] == '\0' || value[i] == ';')
+        return 1;
+    // a colon is the one after a drive letter when it is the second character of the directory and a slash follows
+    return value[i] == ':' && !(i == start + 1 && (value[i + 1] == '\\' || value[i + 1] == '/'));
+}
+
+static char* windows_path_list(const char* value) {
+    size_t length = strlen(value), i, start = 0, used = 0;
+    char* out;
+    int convert = value[0] == '/';
+
+    for (i = 0; i <= length; i++) {
+        if (is_separator_at(value, i, start)) {
+            if (value[i] == ':')
+                convert = 1;
+            start = i + 1;
+            if (value[start] == '/')
+                convert = 1;
+        }
+    }
+    if (!convert)
+        return NULL;
+    out = malloc(length * 2 + 8);
+    if (out == NULL)
+        return NULL;
+    start = 0;
+    for (i = 0; i <= length; i++) {
+        if (!is_separator_at(value, i, start))
+            continue;
+        if (i > start && i - start < VPATH_MAX) {
+            char piece[VPATH_MAX], native[VPATH_MAX];
+
+            memcpy(piece, value + start, i - start);
+            piece[i - start] = '\0';
+            if (piece[0] == '/' && vpath_to_native(piece, native, sizeof native) == 0)
+                snprintf(piece, sizeof piece, "%s", native);
+            if (used > 0)
+                out[used++] = ';';
+            memcpy(out + used, piece, strlen(piece));
+            used += strlen(piece);
+        }
+        start = i + 1;
+    }
+    out[used] = '\0';
+    return out;
+}
+
 #define READONLY_MAX 64
 static char* readonlyNames[READONLY_MAX];
 static size_t readonlyCount;
@@ -391,7 +445,7 @@ void var_set_readonly(const char* name) {
         readonlyNames[readonlyCount++] = _strdup(name);
 }
 
-int var_set(const char* name, const char* value) {
+static int set_plain(const char* name, const char* value) {
     Entry* entry;
 
     if (var_is_readonly(name)) {
@@ -427,7 +481,25 @@ int var_set(const char* name, const char* value) {
     return 0;
 }
 
+static int export_plain(const char* name, const char* value);
+
+int var_set(const char* name, const char* value) {
+    char* converted = _stricmp(name, "PATH") == 0 ? windows_path_list(value) : NULL;
+    int status = set_plain(name, converted != NULL ? converted : value);
+
+    free(converted);
+    return status;
+}
+
 int var_export(const char* name, const char* value) {
+    char* converted = value != NULL && _stricmp(name, "PATH") == 0 ? windows_path_list(value) : NULL;
+    int status = export_plain(name, converted != NULL ? converted : value);
+
+    free(converted);
+    return status;
+}
+
+static int export_plain(const char* name, const char* value) {
     Entry* entry = find_entry(name);
 
     if (find_array(name) != NULL)

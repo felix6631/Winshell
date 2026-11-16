@@ -98,6 +98,38 @@ int vpath_absolute_to_native(const char* absolute, char* out, size_t size) {
     if (strcmp(absolute, "/") == 0)
         return VPATH_ROOT;
 
+    // /tmp and /var/tmp are the temporary directory of the user, which scripts of UNIX take for granted
+    {
+        size_t prefix = 0;
+
+        if (strncmp(absolute, "/tmp", 4) == 0 && (absolute[4] == '/' || absolute[4] == '\0'))
+            prefix = 4;
+        else if (strncmp(absolute, "/var/tmp", 8) == 0 && (absolute[8] == '/' || absolute[8] == '\0'))
+            prefix = 8;
+        if (prefix > 0) {
+            char temp[MAX_PATH];
+            DWORD n = GetTempPathA(sizeof temp, temp);
+            size_t i, used;
+
+            if (n == 0 || n >= sizeof temp) {
+                errno = ENOENT;
+                return -1;
+            }
+            while (n > 3 && temp[n - 1] == '\\')
+                temp[--n] = '\0';
+            used = n;
+            if (used + strlen(absolute + prefix) + 1 > size) {
+                errno = ENAMETOOLONG;
+                return -1;
+            }
+            memcpy(out, temp, used);
+            for (i = 0; absolute[prefix + i] != '\0'; i++)
+                out[used + i] = absolute[prefix + i] == '/' ? '\\' : absolute[prefix + i];
+            out[used + i] = '\0';
+            return 0;
+        }
+    }
+
     if (!(length >= 2 && p[0] == '/' && isalpha((unsigned char)p[1]) && (p[2] == '/' || p[2] == '\0'))) {
         errno = ENOENT;
         return -1;

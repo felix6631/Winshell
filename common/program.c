@@ -40,8 +40,19 @@ static int find_in_path(const char* program, char* path, size_t size) {
                 int written;
 
                 if (e == 0 && !hasExtension)
-                    continue;                       // a name without an extension is not a program by itself
+                    continue;                       // a name without an extension: the programs of Windows first
                 written = snprintf(path, size, "%s\\%s%s", directory, program, extensions[e]);
+                if (written > 0 && (size_t)written < size) {
+                    DWORD attributes = GetFileAttributesA(path);
+
+                    if (attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY))
+                        return 0;
+                }
+            }
+            if (!hasExtension) {
+                // a script with no extension, as the files of UNIX have none: found by its own name, last of all
+                int written = snprintf(path, size, "%s\\%s", directory, program);
+
                 if (written > 0 && (size_t)written < size) {
                     DWORD attributes = GetFileAttributesA(path);
 
@@ -57,7 +68,7 @@ static int find_in_path(const char* program, char* path, size_t size) {
     return -1;
 }
 
-int program_find(const char* program, char* path, size_t size) {
+int program_find_bin(const char* program, char* path, size_t size) {
     int written;
 
     if (strchr(program, '/') != NULL || strchr(program, '\\') != NULL) {
@@ -89,7 +100,11 @@ int program_find(const char* program, char* path, size_t size) {
         if (written < 0 || (size_t)written >= size)
             return -1;
     }
-    if (exists(path))
+    return exists(path) ? 0 : -1;
+}
+
+int program_find(const char* program, char* path, size_t size) {
+    if (program_find_bin(program, path, size) == 0)
         return 0;
     if (strchr(program, '/') != NULL || strchr(program, '\\') != NULL)
         return -1;

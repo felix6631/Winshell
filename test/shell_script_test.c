@@ -279,6 +279,13 @@ static void test_agent_scripts(void) {
                   "m\n0\n1\n2\na\tb\nHELLO-WORLD hello-world llo-World rld Hello-Wor\nHello-World\n", 0);
     expect_script("d7.sh", "cat <(echo from_proc)\nwhile read l; do echo \"[$l]\"; done < <(printf 'x\\ny\\n')\ndiff <(echo a) <(echo a) && echo same\n", "",
                   "from_proc\n[x]\n[y]\nsame\n", 0);
+    printf("what an agent does\n");
+    expect_script("a1.sh", "> e.txt\nls e.txt\necho hi > /tmp/winshell_t_x\ncat /tmp/winshell_t_x\nrm /tmp/winshell_t_x\n", "", "e.txt\nhi\n", 0);
+    expect_script("a2.sh", "cat > sc <<'EOF'\necho from script $1\nEOF\n./sc a\ncat > sb <<'EOF'\n#!/bin/bash\necho sb $1\nEOF\n./sb z\n", "",
+                  "from script a\nsb z\n", 0);
+    expect_script("a3.sh", "mkdir bin2\ncat > bin2/mytool <<'EOF'\necho mytool\nEOF\nexport PATH=\"$PWD/bin2:$PATH\"\nmytool\necho /?\n", "",
+                  "mytool\n/?\n", 0);
+    expect_script("a4.sh", "yes | head -2\ncmd /c echo via\n", "", "y\ny\nvia\n", 0);
     expect_script("d5.sh", "f() { while getopts \"ab:\" o; do case $o in a) echo A;; b) echo B=$OPTARG;; esac; done; }\nf -a -b val\nOPTIND=1\nf -ab x\n", "",
                   "A\nB=val\nA\nB=x\n", 0);
 }

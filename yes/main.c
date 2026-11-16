@@ -78,9 +78,8 @@ int main(int argc, char* argv[]) {
 
     for (;;) {
         if (fwrite(buffer, 1, size, stdout) != size || fflush(stdout) != 0) {
-            // the reader has gone: the pipe is closed
-            fprintf(stderr, PROGRAM ": standard output: Broken pipe\n");
-            return 1;
+            // the reader has gone: GNU yes is killed by SIGPIPE, silently, which a shell reports as 141
+            return 141;
         }
     }
 }

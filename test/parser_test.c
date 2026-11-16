@@ -270,8 +270,13 @@ static void test_redirections(void) {
     CHECK_INT(parse("echo hi >", &p), -1);
     CHECK_INT(parse("echo hi > | cat", &p), -1);
     CHECK_INT(parse("cat <", &p), -1);
-    CHECK_INT(parse("> out.txt", &p), -1);
-    CHECK_INT(parse("echo hi | > out.txt", &p), -1);
+    // redirections alone are a command, as in bash (> file empties the file)
+    CHECK_INT(parse("> out.txt", &p), 0);
+    CHECK_STR(file_of(&p.commands[0], 1), "out.txt");
+    CHECK(p.commands[0].argv == NULL);
+    winshell_freePipeline(&p);
+    CHECK_INT(parse("echo hi | > out.txt", &p), 0);
+    winshell_freePipeline(&p);
 }
 
 static void test_patterns(void) {

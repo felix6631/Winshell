@@ -143,14 +143,143 @@ static char* build_environment(const Command* command, int* failed) {
  * Starts one program with the given standard handles, which have to be inheritable.
  * Returns the process handle, or NULL after reporting the problem.
  */
+/** The name of a program without its directory and its extension. */
+static void base_name(const char* path, char* out, size_t size) {
+    const char* slash = strrchr(path, '/');
+    const char* back = strrchr(path, '\\');
+    const char* name = path;
+    size_t n;
+
+    if (slash != NULL && slash + 1 > name)
+        name = slash + 1;
+    if (back != NULL && back + 1 > name)
+        name = back + 1;
+    n = strlen(name);
+    if (n > 4 && _stricmp(name + n - 4, ".exe") == 0)
+        n -= 4;
+    if (n >= size)
+        n = size - 1;
+    memcpy(out, name, n);
+    out[n] = '\0';
+}
+
+/**
+ * A file that is not a program of Windows is a script: `#!/bin/sh`, `#!/usr/bin/env python3`, or text with no first line
+ * (a shell script). Returns 1 with the interpreter (a Windows path) and the one argument the first line may give it,
+ * 0 for a program that Windows runs itself, -1 when the interpreter cannot be found.
+ */
+static int script_interpreter(const char* path, char* interpreter, size_t size, char* argument, size_t argumentSize) {
+    unsigned char head[256];
+    DWORD got = 0;
+    HANDLE file;
+    size_t length = strlen(path), i;
+    char first[128], second[128], third[128];
+    int words = 0;
+
+    argument[0] = '\0';
+    if (length > 4 && (_stricmp(path + length - 4, ".exe") == 0 || _stricmp(path + length - 4, ".com") == 0 ||
+                       _stricmp(path + length - 4, ".cmd") == 0 || _stricmp(path + length - 4, ".bat") == 0))
+        return 0;
+    file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+        return 0;
+    if (!ReadFile(file, head, sizeof head - 1, &got, NULL))
+        got = 0;
+    CloseHandle(file);
+    if (got >= 2 && head[0] == 'M' && head[1] == 'Z')
+        return 0;
+    head[got] = '\0';
+
+    first[0] = second[0] = third[0] = '\0';
+    if (got >= 2 && head[0] == '#' && head[1] == '!') {
+        char line[256];
+        char* word;
+        char* context = NULL;
+
+        for (i = 2; i < got && head[i] != '\n' && head[i] != '\r'; i++)
+            line[i - 2] = (char)head[i];
+        line[i > 2 ? i - 2 : 0] = '\0';
+        for (word = strtok_s(line, " \t", &context); word != NULL && words < 3; word = strtok_s(NULL, " \t", &context)) {
+            snprintf(words == 0 ? first : (words == 1 ? second : third), 128, "%s", word);
+            words++;
+        }
+    }
+    {
+        char name[128];
+        const char* wanted;
+        char native[MAX_PATH];
+
+        if (words == 0) {
+            snprintf(name, sizeof name, "sh");              // text without a first line: a shell script
+        } else {
+            base_name(first, name, sizeof name);
+            if (strcmp(name, "env") == 0 && words >= 2) {
+                size_t k = 1;
+                const char* args[2] = { second, third };
+
+                while (k <= 2 && args[k - 1][0] == '-' && k < (size_t)words)
+                    k++;                                    // env -S and the like
+                base_name(args[k - 1], name, sizeof name);
+            } else if (words >= 2) {
+                snprintf(argument, argumentSize, "%s", second);
+            }
+        }
+        wanted = name;
+        if (strcmp(name, "sh") == 0 || strcmp(name, "bash") == 0 || strcmp(name, "dash") == 0 || strcmp(name, "zsh") == 0 ||
+            strcmp(name, "ash") == 0 || strcmp(name, "ksh") == 0 || strcmp(name, "shell") == 0) {
+            DWORD n = GetModuleFileNameA(NULL, interpreter, (DWORD)size);
+
+            argument[0] = '\0';
+            return n > 0 && n < size ? 1 : -1;
+        }
+        if (strcmp(name, "python3") == 0 || strcmp(name, "python") == 0) {
+            // python3 of Windows is often a stub of the Store (WindowsApps) that runs nothing: python comes first
+            if (program_find("python", native, sizeof native) != 0 && program_find("python3", native, sizeof native) != 0)
+                return -1;
+        } else if (program_find(wanted, native, sizeof native) != 0) {
+            return -1;
+        }
+        snprintf(interpreter, size, "%s", native);
+        return 1;
+    }
+}
+
 static HANDLE start_program(char* const argv[], HANDLE in, HANDLE out, HANDLE err, char* environment, DWORD flags) {
     char path[MAX_PATH];
+    char interpreter[MAX_PATH], scriptArgument[128], scriptPath[MAX_PATH];
+    char** scriptArgv = NULL;
     char* command;
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
 
     if (program_find(argv[0], path, sizeof path) != 0)
         goto err_start;
+
+    // a script is run by its interpreter: argv becomes interpreter [argument] script arguments...
+    {
+        int kind = script_interpreter(path, interpreter, sizeof interpreter, scriptArgument, sizeof scriptArgument);
+
+        if (kind < 0)
+            goto err_start;
+        if (kind > 0) {
+            size_t count = 0, n = 0, k;
+
+            while (argv[count] != NULL)
+                count++;
+            scriptArgv = calloc(count + 4, sizeof *scriptArgv);
+            if (scriptArgv == NULL)
+                goto err_start;
+            scriptArgv[n++] = interpreter;
+            if (scriptArgument[0] != '\0')
+                scriptArgv[n++] = scriptArgument;
+            snprintf(scriptPath, sizeof scriptPath, "%s", path);
+            scriptArgv[n++] = scriptPath;
+            for (k = 1; k < count; k++)
+                scriptArgv[n++] = argv[k];
+            argv = scriptArgv;
+            snprintf(path, sizeof path, "%s", interpreter);
+        }
+    }
 
     {
         // a batch file is run by cmd.exe, which reads the name of the file from the command line: it has to be a Windows path
@@ -181,6 +310,7 @@ static HANDLE start_program(char* const argv[], HANDLE in, HANDLE out, HANDLE er
     if (strlen(command) >= MAX_COMMAND_LINE) {
         fprintf(stderr, "Error: Command line is too long. Max limit is %d characters\n", MAX_COMMAND_LINE - 1);
         free(command);
+        free(scriptArgv);
         return NULL;
     }
 
@@ -210,10 +340,12 @@ static HANDLE start_program(char* const argv[], HANDLE in, HANDLE out, HANDLE er
     free(command);
 
     CloseHandle(pi.hThread);
+    free(scriptArgv);
     return pi.hProcess;
 
 err_start:
     fprintf(stderr, "Error: Failed to execute command '%s'\n", argv[0]);
+    free(scriptArgv);
     return NULL;
 }
 

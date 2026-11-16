@@ -172,7 +172,7 @@ static void find_program(Matches* m, const char* name, const Extensions* ext, in
 
     {
         char path[VPATH_MAX];
-        if (program_find(name, path, sizeof path) == 0 && is_file(path)) {
+        if (program_find_bin(name, path, sizeof path) == 0 && is_file(path)) {
             add_match(m, path);
             if (!all)
                 return;

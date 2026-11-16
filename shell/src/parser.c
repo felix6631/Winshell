@@ -2158,7 +2158,8 @@ static int add_assignment(Command* command, LPSTR assignment) {
 
 /** A command that has neither a program nor an assignment is not a command. */
 static int has_nothing_to_run(const Command* command) {
-    return command->argv == NULL && command->assignmentCount == 0;
+    // redirections alone (`> file`) are a command: they make or empty the file
+    return command->argv == NULL && command->assignmentCount == 0 && command->redirectCount == 0 && command->input == NULL;
 }
 
 /** A redirection operator at lexemes[*index]; the lexeme after it is the file, which is consumed. */
