@@ -210,6 +210,10 @@ int interp_run_simple(const char* text, int* exitShell, int status) {
     // the parser and the executer report their own errors
     if (winshell_parse(text, &pipeline) != 0)
         return 2;
+    if (winshell_unbound) {             // set -u: nothing runs; the runner ends the shell
+        winshell_freePipeline(&pipeline);
+        return 1;
+    }
 
     if (pipeline.count > 0 && winshell_glob(&pipeline) == 0) {
         int builtinStatus = status;

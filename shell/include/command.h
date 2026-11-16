@@ -59,6 +59,17 @@ void command_run_exit_trap(int* status);
 void* command_traps_enter_subshell(void);
 void command_traps_leave_subshell(void* saved);
 
+/**
+ * set [-+eux...] [-+o NAME] [--] [ARG...]: the builtin. -e (errexit) ends the shell when a command fails (not in a condition or
+ * in a list joined by && or ||), -u (nounset) makes an unset variable an error, -o pipefail gives a pipeline the status of its last
+ * command that failed; -x, -f, -C, -v and the other options of bash are accepted and do nothing. Words that are not options (or
+ * come after --) become the parameters $1.. Returns the status.
+ */
+int command_set(char* const* argv);
+
+/** The options of set: non-zero when on. */
+extern int winshell_opt_errexit, winshell_opt_nounset, winshell_opt_pipefail;
+
 /** Whether a Ctrl+C is waiting to be served (the builtin wait stops then). */
 int command_was_interrupted(void);
 

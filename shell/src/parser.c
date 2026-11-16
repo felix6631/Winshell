@@ -181,6 +181,20 @@ void winshell_positionals_restore(Positionals* saved) {
     free(saved);
 }
 
+int winshell_unbound;
+int winshell_opt_nounset;           // set -u
+
+/** set -u: tells of the unset variable (not the special parameters, which have no value to miss). */
+static void check_unbound(const char* name, const char* value) {
+    if (value != NULL || !winshell_opt_nounset || winshell_unbound)
+        return;
+    if (name[0] == '@' || name[0] == '*' || name[0] == '#' || name[0] == '-' || name[0] == '0' || name[0] == '?' ||
+        name[0] == '$' || name[0] == '!' || name[0] == '_' && name[1] == '\0')
+        return;
+    fprintf(stderr, "%s: unbound variable\n", name);
+    winshell_unbound = 1;
+}
+
 static const char* variable_value(const char* name, char* scratch, size_t size) {
     const char* value;
 
@@ -1475,6 +1489,8 @@ static int lex_braced(Lexer* L) {
     }
     set = current != NULL;
     nonnull = set && current[0] != '\0';
+    if (bodyLength == 0)
+        check_unbound(name, current);
     if (bodyLength == 0) {
         if (strcmp(name, "@") == 0 && L->quote == '"' && !L->isAssign)
             lexer_quoted_at(L);
@@ -1671,6 +1687,7 @@ static int lex_variable(Lexer* L) {
     memcpy(name, start, length);
     name[length] = '\0';
     value = variable_value(name, scratch, sizeof scratch);
+    check_unbound(name, value);
     L->read = after;
     if (strcmp(name, "@") == 0 && L->quote == '"' && !L->isAssign)
         lexer_quoted_at(L);

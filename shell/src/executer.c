@@ -1,4 +1,5 @@
 #include "executer.h"
+#include "command.h"
 #include "vpath.h"
 #include "program.h"
 #include "cmdline.h"
@@ -288,6 +289,7 @@ static int run_pipeline(const Pipeline* pipeline, int background, HANDLE** keep,
     HANDLE pipeRead = NULL;     // read end of the pipe coming from the previous command
     DWORD exitCode = (DWORD)-1;
     int noopSucceeded = 0;      // the last command was NAME=value alone
+    DWORD failed = 0;           // the status of the last command before the end of the pipeline that failed (set -o pipefail)
     size_t i;
 
     HANDLE nul = INVALID_HANDLE_VALUE;
@@ -356,8 +358,16 @@ static int run_pipeline(const Pipeline* pipeline, int background, HANDLE** keep,
         WaitForSingleObject(processes[i], INFINITE);
         if (i + 1 == pipeline->count && !GetExitCodeProcess(processes[i], &exitCode))
             exitCode = (DWORD)-1;
+        if (i + 1 != pipeline->count && winshell_opt_pipefail) {
+            DWORD code;
+
+            if (GetExitCodeProcess(processes[i], &code) && code != 0)
+                failed = code;
+        }
         CloseHandle(processes[i]);
     }
+    if (winshell_opt_pipefail && failed != 0 && (exitCode == 0 || exitCode == (DWORD)-1))
+        exitCode = failed;
 
     if (noopSucceeded)
         exitCode = 0;

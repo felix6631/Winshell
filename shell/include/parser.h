@@ -56,7 +56,9 @@ void winshell_setLastStatus(int status);
  */
 void winshell_positionals_set(const char* const* arguments, int count);
 int winshell_positional_count(void);
-const char* winshell_positional(int number);        // 1-based; NULL beyond the count
+const char* winshell_positional(int number);
+/** set -u found an unset variable: the command is not run and the shell ends (the runner takes the flag). */
+extern int winshell_unbound;        // 1-based; NULL beyond the count
 typedef struct Positionals Positionals;
 Positionals* winshell_positionals_save(void);
 void winshell_positionals_restore(Positionals* saved);

@@ -52,6 +52,7 @@ struct Node {
     char*    name;              // NODE_FOR: the variable; NODE_FUNCTION: the name of the function
     int      until;             // NODE_WHILE: until
     int      isSelect;          // NODE_FOR: select instead of for
+    int      negate;            // ! in front of the command: its status is turned round
     int      hasElse;           // NODE_IF
     List     first;             // IF: the condition, WHILE: the condition
     List     second;            // IF: then, WHILE and FOR: the body
@@ -1007,7 +1008,26 @@ static Node* parse_single(Parser* p) {
  * A command and the stages after it when they are joined with | and one of them is a compound command: the
  * stages are the nodes of a NODE_PIPE. (Stages that are all simple commands stay in one text: a pipeline.)
  */
+static Node* parse_pipeline(Parser* p);
+
+/** `! pipeline`: the status of the pipeline turned round. */
 static Node* parse_command(Parser* p) {
+    Node* node;
+    int negate = 0;
+
+    skip_blanks(p);
+    while (at_word(p, "!") && (is_blank(p->text[p->pos + 1]) || p->text[p->pos + 1] == '\n')) {
+        negate = !negate;
+        p->pos++;
+        skip_blanks(p);
+    }
+    node = parse_pipeline(p);
+    if (node != NULL && negate)
+        node->negate = !node->negate;
+    return node;
+}
+
+static Node* parse_pipeline(Parser* p) {
     Node* first = parse_single(p);
     Node* pipe;
 
@@ -1103,6 +1123,8 @@ enum { TRAP_EXIT, TRAP_INT, TRAP_ERR, TRAP_COUNT };
 // NULL: the default action; "": ignored; otherwise the commands to run
 static char* trapAction[TRAP_COUNT];
 static int trapRunning[TRAP_COUNT];
+int winshell_opt_errexit, winshell_opt_pipefail;
+static int conditionDepth;              // inside a condition or the left of && and ||: no errexit
 static int errSuppressed;               // inside a condition, a function or a trap: no ERR
 
 static const char* const trapNames[TRAP_COUNT] = { "EXIT", "INT", "ERR" };
@@ -2167,7 +2189,22 @@ static int run_select(Runner* r, const Node* node, char* const* values, size_t c
     return result;
 }
 
+static int run_node_plain(Runner* r, const Node* node, int status);
+
 static int run_node(Runner* r, const Node* node, int status) {
+    int result;
+
+    if (!node->negate)
+        return run_node_plain(r, node, status);
+    conditionDepth++;
+    result = run_node_plain(r, node, status);
+    conditionDepth--;
+    if (*r->exitShell || pendingLevels > 0)
+        return result;
+    return result == 0 ? 1 : 0;
+}
+
+static int run_node_plain(Runner* r, const Node* node, int status) {
     if (node->redirects != NULL)
         return run_redirected(r, node, status);
     if (node->type == NODE_PIPE)
@@ -2198,7 +2235,9 @@ static int run_node(Runner* r, const Node* node, int status) {
         int condition;
 
         errSuppressed++;
+        conditionDepth++;
         condition = run_list(r, &node->first, status);
+        conditionDepth--;
         errSuppressed--;
 
         if (*r->exitShell || pendingLevels > 0)
@@ -2222,7 +2261,9 @@ static int run_node(Runner* r, const Node* node, int status) {
                 break;
             }
             errSuppressed++;
+            conditionDepth++;
             condition = run_list(r, &node->first, result);
+            conditionDepth--;
             errSuppressed--;
             if (*r->exitShell || pendingLevels > 0) {
                 if (after_round())
@@ -2303,6 +2344,78 @@ static int run_node(Runner* r, const Node* node, int status) {
     return 0;
 }
 
+static int set_option_by_name(const char* name, int on) {
+    static const char* const ignored[] = { "xtrace", "noglob", "noclobber", "verbose", "allexport", "ignoreeof", "monitor",
+                                           "emacs", "vi", "posix", "noexec", "braceexpand", "hashall", "history", "keyword",
+                                           "notify", "onecmd", "physical", "privileged", "errtrace", "functrace", "histexpand",
+                                           "interactive-comments", NULL };
+    int i;
+
+    if (strcmp(name, "errexit") == 0) {
+        winshell_opt_errexit = on;
+        return 0;
+    }
+    if (strcmp(name, "nounset") == 0) {
+        winshell_opt_nounset = on;
+        return 0;
+    }
+    if (strcmp(name, "pipefail") == 0) {
+        winshell_opt_pipefail = on;
+        return 0;
+    }
+    for (i = 0; ignored[i] != NULL; i++)
+        if (strcmp(name, ignored[i]) == 0)
+            return 0;
+    return -1;
+}
+
+int command_set(char* const* argv) {
+    int i = 1, status = 0;
+
+    for (; argv[i] != NULL; i++) {
+        const char* a = argv[i];
+        int on;
+
+        if (strcmp(a, "--") == 0) {
+            i++;
+            break;
+        }
+        if ((a[0] != '-' && a[0] != '+') || a[1] == '\0')
+            break;
+        on = a[0] == '-';
+        if (strcmp(a, "-o") == 0 || strcmp(a, "+o") == 0) {
+            if (argv[i + 1] == NULL)
+                continue;                   // the list of the options
+            i++;
+            if (set_option_by_name(argv[i], on) != 0) {
+                fprintf(stderr, "set: %s: invalid option name\n", argv[i]);
+                status = 1;
+            }
+            continue;
+        }
+        for (a++; *a != '\0'; a++) {
+            switch (*a) {
+            case 'e': winshell_opt_errexit = on; break;
+            case 'u': winshell_opt_nounset = on; break;
+            case 'x': case 'f': case 'C': case 'v': case 'n': case 'a': case 'b': case 'h': case 'm': case 'B':
+            case 'H': case 'P': case 'T': case 'E': case 'k': case 't': case 'p':
+                break;
+            default:
+                fprintf(stderr, "set: %c%c: invalid option\n", on ? '-' : '+', *a);
+                return 2;
+            }
+        }
+    }
+    if (argv[i] != NULL || (i > 1 && strcmp(argv[i - 1], "--") == 0)) {
+        int count = 0;
+
+        while (argv[i + count] != NULL)
+            count++;
+        interp_set_parameters(NULL, (const char* const*)argv + i, count);
+    }
+    return status;
+}
+
 static int run_list(Runner* r, const List* list, int status) {
     size_t i;
 
@@ -2314,9 +2427,25 @@ static int run_list(Runner* r, const List* list, int status) {
         if (!run)
             continue;
         winshell_setLastStatus(status);
-        status = run_node(r, list->nodes[i], status);
+        {
+            int guarded = i + 1 < list->count && (list->ops[i + 1] == LIST_AND || list->ops[i + 1] == LIST_OR);
+
+            conditionDepth += guarded;
+            status = run_node(r, list->nodes[i], status);
+            conditionDepth -= guarded;
+        }
         winshell_setLastStatus(status);
+        if (winshell_unbound) {                 // set -u: an unset variable ends the shell
+            winshell_unbound = 0;
+            status = 1;
+            *r->exitShell = 1;
+        }
         service_interrupt(r, &status);
+        // set -e: a command failed, unless its status is being tested
+        if (status != 0 && winshell_opt_errexit && conditionDepth == 0 && !*r->exitShell && pendingLevels == 0 &&
+            (list->nodes[i]->type == NODE_SIMPLE || list->nodes[i]->type == NODE_PIPE || list->nodes[i]->type == NODE_SUBSHELL) &&
+            (i + 1 >= list->count || (list->ops[i + 1] != LIST_AND && list->ops[i + 1] != LIST_OR)))
+            *r->exitShell = 1;
         // ERR: a command failed, unless its status is being tested (a condition, the left of && or ||)
         if (status != 0 && trapAction[TRAP_ERR] != NULL && errSuppressed == 0 && !*r->exitShell &&
             pendingLevels == 0 && (list->nodes[i]->type == NODE_SIMPLE || list->nodes[i]->type == NODE_PIPE) &&

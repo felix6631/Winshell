@@ -197,6 +197,16 @@ int vpath_getcwd(char* out, size_t size) {
 int vpath_to_native(const char* path, char* out, size_t size) {
     char base[VPATH_MAX], absolute[VPATH_MAX];
 
+    // the null device: scripts write to /dev/null whatever the system
+    if (strcmp(path, "/dev/null") == 0) {
+        if (size < 4) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        strcpy(out, "NUL");
+        return 0;
+    }
+
     // not part of the virtual tree: hand it to Windows as it is
     if (path[0] == '\\') {
         if (strlen(path) + 1 > size) {
