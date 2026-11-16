@@ -158,6 +158,18 @@ static long long primary(Arith* a, int live) {
         }
         name[n] = '\0';
         a->pos += n;
+        if ((a->text[a->pos] == '+' && a->text[a->pos + 1] == '+') || (a->text[a->pos] == '-' && a->text[a->pos + 1] == '-')) {
+            // name++ and name--: the value before the change
+            long long old = live ? value_of_name(a, name, live) : 0;
+            char text[32];
+
+            if (live) {
+                snprintf(text, sizeof text, "%lld", a->text[a->pos] == '+' ? old + 1 : old - 1);
+                var_set(name, text);
+            }
+            a->pos += 2;
+            return old;
+        }
         return live ? value_of_name(a, name, live) : 0;
     }
     if (a->text[a->pos] == '\0')
@@ -170,6 +182,33 @@ static long long primary(Arith* a, int live) {
 
 static long long unary(Arith* a, int live) {
     skip_blanks(a);
+    if ((a->text[a->pos] == '+' && a->text[a->pos + 1] == '+') || (a->text[a->pos] == '-' && a->text[a->pos + 1] == '-')) {
+        // ++name and --name: the value after the change
+        int plus = a->text[a->pos] == '+';
+        char name[128];
+        size_t n = 0;
+
+        a->pos += 2;
+        skip_blanks(a);
+        while ((isalnum((unsigned char)a->text[a->pos + n]) || a->text[a->pos + n] == '_') && n < sizeof name - 1) {
+            name[n] = a->text[a->pos + n];
+            n++;
+        }
+        name[n] = '\0';
+        if (n == 0 || !is_name_start(name[0]))
+            return fail(a, "syntax error: operand expected%s", NULL);
+        a->pos += n;
+        if (!live)
+            return 0;
+        {
+            long long value = value_of_name(a, name, live) + (plus ? 1 : -1);
+            char text[32];
+
+            snprintf(text, sizeof text, "%lld", value);
+            var_set(name, text);
+            return value;
+        }
+    }
     if (a->text[a->pos] == '+' && a->text[a->pos + 1] != '+') {
         a->pos++;
         return unary(a, live);

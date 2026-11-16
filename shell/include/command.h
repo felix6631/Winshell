@@ -67,6 +67,18 @@ void command_traps_leave_subshell(void* saved);
  */
 int command_set(char* const* argv);
 
+/**
+ * [[ expression ]] and (( arithmetic )): the status of the command (0 true, 1 false, 2 a mistake in it, which is reported).
+ */
+int command_dbracket(const char* text);
+int command_arithmetic(const char* text);
+
+/** Whether a function is being run (declare makes local variables there). */
+int command_in_function(void);
+
+/** command NAME: while on, a name is not looked for among the functions. */
+void command_bypass_functions(int on);
+
 /** The options of set: non-zero when on. */
 extern int winshell_opt_errexit, winshell_opt_nounset, winshell_opt_pipefail;
 

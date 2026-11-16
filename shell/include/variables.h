@@ -52,6 +52,10 @@ void var_array_unset(const char* name, long index);
 /** Calls fn for every element of every array (an empty array once, with index -1 and no value). */
 void var_each_array(void (*fn)(const char* name, long index, const char* value, void* context), void* context);
 
+/** readonly NAME: the variable can no longer be set or unset (a message and a failure instead). */
+void var_set_readonly(const char* name);
+int var_is_readonly(const char* name);
+
 /** unset NAME: removes the variable, whichever kind it is. */
 void var_unset(const char* name);
 

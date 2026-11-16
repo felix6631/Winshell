@@ -6,6 +6,7 @@
 #include "jobs.h"
 #include "vpath.h"
 #include "variables.h"
+#include "program.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -358,9 +359,331 @@ static int builtin_unset(char* const argv[]) {
     return status;
 }
 
+/* ---- eval, let, readonly, declare, type, command, getopts, shopt ---------------------------------------- */
+
+/** The arguments from `first` joined with blanks; malloc'ed. */
+static char* join_arguments(char* const argv[], int first) {
+    size_t length = 1;
+    int i;
+    char* text;
+
+    for (i = first; argv[i] != NULL; i++)
+        length += strlen(argv[i]) + 1;
+    text = malloc(length);
+    if (text == NULL)
+        return NULL;
+    text[0] = '\0';
+    for (i = first; argv[i] != NULL; i++) {
+        if (i > first)
+            strcat(text, " ");
+        strcat(text, argv[i]);
+    }
+    return text;
+}
+
+/** A word that the parser reads back as it is: in single quotes. malloc'ed. */
+static char* quote_word(const char* word) {
+    size_t extra = 2, i;
+    char* out;
+    size_t n = 0;
+
+    for (i = 0; word[i] != '\0'; i++)
+        extra += word[i] == '\'' ? 4 : 1;
+    out = malloc(extra + 1);
+    if (out == NULL)
+        return NULL;
+    out[n++] = '\'';
+    for (i = 0; word[i] != '\0'; i++) {
+        if (word[i] == '\'') {
+            memcpy(out + n, "'\\''", 4);
+            n += 4;
+        } else {
+            out[n++] = word[i];
+        }
+    }
+    out[n++] = '\'';
+    out[n] = '\0';
+    return out;
+}
+
+static int builtin_eval(char* const argv[], int* status, int* exitShell) {
+    char* text;
+
+    if (argv[1] == NULL)
+        return 0;
+    text = join_arguments(argv, 1);
+    if (text == NULL)
+        return 1;
+    *status = interp_run_line(text, exitShell, *status);
+    free(text);
+    return *status;
+}
+
+static int builtin_let(char* const argv[]) {
+    int i, status = 1;
+
+    if (argv[1] == NULL) {
+        fprintf(stderr, "let: expression expected\n");
+        return 1;
+    }
+    for (i = 1; argv[i] != NULL; i++)
+        status = command_arithmetic(argv[i]);
+    return status;
+}
+
+static int builtin_readonly(char* const argv[]) {
+    int i, status = 0;
+
+    for (i = 1; argv[i] != NULL; i++) {
+        const char* equals;
+        char name[256];
+        size_t length;
+
+        if (argv[i][0] == '-')
+            continue;                       // -p, -a, -f: nothing to say here
+        equals = strchr(argv[i], '=');
+        length = equals != NULL ? (size_t)(equals - argv[i]) : strlen(argv[i]);
+        if (length == 0 || length >= sizeof name || !valid_name(argv[i], length)) {
+            fprintf(stderr, "readonly: '%s': not a valid identifier\n", argv[i]);
+            status = 1;
+            continue;
+        }
+        memcpy(name, argv[i], length);
+        name[length] = '\0';
+        if (equals != NULL && var_set(name, equals + 1) != 0) {
+            status = 1;
+            continue;
+        }
+        var_set_readonly(name);
+    }
+    return status;
+}
+
+static int builtin_declare(char* const argv[]) {
+    int i, status = 0, readonly = 0, exported = 0, print = 0;
+
+    for (i = 1; argv[i] != NULL && argv[i][0] == '-' && argv[i][1] != '\0'; i++) {
+        const char* f;
+
+        for (f = argv[i] + 1; *f != '\0'; f++) {
+            if (*f == 'r')
+                readonly = 1;
+            else if (*f == 'x')
+                exported = 1;
+            else if (*f == 'p')
+                print = 1;
+        }
+    }
+    for (; argv[i] != NULL; i++) {
+        const char* equals = strchr(argv[i], '=');
+        char name[256];
+        size_t length = equals != NULL ? (size_t)(equals - argv[i]) : strlen(argv[i]);
+
+        if (length == 0 || length >= sizeof name || !valid_name(argv[i], length)) {
+            fprintf(stderr, "declare: '%s': not a valid identifier\n", argv[i]);
+            status = 1;
+            continue;
+        }
+        memcpy(name, argv[i], length);
+        name[length] = '\0';
+        if (print) {
+            const char* value = var_get(name);
+
+            if (value == NULL) {
+                fprintf(stderr, "declare: %s: not found\n", name);
+                status = 1;
+            } else {
+                printf("declare -- %s=\"%s\"\n", name, value);
+            }
+            continue;
+        }
+        if (command_in_function()) {
+            if (command_local(name, equals != NULL ? equals + 1 : NULL) != 0)
+                status = 1;
+        } else if (equals != NULL && var_set(name, equals + 1) != 0) {
+            status = 1;
+            continue;
+        }
+        if (exported)
+            var_export(name, NULL);
+        if (readonly)
+            var_set_readonly(name);
+    }
+    return status;
+}
+
+/** What a command word is: 'f' function, 'b' builtin, 'p' program (path in out), 0 nothing. */
+static int word_kind(const char* name, char* out, size_t size) {
+    char native[1024];
+
+    if (command_has_function(name))
+        return 'f';
+    if (builtin_exists(name))
+        return 'b';
+    if (program_find(name, native, sizeof native) == 0) {
+        if (vpath_from_native(native, out, size) != 0)
+            snprintf(out, size, "%s", native);
+        return 'p';
+    }
+    return 0;
+}
+
+/** command -v / -V and type: tells what the names are. */
+static int builtin_type(char* const argv[], int isType) {
+    int i = 1, status = 0, terse = !isType, verbose = isType, onlyPath = 0;
+
+    for (; argv[i] != NULL && argv[i][0] == '-' && argv[i][1] != '\0'; i++) {
+        const char* f;
+
+        for (f = argv[i] + 1; *f != '\0'; f++) {
+            if (*f == 'v') {
+                terse = 1;
+                verbose = 0;
+            } else if (*f == 'V') {
+                terse = 0;
+                verbose = 1;
+            } else if (*f == 't') {
+                terse = 2;
+                verbose = 0;
+            } else if (*f == 'p' || *f == 'P') {
+                onlyPath = 1;
+            }
+        }
+    }
+    for (; argv[i] != NULL; i++) {
+        char path[1024];
+        int kind = word_kind(argv[i], path, sizeof path);
+
+        if (kind == 0 || (onlyPath && kind != 'p')) {
+            if (verbose || (isType && terse != 2))
+                fprintf(stderr, "%s: %s: not found\n", isType ? "type" : "command", argv[i]);
+            status = 1;
+        } else if (terse == 2) {
+            puts(kind == 'f' ? "function" : (kind == 'b' ? "builtin" : "file"));
+        } else if (verbose) {
+            if (kind == 'f')
+                printf("%s is a function\n", argv[i]);
+            else if (kind == 'b')
+                printf("%s is a shell builtin\n", argv[i]);
+            else
+                printf("%s is %s\n", argv[i], path);
+        } else {
+            puts(kind == 'p' ? path : argv[i]);
+        }
+    }
+    return status;
+}
+
+/** getopts OPTSTRING NAME [ARG...] */
+static int builtin_getopts(char* const argv[]) {
+    static long stateIndex = 0, stateOffset = 1;
+    const char* optstring = argv[1];
+    const char* name = argv[2];
+    char* const* args;
+    int count = 0, silent;
+    long index;
+    const char* current;
+    char option;
+    const char* at;
+    char value[2];
+    const char* indexText;
+
+    if (optstring == NULL || name == NULL) {
+        fprintf(stderr, "getopts: usage: getopts optstring name [arg ...]\n");
+        return 2;
+    }
+    silent = optstring[0] == ':';
+    if (argv[3] != NULL) {
+        args = argv + 3;
+        while (args[count] != NULL)
+            count++;
+    } else {
+        // the parameters of the shell
+        static char* positionalCopy[256];
+        int n = winshell_positional_count(), k;
+
+        for (k = 0; k < n && k < 255; k++)
+            positionalCopy[k] = (char*)winshell_positional(k + 1);
+        positionalCopy[k] = NULL;
+        count = k;
+        args = positionalCopy;
+    }
+    indexText = var_get("OPTIND");
+    index = indexText != NULL ? atol(indexText) : 1;
+    if (index < 1)
+        index = 1;
+    if (index != stateIndex)
+        stateOffset = 1;
+    stateIndex = index;
+
+    if (index > count || args[index - 1] == NULL || args[index - 1][0] != '-' || args[index - 1][1] == '\0') {
+        var_set(name, "?");
+        return 1;
+    }
+    current = args[index - 1];
+    if (strcmp(current, "--") == 0) {
+        char number[32];
+
+        snprintf(number, sizeof number, "%ld", index + 1);
+        var_set("OPTIND", number);
+        var_set(name, "?");
+        stateIndex = 0;
+        return 1;
+    }
+    option = current[stateOffset];
+    value[0] = option;
+    value[1] = '\0';
+    at = option != ':' ? strchr(optstring + (silent ? 1 : 0), option) : NULL;
+    {
+        char number[32];
+        long newIndex = index;
+        int moreInWord = current[stateOffset + 1] != '\0';
+
+        if (at == NULL) {
+            var_set(name, "?");
+            if (silent) {
+                var_set("OPTARG", value);
+            } else {
+                fprintf(stderr, "getopts: illegal option -- %c\n", option);
+                var_unset("OPTARG");
+            }
+        } else if (at[1] == ':') {
+            if (moreInWord) {
+                var_set(name, value);
+                var_set("OPTARG", current + stateOffset + 1);
+            } else if (index < count) {
+                var_set(name, value);
+                var_set("OPTARG", args[index]);
+                newIndex = index + 1;
+            } else if (silent) {
+                var_set(name, ":");
+                var_set("OPTARG", value);
+            } else {
+                var_set(name, "?");
+                fprintf(stderr, "getopts: option requires an argument -- %c\n", option);
+                var_unset("OPTARG");
+            }
+            moreInWord = 0;                     // the rest of the word was the argument
+        } else {
+            var_set(name, value);
+            var_unset("OPTARG");
+        }
+        if (moreInWord) {
+            stateOffset++;                      // more options in this word
+        } else {
+            stateOffset = 1;
+            newIndex++;
+        }
+        snprintf(number, sizeof number, "%ld", newIndex);
+        var_set("OPTIND", number);
+        stateIndex = newIndex;
+    }
+    return 0;
+}
+
 int builtin_exists(const char* name) {
     static const char* const names[] = { "cd", "export", "unset", "exit", "quit", "source", ".", ":", "break",
-                                         "continue", "read", "return", "local", "trap", "jobs", "wait", "shift", "fg", "bg", "disown", "set" };
+                                         "continue", "read", "return", "local", "trap", "jobs", "wait", "shift", "fg", "bg", "disown", "set", "eval", "let", "readonly", "declare", "typeset", "type", "command", "getopts", "shopt" };
     size_t i;
 
     for (i = 0; i < sizeof names / sizeof names[0]; i++)
@@ -491,6 +814,86 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
             free(rest);
         }
         *status = 0;
+        return 1;
+    }
+    if (strcmp(name, "eval") == 0) {
+        *status = builtin_eval(command->argv, status, exitShell);
+        return 1;
+    }
+    if (strcmp(name, "let") == 0) {
+        *status = builtin_let(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "readonly") == 0) {
+        *status = builtin_readonly(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "declare") == 0 || strcmp(name, "typeset") == 0) {
+        *status = builtin_declare(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "type") == 0) {
+        *status = builtin_type(command->argv, 1);
+        return 1;
+    }
+    if (strcmp(name, "getopts") == 0) {
+        *status = builtin_getopts(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "shopt") == 0) {
+        *status = 0;                // the options of bash that matter here are on already or not supported
+        return 1;
+    }
+    if (strcmp(name, "command") == 0) {
+        char* const* argv = command->argv;
+
+        if (argv[1] != NULL && (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "-V") == 0 || strcmp(argv[1], "-p") == 0 && argv[2] != NULL && (strcmp(argv[2], "-v") == 0 || strcmp(argv[2], "-V") == 0))) {
+            *status = builtin_type(argv, 0);
+        } else {
+            // command NAME ARG...: NAME is not looked for among the functions
+            int first = 1;
+            size_t i, length = 1;
+            char* text;
+            int result;
+
+            if (argv[first] != NULL && strcmp(argv[first], "-p") == 0)
+                first++;
+            if (argv[first] != NULL && strcmp(argv[first], "--") == 0)
+                first++;
+            if (argv[first] == NULL) {
+                *status = 0;
+                return 1;
+            }
+            for (i = (size_t)first; argv[i] != NULL; i++) {
+                char* quoted = quote_word(argv[i]);
+
+                if (quoted == NULL) {
+                    *status = 1;
+                    return 1;
+                }
+                length += strlen(quoted) + 1;
+                free(quoted);
+            }
+            text = malloc(length);
+            if (text == NULL) {
+                *status = 1;
+                return 1;
+            }
+            text[0] = '\0';
+            for (i = (size_t)first; argv[i] != NULL; i++) {
+                char* quoted = quote_word(argv[i]);
+
+                if (i > (size_t)first)
+                    strcat(text, " ");
+                strcat(text, quoted);
+                free(quoted);
+            }
+            command_bypass_functions(1);
+            result = interp_run_line(text, exitShell, *status);
+            command_bypass_functions(0);
+            free(text);
+            *status = result;
+        }
         return 1;
     }
     if (strcmp(name, "set") == 0) {

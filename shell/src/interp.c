@@ -231,7 +231,7 @@ int interp_run_simple(const char* text, int* exitShell, int status) {
                 if (length < sizeof name) {
                     memcpy(name, assignment, length);
                     name[length] = '\0';
-                    if (var_set(name, assignment + length + 1) != 0)
+                    if (var_set(name, assignment + length + 1) != 0 && !var_is_readonly(name))
                         fprintf(stderr, "Error: Out of memory\n");
                 } else {
                     fprintf(stderr, "Error: Variable name too long\n");

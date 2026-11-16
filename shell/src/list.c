@@ -66,6 +66,9 @@ size_t winshell_pass_quoted(const CHAR* line, size_t i, CHAR* quote) {
             backslashes++;
         if (line[i + backslashes] == '"' && backslashes % 2 == 1)
             return backslashes + 1;     // the quote is escaped: pass it as well
+        if (backslashes == 1 && line[i + 1] != '\0' && line[i + 1] < 128 && *quote == '\0' &&
+            strchr(" \t'$`;&|<>()#", (int)line[i + 1]) != NULL)
+            return 2;                   // \; \| \& ... : the character is no operator
         return backslashes;             // an even number: the quote that follows toggles
     }
 

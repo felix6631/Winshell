@@ -247,6 +247,18 @@ static void test_agent_scripts(void) {
     printf("backslashes\n");
     expect_script("b1.sh", "echo a\\ b\necho one \\\n  two\necho \"\\$x\"\n", "", "a b\none two\n$x\n", 0);
     expect_script("b2.sh", "echo C:\\Users\\me\n", "", "C:\\Users\\me\n", 0);
+
+    printf("[[ ]], (( )) and the builtins of bash\n");
+    expect_script("d1.sh", "[[ abc == a* ]] && echo glob\n[[ abc == \"a*\" ]] || echo literal\n[[ -n x && -z \"\" ]] && echo and\n[[ 5 -gt 3 || 1 -eq 2 ]] && echo num\n", "",
+                  "glob\nliteral\nand\nnum\n", 0);
+    expect_script("d2.sh", "[[ foo123 =~ ([a-z]+)([0-9]+) ]] && echo \"${BASH_REMATCH[1]}-${BASH_REMATCH[2]}\"\n[[ ! -e nothere ]] && echo none\n[[ a < b ]] && echo lt\n", "",
+                  "foo-123\nnone\nlt\n", 0);
+    expect_script("d3.sh", "i=0\nwhile (( i < 3 )); do echo $i; (( i++ )); done\nx=5; (( x > 3 )) && echo big\ny=$((x++)); echo $y $x\nlet \"k = 2 + 3\"; echo $k\n", "",
+                  "0\n1\n2\nbig\n5 6\n5\n", 0);
+    expect_script("d4.sh", "eval 'a=1; b=2'\necho $a$b\nreadonly R=1\nR=2 2>/dev/null\necho $R\ncommand -v cd\ntype cd\n", "",
+                  "12\n1\ncd\ncd is a shell builtin\n", 0);
+    expect_script("d5.sh", "f() { while getopts \"ab:\" o; do case $o in a) echo A;; b) echo B=$OPTARG;; esac; done; }\nf -a -b val\nOPTIND=1\nf -ab x\n", "",
+                  "A\nB=val\nA\nB=x\n", 0);
 }
 
 int main(void) {

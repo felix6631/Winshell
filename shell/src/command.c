@@ -33,7 +33,9 @@ typedef struct {
 
 typedef enum {
     NODE_SIMPLE, NODE_IF, NODE_WHILE, NODE_FOR, NODE_PIPE, NODE_CASE, NODE_GROUP, NODE_SUBSHELL, NODE_FUNCTION,
-    NODE_BACKGROUND             // list &: first is the and-or list, text its source
+    NODE_BACKGROUND,            // list &: first is the and-or list, text its source
+    NODE_DBRACKET,              // [[ text ]]
+    NODE_ARITH                  // (( text ))
 } NodeType;
 
 /** One clause of a case: the patterns (text, expanded when the case is run) and the commands. */
@@ -903,6 +905,82 @@ static Node* parse_single(Parser* p) {
         }
     }
 
+    // [[ expression ]]
+    if (at_word(p, "[[")) {
+        size_t k = p->pos + 2;
+        char quote = '\0';
+        size_t end = (size_t)-1;
+
+        while (p->text[k] != '\0') {
+            char c = p->text[k];
+
+            if (quote != '\0') {
+                if (c == '\\' && quote == '"' && p->text[k + 1] != '\0')
+                    k++;
+                else if (c == quote)
+                    quote = '\0';
+            } else if (c == '\\' && p->text[k + 1] != '\0') {
+                k++;
+            } else if (c == '\'' || c == '"') {
+                quote = c;
+            } else if (c == '$' && p->text[k + 1] == '(') {
+                size_t n = winshell_paren_end(p->text + k + 1);
+
+                if (n > 0)
+                    k += n;
+            } else if (c == ']' && p->text[k + 1] == ']' && k > p->pos + 2 && is_blank(p->text[k - 1]) &&
+                       (p->text[k + 2] == '\0' || is_blank(p->text[k + 2]) || strchr("\n;&|)", p->text[k + 2]) != NULL)) {
+                end = k;
+                break;
+            }
+            k++;
+        }
+        if (end == (size_t)-1) {
+            incomplete(p, "Syntax error: missing ']]'");
+            return NULL;
+        }
+        node = new_node(NODE_DBRACKET);
+        if (node == NULL) {
+            p->error = ERROR_MEMORY;
+            return NULL;
+        }
+        node->type = NODE_DBRACKET;
+        node->text = malloc(end - (p->pos + 2) + 1);
+        if (node->text == NULL) {
+            free(node);
+            p->error = ERROR_MEMORY;
+            return NULL;
+        }
+        memcpy(node->text, p->text + p->pos + 2, end - (p->pos + 2));
+        node->text[end - (p->pos + 2)] = '\0';
+        p->pos = end + 2;
+        return node;
+    }
+
+    // (( expression ))
+    if (p->text[p->pos] == '(' && p->text[p->pos + 1] == '(') {
+        size_t length = winshell_paren_end(p->text + p->pos);
+
+        if (length >= 4 && p->text[p->pos + length - 2] == ')') {
+            node = new_node(NODE_ARITH);
+            if (node == NULL) {
+                p->error = ERROR_MEMORY;
+                return NULL;
+            }
+            node->type = NODE_ARITH;
+            node->text = malloc(length - 4 + 1);
+            if (node->text == NULL) {
+                free(node);
+                p->error = ERROR_MEMORY;
+                return NULL;
+            }
+            memcpy(node->text, p->text + p->pos + 2, length - 4);
+            node->text[length - 4] = '\0';
+            p->pos += length;
+            return node;
+        }
+    }
+
     // ( list ): a subshell
     if (p->text[p->pos] == '(') {
         int status;
@@ -1361,7 +1439,19 @@ static Function* find_function(const char* name) {
     return NULL;
 }
 
+static int bypassFunctions;
+
+void command_bypass_functions(int on) {
+    bypassFunctions = on;
+}
+
+int command_in_function(void) {
+    return callDepth > 0;
+}
+
 int command_has_function(const char* name) {
+    if (bypassFunctions)
+        return 0;
     return find_function(name) != NULL;
 }
 
@@ -2228,6 +2318,10 @@ static int run_node_plain(Runner* r, const Node* node, int status) {
 
     case NODE_BACKGROUND:
         return run_background(r, node, status);
+    case NODE_DBRACKET:
+        return command_dbracket(node->text);
+    case NODE_ARITH:
+        return command_arithmetic(node->text);
     case NODE_SIMPLE:
         return run_simple(r, node, status);
 

@@ -373,8 +373,32 @@ const char* var_get(const char* name) {
     return entry != NULL ? entry->value : NULL;
 }
 
+#define READONLY_MAX 64
+static char* readonlyNames[READONLY_MAX];
+static size_t readonlyCount;
+
+int var_is_readonly(const char* name) {
+    size_t i;
+
+    for (i = 0; i < readonlyCount; i++)
+        if (strcmp(readonlyNames[i], name) == 0)
+            return 1;
+    return 0;
+}
+
+void var_set_readonly(const char* name) {
+    if (!var_is_readonly(name) && readonlyCount < READONLY_MAX)
+        readonlyNames[readonlyCount++] = _strdup(name);
+}
+
 int var_set(const char* name, const char* value) {
-    Entry* entry = find_entry(name);
+    Entry* entry;
+
+    if (var_is_readonly(name)) {
+        fprintf(stderr, "%s: readonly variable\n", name);
+        return -1;
+    }
+    entry = find_entry(name);
 
     if (find_array(name) != NULL)
         return put_element(find_array(name), 0, value);     // a=x on an array sets a[0]
@@ -442,8 +466,15 @@ void var_each_local(void (*fn)(const char* name, const char* value, void* contex
 }
 
 void var_unset(const char* name) {
-    Entry* entry = find_entry(name);
-    ArrayVar* array = find_array(name);
+    Entry* entry;
+    ArrayVar* array;
+
+    if (var_is_readonly(name)) {
+        fprintf(stderr, "unset: %s: cannot unset: readonly variable\n", name);
+        return;
+    }
+    entry = find_entry(name);
+    array = find_array(name);
 
     if (array != NULL)
         remove_array(array);
