@@ -373,6 +373,8 @@ static void lex_output_operator(Lexer* L, int fd) {
     if (*L->read == '>') {
         append = 1;
         L->read++;
+    } else if (*L->read == '|') {
+        L->read++;                          // >| is > (there is no noclobber)
     }
     if (*L->read == '&') {
         lex_dup(L, fd, append);

@@ -220,6 +220,8 @@ static int builtin_read(char* const argv[]) {
     }
     text[length] = '\0';
     (void)gotAny;
+    if (interp_lastLineUnterminated)
+        status = 1;                         // the variables are set, but read fails: a loop on it ends
 
     ifs = var_get("IFS");
     if (ifs == NULL)

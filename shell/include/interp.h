@@ -53,6 +53,8 @@ int interp_capture_call(int (*run)(void* context), void* context, char** output,
  * command (interp_input_redirected), then from descriptor 0.
  */
 int interp_read_line(char** line);
+/** Non-zero when the line the last interp_read_line gave ended with the input, with no line end (read then fails). */
+extern int interp_lastLineUnterminated;
 void interp_set_line_reader(char* (*reader)(void));
 void interp_input_redirected(int delta);
 

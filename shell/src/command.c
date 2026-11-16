@@ -1996,7 +1996,12 @@ static int run_stages(Runner* r, const StageList* list, int status) {
 
     for (i = 0; i < list->count; i++) {
         if (i + 1 == list->count) {
+            // every stage of a pipeline is a subshell: what the last one sets does not stay (echo x | read y)
+            VarSnapshot* before = list->count > 1 ? var_save() : NULL;
+
             result = run_stage_here(r, &list->items[i], status);
+            if (before != NULL)
+                var_restore(before);
         } else {
             StageRun run;
             char* output = NULL;

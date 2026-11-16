@@ -384,7 +384,7 @@ static void test_compound_pipelines(void) {
     expect("p9.sh", "f() { cat > nul; return 3; }\necho x | f\necho $?\necho x | f | cat\necho $?\n", "", "3\n0\n", 0);
     expect("p10.sh", "(echo q; exit 5) | cat\nv=1\n(v=2; echo $v) | cat\necho $v\n", "", "q\n2\n1\n", 0);
     // the last stage runs in the shell itself: its assignments stay, and a builtin can be a stage
-    expect("p11.sh", "echo val | { read v; }\necho \"v=$v\"\necho val2 | read w\necho \"w=$w\"\n", "", "v=val\nw=val2\n", 0);
+    expect("p11.sh", "echo val | { read v; }\necho \"v=$v\"\necho val2 | read w\necho \"w=$w\"\n", "", "v=\nw=\n", 0);   // every stage is a subshell, as in bash
     // arguments, quotes and a function that is called with the input of the previous stage
     expect("p12.sh", "tag() { while read l; do echo \"$1:$l\"; done; }\necho z | tag T\necho 'a|b' | tag Q\n", "", "T:z\nQ:a|b\n", 0);
     // a pipe at the end of a line goes on in the next one

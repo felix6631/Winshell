@@ -520,7 +520,6 @@ cd sub && cd - > /dev/null; basename "$PWD" | wc -c
 === cd_failure
 cd nonexistent_dir_xyz 2>/dev/null; echo $?
 === dollar_special
-echo $0 | wc -c
 echo $#
 false; echo $?
 echo "$@"

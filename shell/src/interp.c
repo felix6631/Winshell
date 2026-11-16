@@ -620,11 +620,14 @@ void interp_set_line_reader(char* (*reader)(void)) {
     lineReader = reader;
 }
 
+int interp_lastLineUnterminated;
+
 int interp_read_line(char** line) {
     size_t length = 0, capacity = 0;
     char* text = NULL;
 
     *line = NULL;
+    interp_lastLineUnterminated = 0;
     if (inputRedirected == 0) {
         char* input = lineReader != NULL ? lineReader() : NULL;
         size_t n;
@@ -648,6 +651,7 @@ int interp_read_line(char** line) {
                 free(text);
                 return 0;
             }
+            interp_lastLineUnterminated = 1;
             break;
         }
         if (c == '\n')
