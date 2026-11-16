@@ -2873,15 +2873,58 @@ static int run_text_plain(const char* text, int* exitShell, int status) {
     return status;
 }
 
+/** The text without the backslash-newline of a continued line (not inside single quotes). NULL when there is none or no memory. */
+static char* strip_continuations(const char* text) {
+    char* out;
+    size_t i = 0, n = 0;
+    int quote = 0, any = 0;
+
+    if (strchr(text, '\\') == NULL)
+        return NULL;
+    out = malloc(strlen(text) + 1);
+    if (out == NULL)
+        return NULL;
+    while (text[i] != '\0') {
+        if (quote != 1 && text[i] == '\\' && (text[i + 1] == '\n' || (text[i + 1] == '\r' && text[i + 2] == '\n'))) {
+            i += text[i + 1] == '\n' ? 2 : 3;
+            any = 1;
+            continue;
+        }
+        if (quote == 0 && text[i] == '\\' && text[i + 1] != '\0') {
+            out[n++] = text[i++];           // the escaped character is not a quote
+        } else if (text[i] == '\'' && quote != 2) {
+            quote = quote == 1 ? 0 : 1;
+        } else if (text[i] == '"' && quote != 1) {
+            quote = quote == 2 ? 0 : 2;
+        }
+        out[n++] = text[i++];
+    }
+    out[n] = '\0';
+    if (!any) {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
 int command_run_text(const char* text, int* exitShell, int status) {
-    int unterminated;
-    char* rewritten = strstr(text, "<<") != NULL ? rewrite_heredocs(text, &unterminated) : NULL;
+    char* joined = strip_continuations(text);
     int result;
 
-    if (rewritten == NULL)
-        return run_text_plain(text, exitShell, status);
-    result = run_text_plain(rewritten, exitShell, status);
-    free(rewritten);
+    if (joined != NULL) {
+        result = command_run_text(joined, exitShell, status);
+        free(joined);
+        return result;
+    }
+    {
+        int unterminated;
+        char* rewritten = strstr(text, "<<") != NULL ? rewrite_heredocs(text, &unterminated) : NULL;
+
+        if (rewritten == NULL)
+            return run_text_plain(text, exitShell, status);
+        result = run_text_plain(rewritten, exitShell, status);
+        free(rewritten);
+    }
     return result;
 }
 
@@ -2906,6 +2949,14 @@ static int incomplete_plain(const char* text) {
 
 int command_incomplete(const char* text) {
     int unterminated = 0;
+    char* joined = strip_continuations(text);
+
+    if (joined != NULL) {
+        int again = command_incomplete(joined);
+
+        free(joined);
+        return again;
+    }
     char* rewritten = strstr(text, "<<") != NULL ? rewrite_heredocs(text, &unterminated) : NULL;
     int result;
 

@@ -28,7 +28,7 @@ x=1; y=2
 echo $x$y ${x}${y}
 z=$x$y; echo $z
 unset x; echo "[$x]"
-export E=exported; sh -c 'echo $E' 2>/dev/null || true
+export E=exported; printenv E
 echo ${undefined-default} ${undefined:-default}
 empty=; echo ${empty-d} ${empty:-d}
 === param_default
@@ -565,7 +565,7 @@ nocmd_xyz 2>/dev/null
 echo $?
 === assignment_prefix
 X=1 echo $X
-X=1; X=2 sh -c 'echo $X' 2>/dev/null; echo $X
+X=1; X=2 printenv X; echo $X
 === env_builtin
 export A=1 B=2
 env | grep -c '^[AB]='

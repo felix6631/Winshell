@@ -227,8 +227,31 @@ static void test_source(void) {
     expect_c("sub/in.sh", "sub/in.sh\n", 0);
 }
 
+/** What a script of an agent needs: set, ! , here-strings and here documents, backslash escapes, the null device. */
+static void test_agent_scripts(void) {
+    printf("set\n");
+    expect_script("e1.sh", "set -e\necho a\nfalse\necho b\n", "", "a\n", 1);
+    expect_script("e2.sh", "set -e\nfalse || echo handled\nif false; then echo no; fi\necho end\n", "", "handled\nend\n", 0);
+    expect_script("e3.sh", "set -u\necho ${x:-d}\necho $x\necho no\n", "", "d\n", 1);
+    expect_script("e4.sh", "set -o pipefail\nfalse | true\necho $?\nset +o pipefail\nfalse | true\necho $?\n", "", "1\n0\n", 0);
+    expect_script("e5.sh", "set -- a 'b c'\necho $# $2\n", "", "2 b c\n", 0);
+    expect_script("e6.sh", "! false\necho $?\n! true\necho $?\n", "", "0\n1\n", 0);
+    expect_script("e7.sh", "echo x > /dev/null\ncat /dev/null\necho ok\n", "", "ok\n", 0);
+
+    printf("here-strings and here documents\n");
+    expect_script("h1.sh", "read a b <<< \"x y z\"\necho \"$a|$b\"\n", "", "x|y z\n", 0);
+    expect_script("h2.sh", "cat <<EOF\nline $((1+2))\nEOF\ncat <<'EOF'\nno $x\nEOF\n", "", "line 3\nno $x\n", 0);
+    expect_script("h3.sh", "cat <<-EOF\n\ttabs gone\n\tEOF\ncat <<EOF | tr a-z A-Z\nup\nEOF\n", "", "tabs gone\nUP\n", 0);
+    expect_script("h4.sh", "f() { cat <<EOF\nin $1\nEOF\n}\nf arg\ncat <<A; cat <<B\none\nA\ntwo\nB\n", "", "in arg\none\ntwo\n", 0);
+
+    printf("backslashes\n");
+    expect_script("b1.sh", "echo a\\ b\necho one \\\n  two\necho \"\\$x\"\n", "", "a b\none two\n$x\n", 0);
+    expect_script("b2.sh", "echo C:\\Users\\me\n", "", "C:\\Users\\me\n", 0);
+}
+
 int main(void) {
     tools_init("shell_script_test");
+    test_agent_scripts();
     test_scripts();
     test_substitution();
     test_expansion();

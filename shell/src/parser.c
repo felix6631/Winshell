@@ -455,6 +455,23 @@ static int lex_backslash(Lexer* L) {
     while (L->read[backslashes] == '\\')
         backslashes++;
 
+    // POSIX: a backslash makes the next character an ordinary one. Where a Windows path has a backslash (before a letter or a
+    // digit, or a second backslash) it stays as it is, so C:\Users and \\server\share still mean what they say.
+    if (backslashes == 1 && L->read[1] != '\0') {
+        CHAR next = L->read[1];
+
+        if (L->quote == '\0' && strchr(" \t'\"$`;&|<>()#", (int)next) != NULL) {
+            lexer_char(L, next, 1);
+            L->read += 2;
+            return 1;
+        }
+        if (L->quote == '"' && (next == '$' || next == '`')) {
+            lexer_char(L, next, 1);
+            L->read += 2;
+            return 1;
+        }
+    }
+
     if (L->read[backslashes] == '"') {
         for (k = 0; k < backslashes / 2; k++)
             lexer_char(L, '\\', 1);
