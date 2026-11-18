@@ -1261,7 +1261,12 @@ static int interrupted_now(void) {
 
 /* ---- traps ------------------------------------------------------------------------------- */
 
-enum { TRAP_EXIT, TRAP_INT, TRAP_ERR, TRAP_COUNT };
+/*
+ * The traps: EXIT, INT (Ctrl+C, the only signal Windows delivers), ERR, and the other names of bash. A trap on a
+ * signal that cannot arrive here (TERM, HUP, USR1 ...) or on DEBUG and RETURN is accepted and kept (trap -p shows it),
+ * so that a script that sets one is not stopped by an error; it does not run.
+ */
+enum { TRAP_EXIT, TRAP_INT, TRAP_ERR, TRAP_DEBUG, TRAP_RETURN, TRAP_SIG, TRAP_COUNT = TRAP_SIG + 65 };
 
 // NULL: the default action; "": ignored; otherwise the commands to run
 static char* trapAction[TRAP_COUNT];
@@ -1270,7 +1275,40 @@ int winshell_opt_errexit, winshell_opt_pipefail;
 static int conditionDepth;              // inside a condition or the left of && and ||: no errexit
 static int errSuppressed;               // inside a condition, a function or a trap: no ERR
 
-static const char* const trapNames[TRAP_COUNT] = { "EXIT", "INT", "ERR" };
+/** The names of the signals 1 to 31 of Linux. */
+static const char* const signalNames[32] = {
+    "", "HUP", "INT", "QUIT", "ILL", "TRAP", "ABRT", "BUS", "FPE", "KILL", "USR1", "SEGV", "USR2", "PIPE", "ALRM", "TERM",
+    "STKFLT", "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG", "XCPU", "XFSZ", "VTALRM", "PROF", "WINCH", "IO", "PWR", "SYS"
+};
+
+/** The slot of the signal with this number (1 to 64). */
+static int signal_slot(int number) {
+    return number == 2 ? TRAP_INT : TRAP_SIG + number;
+}
+
+/** The text that trap -p shows for a slot. */
+static void trap_name(int slot, char* buffer, size_t size) {
+    int number = slot == TRAP_INT ? 2 : slot - TRAP_SIG;
+
+    if (slot == TRAP_EXIT)
+        snprintf(buffer, size, "EXIT");
+    else if (slot == TRAP_ERR)
+        snprintf(buffer, size, "ERR");
+    else if (slot == TRAP_DEBUG)
+        snprintf(buffer, size, "DEBUG");
+    else if (slot == TRAP_RETURN)
+        snprintf(buffer, size, "RETURN");
+    else if (number <= 31)
+        snprintf(buffer, size, "SIG%s", signalNames[number]);
+    else if (number == 34)
+        snprintf(buffer, size, "SIGRTMIN");
+    else if (number == 64)
+        snprintf(buffer, size, "SIGRTMAX");
+    else if (number < 49)
+        snprintf(buffer, size, "SIGRTMIN+%d", number - 34);
+    else
+        snprintf(buffer, size, "SIGRTMAX-%d", 64 - number);
+}
 
 /** Runs the commands of a trap. Returns the status to go on with; *exitShell is set when they ended the shell. */
 static int run_trap(int which, int* exitShell, int status) {
@@ -1350,32 +1388,30 @@ void command_traps_leave_subshell(void* handle) {
 
 /** The trap that a signal name or number stands for; prints the reason and returns 1 when there is none. */
 static int trap_slot(const char* name, int* slot) {
-    static const char* const unsupported[] = { "HUP", "QUIT", "ILL", "ABRT", "FPE", "SEGV", "PIPE", "ALRM", "TERM",
-                                               "USR1", "USR2", "CHLD", "CONT", "TSTP", "TTIN", "TTOU", "BUS",
-                                               "DEBUG", "RETURN", "KILL", "STOP" };
     const char* n = name;
     char* end;
     long number;
-    size_t i;
+    int k;
 
-    if (strncmp(n, "SIG", 3) == 0)
-        n += 3;
-    if (strcmp(n, "EXIT") == 0) { *slot = TRAP_EXIT; return 0; }
-    if (strcmp(n, "INT") == 0)  { *slot = TRAP_INT;  return 0; }
-    if (strcmp(n, "ERR") == 0)  { *slot = TRAP_ERR;  return 0; }
     number = strtol(name, &end, 10);
     if (*name != '\0' && *end == '\0') {
         if (number == 0) { *slot = TRAP_EXIT; return 0; }
-        if (number == 2) { *slot = TRAP_INT;  return 0; }
-        if (number > 0 && number < 65) {
-            fprintf(stderr, "trap: %s: signal not supported\n", name);
-            return 1;
-        }
+        if (number > 0 && number < 65) { *slot = signal_slot((int)number); return 0; }
+        fprintf(stderr, "trap: %s: invalid signal specification\n", name);
+        return 1;
     }
-    for (i = 0; i < sizeof unsupported / sizeof unsupported[0]; i++) {
-        if (strcmp(n, unsupported[i]) == 0) {
-            fprintf(stderr, "trap: %s: signal not supported\n", name);
-            return 1;
+    if (strncmp(n, "SIG", 3) == 0)
+        n += 3;
+    if (strcmp(n, "EXIT") == 0)   { *slot = TRAP_EXIT;   return 0; }
+    if (strcmp(n, "ERR") == 0)    { *slot = TRAP_ERR;    return 0; }
+    if (strcmp(n, "DEBUG") == 0)  { *slot = TRAP_DEBUG;  return 0; }
+    if (strcmp(n, "RETURN") == 0) { *slot = TRAP_RETURN; return 0; }
+    if (strcmp(n, "RTMIN") == 0)  { *slot = signal_slot(34); return 0; }
+    if (strcmp(n, "RTMAX") == 0)  { *slot = signal_slot(64); return 0; }
+    for (k = 1; k < 32; k++) {
+        if (strcmp(n, signalNames[k]) == 0) {
+            *slot = signal_slot(k);
+            return 0;
         }
     }
     fprintf(stderr, "trap: %s: invalid signal specification\n", name);
@@ -1394,7 +1430,24 @@ static void trap_print(int slot) {
         else
             putchar(*p);
     }
-    printf("' %s\n", trapNames[slot]);
+    {
+        char name[24];
+
+        trap_name(slot, name, sizeof name);
+        printf("' %s\n", name);
+    }
+}
+
+/** trap -p without names: every trap that is set, EXIT first, then the signals by number, then DEBUG, ERR and RETURN. */
+static void trap_print_all(void) {
+    int n;
+
+    trap_print(TRAP_EXIT);
+    for (n = 1; n < 65; n++)
+        trap_print(signal_slot(n));
+    trap_print(TRAP_DEBUG);
+    trap_print(TRAP_ERR);
+    trap_print(TRAP_RETURN);
 }
 
 static int trap_command(char* const* argv);
@@ -1413,7 +1466,12 @@ static int trap_command(char* const* argv) {
     if (argv[i] != NULL && strcmp(argv[i], "--") == 0)
         i++;
     if (argv[i] != NULL && strcmp(argv[i], "-l") == 0) {
-        puts("EXIT INT ERR");
+        {
+            int n;
+
+            for (n = 1; n < 32; n++)
+                printf("%2d) SIG%s%s", n, signalNames[n], n % 5 == 0 || n == 31 ? "\n" : "\t");
+        }
         return 0;
     }
     if (argv[i] != NULL && strcmp(argv[i], "-p") == 0) {
@@ -1428,8 +1486,7 @@ static int trap_command(char* const* argv) {
         }
     }
     if (argv[i] == NULL) {
-        for (slot = 0; slot < TRAP_COUNT; slot++)
-            trap_print(slot);
+        trap_print_all();
         return 0;
     }
     if (argv[i + 1] == NULL) {

@@ -123,7 +123,7 @@ nmake gnu       :: GNU 도구와 출력 대조 (MSYS2 나 Git for Windows 의 ba
 
 Winshell은 활발히 개발 중입니다.
 
-- **쉘**: Ctrl+Z 로 작업 멈추기, `trap` 의 다른 신호
+- **쉘**: `HUP`, `TERM` 같은 신호의 `trap` 은 이름만 받고 실행하지 않습니다(Windows 에서 오지 않음). 신호로 쉘을 끝내는 `kill -TERM $$` 에 트랩을 실행하는 것과, 콘솔 없이는 쓸 수 없는 Ctrl+Z 작업 멈춤은 에이전트 사용에 영향이 작아 뒤로 미뤘습니다(`kill -STOP`, `bg`, `fg` 는 있음)
 - **호환성**: Windows XP까지 동작하는 것이 목표입니다(아직 검증 전). UTF-8 동작은 Windows 10 1903 이상에서 적용됩니다.
 - **coreutils**: 대상에서 제외한 명령을 빼고 모두 구현했습니다. Windows에 대응하는 개념이 없는 `mkfifo`, `mknod`, `stdbuf`는 옵션과 오류를 GNU처럼 검사하되 실제 동작은 하지 못하고, `stty`는 콘솔이 가진 `isig` `icanon` `echo`와 크기만 다룹니다(문서 참고).
 

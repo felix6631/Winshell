@@ -268,7 +268,7 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
     the script, `exit`), and an `exit N` inside it gives the status of the shell. `INT` stops the command that was running with Ctrl+C, runs
     the trap and the script goes on (without a trap a loop stops). `ERR` runs after a simple command failed, but not in a condition
     (`if`, `while`), on the left of `&&`/`||` and inside functions. A subshell and `$(...)` start without traps (what was ignored stays
-    ignored). The other signals (`HUP`, `TERM`, ...) do not exist on Windows: "signal not supported".
+    ignored). Signals that do not arrive on Windows (`HUP`, `TERM`, `USR1` ...) and `DEBUG`, `RETURN` are accepted by name or number (the numbers of Linux, 1 to 64) and shown by `trap -p` as `trap -- 'ACTION' SIGTERM`, but they never run, so a first line such as `trap cleanup EXIT INT TERM` does not stop the script with an error. An unknown name is `invalid signal specification`. `trap -l` lists the signals 1 to 31 of Linux.
   - The input is read one command of the top level at a time (up to the next newline) and parsed whole before it runs, so a line with a
     syntax error runs nothing; in a script file the commands before the error have run when it ends with status 2. At a terminal an
     unfinished `if`/`while`/`for`, an open quote, or a line that ends in `&&`, `||` or `$(` goes on in the next line (prompt `> `). Ctrl+C

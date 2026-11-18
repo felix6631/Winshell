@@ -129,7 +129,7 @@ Besides the unit tests there are **property tests** (LF, CRLF and mixed line end
 
 Winshell is under active development.
 
-- **Shell**: stopping a job with Ctrl+Z, more signals for `trap`
+- **Shell**: a `trap` on `HUP`, `TERM` and the like is accepted by name but never runs (those signals do not arrive on Windows). Running the trap when `kill -TERM $$` ends the shell, and stopping a job with Ctrl+Z (there is no such key without a console), matter little to agents and are put off (`kill -STOP`, `bg` and `fg` exist)
 - **Compatibility**: the goal is to run as far back as Windows XP (not verified yet). UTF-8 behaviour needs Windows 10 version 1903 or later.
 - **coreutils**: all the commands are done except the ones that are out of scope. `mkfifo`, `mknod` and `stdbuf` have no counterpart on Windows: they check their options and operands as GNU does but cannot do what they are for, and `stty` only handles what a console has: `isig`, `icanon`, `echo` and the size (see the reference).
 

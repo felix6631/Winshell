@@ -339,21 +339,23 @@ static void test_trap(void) {
     // a subshell and a substitution start without the traps
     expect("t11.sh", "trap 'echo outer' EXIT\n(echo in; exit 0)\necho \"$(echo sub)\"\n", "", "in\nsub\nouter\n", 0);
     expect("t12.sh", "trap 'echo outer' EXIT\n(trap 'echo inner' ERR; false)\necho \"[$(trap)]\"\n", "", "inner\n[]\nouter\n", 0);
-    // INT can be ignored or set; the other signals are refused
+    // INT can be ignored or set; signals that cannot arrive are accepted and kept; unknown names are refused
     expect("t13.sh", "trap '' INT\ntrap\ntrap - INT\ntrap 'echo h' 2\ntrap -p\n", "",
-           "trap -- '' INT\ntrap -- 'echo h' INT\n", 0);
+           "trap -- '' SIGINT\ntrap -- 'echo h' SIGINT\n", 0);
     {
         RunResult r;
 
         write_text(workDir, "t14.sh", "trap 'echo x' TERM\necho $?\ntrap 'echo x' BOGUS\necho $?\n");
         run_shell("t14.sh", "", &r);
         lf_only(r.out);
-        CHECK_STR(r.out, "1\n1\n");
-        CHECK(strstr(r.err, "TERM: signal not supported") != NULL);
+        CHECK_STR(r.out, "0\n1\n");
+        CHECK(strstr(r.err, "TERM") == NULL);
         CHECK(strstr(r.err, "BOGUS: invalid signal specification") != NULL);
         run_result_free(&r);
     }
     // the trap sees the variables of the script, and $? outside is as it was
+    expect("t16.sh", "trap 'echo bye' EXIT INT TERM HUP\ntrap -p\ntrap - TERM\ntrap -p SIGTERM SIGHUP\nset -e\ntrap '' PIPE USR1\necho ok\n", "",
+           "trap -- 'echo bye' EXIT\ntrap -- 'echo bye' SIGHUP\ntrap -- 'echo bye' SIGINT\ntrap -- 'echo bye' SIGTERM\ntrap -- 'echo bye' SIGHUP\nok\nbye\n", 0);
     expect("t15.sh", "n=5\ntrap 'echo n=$n' EXIT\nn=6\n", "", "n=6\n", 0);
 }
 
