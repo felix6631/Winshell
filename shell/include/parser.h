@@ -51,6 +51,9 @@ typedef struct {
  */
 void winshell_setLastStatus(int status);
 
+/** $LINENO: the line of the command that runs (a script file or a -c text, counted from 1). */
+extern int winshell_lineno;
+
 /**
  * The positional parameters $1, $2, ... as a list of their own, so that "$@" can give every one of them as a
  * word whatever it contains. winshell_positionals_set replaces the list (the arguments are copied, and may be

@@ -57,6 +57,7 @@ struct Node {
     int      isSelect;          // NODE_FOR: select instead of for
     char*    cfor[3];           // NODE_FOR: for ((init; condition; step)): the three parts, or NULL
     int      negate;            // ! in front of the command: its status is turned round
+    int      line;              // the line of the text where the command starts (for $LINENO)
     int      hasElse;           // NODE_IF
     List     first;             // IF: the condition, WHILE: the condition
     List     second;            // IF: then, WHILE and FOR: the body
@@ -128,6 +129,8 @@ typedef struct {
     int         pipeToCompound; // scan_simple stopped at a | that is followed by a compound command
     int         stopAtPipe;     // scan_simple ends at a | (the redirections after a compound command)
     int         subshellDepth;  // inside ( ... ): a ) ends a command
+    size_t      linePos;        // the line of linePos is lineAt: moved forward as the parser goes
+    int         lineAt;
     char        message[200];
 } Parser;
 
@@ -334,10 +337,11 @@ static size_t scan_simple(Parser* p, size_t start) {
 
             while (is_blank(text[j]) || text[j] == '\n')
                 j++;
-            if (plain_word(p, j, word, sizeof word, &wordEnd) &&
+            if (text[j] == '(' ||
+                (plain_word(p, j, word, sizeof word, &wordEnd) &&
                 (strcmp(word, "while") == 0 || strcmp(word, "until") == 0 || strcmp(word, "for") == 0 ||
                  strcmp(word, "select") == 0 || strcmp(word, "if") == 0 || strcmp(word, "case") == 0 ||
-                 strcmp(word, "{") == 0)) {
+                 strcmp(word, "{") == 0))) {
                 p->pipeToCompound = 1;
                 return i;
             }
@@ -876,7 +880,34 @@ static int parse_subshell(Parser* p, Node* node) {
     return 0;
 }
 
+static Node* parse_single_inner(Parser* p);
+static int noLineNumbers;                // the text of a trap: its commands keep the line of the command that set it off
+
+/** The line (from 1) of the text at pos, counted forward from the last place asked about. */
+static int line_at(Parser* p, size_t pos) {
+    if (p->lineAt == 0 || pos < p->linePos) {
+        p->lineAt = 1;
+        p->linePos = 0;
+    }
+    for (; p->linePos < pos && p->text[p->linePos] != '\0'; p->linePos++)
+        if (p->text[p->linePos] == '\n')
+            p->lineAt++;
+    return p->lineAt;
+}
+
 static Node* parse_single(Parser* p) {
+    int line;
+    Node* node;
+
+    skip_blanks(p);
+    line = line_at(p, p->pos);
+    node = parse_single_inner(p);
+    if (node != NULL && node->line == 0 && !noLineNumbers)
+        node->line = line;
+    return node;
+}
+
+static Node* parse_single_inner(Parser* p) {
     char buffer[16];
     const char* word;
     Node* node;
@@ -1325,7 +1356,9 @@ static int run_trap(int which, int* exitShell, int status) {
     errSuppressed = 1;
     pendingLevels = 0;
     winshell_setLastStatus(status);
+    noLineNumbers++;
     result = command_run_text(text, exitShell, status);
+    noLineNumbers--;
     free(text);
     errSuppressed = savedSuppressed;
     trapRunning[which] = 0;
@@ -1656,6 +1689,19 @@ int command_local(const char* name, const char* value) {
     return 0;
 }
 
+/** FUNCNAME: the names of the functions being called, the innermost first. */
+static const char* functionStack[200];
+static int functionDepth;
+
+static void set_funcname(void) {
+    char* values[200];
+    int i;
+
+    for (i = 0; i < functionDepth; i++)
+        values[i] = (char*)functionStack[functionDepth - 1 - i];
+    var_array_assign("FUNCNAME", values, (size_t)functionDepth);
+}
+
 static int run_function(Runner* r, const Function* function, char* const* argv, int status) {
     ParameterFrame* frame;
     size_t localsBefore = localCount, i;
@@ -1671,7 +1717,11 @@ static int run_function(Runner* r, const Function* function, char* const* argv, 
     callDepth++;
     activeLoopDepth += 0;
     errSuppressed++;
+    functionStack[functionDepth++] = argv[0];
+    set_funcname();
     result = run_node(r, function->body, status);
+    functionDepth--;
+    set_funcname();
     errSuppressed--;
     if (pendingReturn) {
         result = returnStatus;
@@ -2061,6 +2111,7 @@ static int run_stage_captured(void* context) {
 static int run_stages(Runner* r, const StageList* list, int status) {
     InputRedirection* input = NULL;
     int result = 0;
+    int codes[64];
     size_t i;
 
     for (i = 0; i < list->count; i++) {
@@ -2068,7 +2119,17 @@ static int run_stages(Runner* r, const StageList* list, int status) {
             // every stage of a pipeline is a subshell: what the last one sets does not stay (echo x | read y)
             VarSnapshot* before = list->count > 1 ? var_save() : NULL;
 
-            result = run_stage_here(r, &list->items[i], status);
+            if (list->count > 1) {
+                // an exit in the stage ends the stage, not the shell
+                Runner inner;
+                int exitInside = 0;
+
+                inner.exitShell = &exitInside;
+                inner.loopDepth = 0;
+                result = run_stage_here(&inner, &list->items[i], status);
+            } else {
+                result = run_stage_here(r, &list->items[i], status);
+            }
             if (before != NULL)
                 var_restore(before);
         } else {
@@ -2083,6 +2144,8 @@ static int run_stages(Runner* r, const StageList* list, int status) {
                 result = 1;
                 break;
             }
+            if (i < 64)
+                codes[i] = stageStatus;
             if (input != NULL) {
                 interp_input_redirected(-1);
                 interp_input_restore(input);
@@ -2100,6 +2163,10 @@ static int run_stages(Runner* r, const StageList* list, int status) {
     if (input != NULL) {
         interp_input_redirected(-1);
         interp_input_restore(input);
+    }
+    if (list->count > 0 && list->count <= 64) {
+        codes[list->count - 1] = result;
+        executer_set_pipe_statuses(codes, (int)list->count);
     }
     return result;
 }
@@ -2126,10 +2193,51 @@ static int run_pipe(Runner* r, const Node* node, int status) {
 }
 
 /** A simple command whose pipeline calls a function runs as stages; any other goes to the pipeline runner. */
+static int run_simple(Runner* r, const Node* node, int status);
+
+/** `time [-p] pipeline`: runs it and tells how long it took (the time of the processes that it started is not counted separately). */
+static int run_timed(Runner* r, const Node* node, const char* rest, int posix, int status) {
+    ULONGLONG start = GetTickCount64(), elapsed;
+    Node copy = *node;
+    int result;
+
+    copy.text = (char*)rest;
+    result = run_simple(r, &copy, status);
+    elapsed = GetTickCount64() - start;
+    fflush(stdout);
+    if (posix)
+        fprintf(stderr, "real %llu.%02llu\nuser 0.00\nsys 0.00\n", elapsed / 1000, elapsed % 1000 / 10);
+    else
+        fprintf(stderr, "\nreal\t%llum%llu.%03llus\nuser\t0m0.000s\nsys\t0m0.000s\n", elapsed / 60000, elapsed / 1000 % 60, elapsed % 1000);
+    fflush(stderr);
+    return result;
+}
+
 static int run_simple(Runner* r, const Node* node, int status) {
     StageList list;
     int anyFunction = 0, result;
 
+    {
+        const char* q = node->text;
+
+        while (*q == ' ' || *q == '\t')
+            q++;
+        if (strncmp(q, "time", 4) == 0 && (q[4] == ' ' || q[4] == '\t')) {
+            int posix = 0;
+
+            q += 4;
+            while (*q == ' ' || *q == '\t')
+                q++;
+            if (strncmp(q, "-p", 2) == 0 && (q[2] == ' ' || q[2] == '\t')) {
+                posix = 1;
+                q += 2;
+                while (*q == ' ' || *q == '\t')
+                    q++;
+            }
+            if (*q != '\0')
+                return run_timed(r, node, q, posix, status);
+        }
+    }
     if (strchr(node->text, '|') == NULL)
         return interp_run_simple(node->text, r->exitShell, status);
     memset(&list, 0, sizeof list);
@@ -2427,6 +2535,8 @@ static int run_node(Runner* r, const Node* node, int status) {
 }
 
 static int run_node_plain(Runner* r, const Node* node, int status) {
+    if (node->line > 0)
+        winshell_lineno = node->line;
     if (node->redirects != NULL)
         return run_redirected(r, node, status);
     if (node->type == NODE_PIPE)
@@ -2663,6 +2773,23 @@ int command_set(char* const* argv) {
     return status;
 }
 
+/** PIPESTATUS: the statuses of the commands of the pipeline that ran, or the one status of anything else. */
+static void set_pipestatus(int status) {
+    int codes[64], count = executer_take_pipe_statuses(codes, 64), i;
+    char text[64][16];
+    char* values[64];
+
+    if (count == 0) {
+        codes[0] = status;
+        count = 1;
+    }
+    for (i = 0; i < count; i++) {
+        snprintf(text[i], sizeof text[i], "%d", codes[i]);
+        values[i] = text[i];
+    }
+    var_array_assign("PIPESTATUS", values, (size_t)count);
+}
+
 static int run_list(Runner* r, const List* list, int status) {
     size_t i;
 
@@ -2681,6 +2808,7 @@ static int run_list(Runner* r, const List* list, int status) {
             status = run_node(r, list->nodes[i], status);
             conditionDepth -= guarded;
         }
+        set_pipestatus(status);
         winshell_setLastStatus(status);
         if (winshell_unbound) {                 // set -u: an unset variable ends the shell
             winshell_unbound = 0;

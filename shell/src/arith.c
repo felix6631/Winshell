@@ -132,7 +132,45 @@ static long long primary(Arith* a, int live) {
     }
     if (isdigit((unsigned char)a->text[a->pos])) {
         char* end;
-        long long value = strtoll(a->text + a->pos, &end, 0);
+        long long value;
+        size_t digits = 0;
+
+        while (isdigit((unsigned char)a->text[a->pos + digits]))
+            digits++;
+        if (a->text[a->pos + digits] == '#') {
+            // BASE#NUMBER: 2#101, 16#ff, 36#zz
+            long base = strtol(a->text + a->pos, NULL, 10);
+            size_t at = a->pos + digits + 1, used = 0;
+            long long result = 0;
+
+            if (base < 2 || base > 64)
+                return fail(a, "invalid arithmetic base%s", NULL);
+            for (;; at++, used++) {
+                char c = a->text[at];
+                int digit;
+
+                if (c >= '0' && c <= '9')
+                    digit = c - '0';
+                else if (c >= 'a' && c <= 'z')
+                    digit = c - 'a' + 10;
+                else if (c >= 'A' && c <= 'Z')
+                    digit = base <= 36 ? c - 'A' + 10 : c - 'A' + 36;
+                else if (c == '@')
+                    digit = 62;
+                else if (c == '_')
+                    digit = 63;
+                else
+                    break;
+                if (digit >= base)
+                    return fail(a, "value too great for base%s", NULL);
+                result = result * base + digit;
+            }
+            if (used == 0)
+                return fail(a, "invalid number%s", NULL);
+            a->pos = at;
+            return result;
+        }
+        value = strtoll(a->text + a->pos, &end, 0);
 
         if (end == a->text + a->pos || isalnum((unsigned char)*end) || *end == '_') {
             char token[40];

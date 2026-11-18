@@ -55,6 +55,19 @@ size_t winshell_pass_quoted(const CHAR* line, size_t i, CHAR* quote) {
     if (c == '\0')
         return 0;
 
+    // $'...': a backslash protects the next character, so \' does not end it
+    if (*quote == 'A') {
+        if (c == '\\' && line[i + 1] != '\0')
+            return 2;
+        if (c == '\'')
+            *quote = '\0';
+        return 1;
+    }
+    if (*quote == '\0' && c == '$' && line[i + 1] == '\'') {
+        *quote = 'A';
+        return 2;
+    }
+
     if (*quote == '\'') {
         if (c == '\'')
             *quote = '\0';

@@ -34,12 +34,15 @@ Lists (`;` `&&` `||` `!`), pipes (every stage is a subshell, as in bash), `if` `
 functions (`name()` and `function name`), `$(...)` and backticks, `$((...))` and `(( ))`, `[ ]` and `[[ ]]` (patterns, `=~` with
 `BASH_REMATCH`, file tests), here documents (`<<EOF`, `<<-`, `<<'EOF'`), here-strings, `<(command)`, `$'...'`, brace expansion,
 `${var:-x}` and the other expansions (`# ## % %% / // ^^ ,, : !name`), arrays, `trap` (EXIT, ERR, INT), `set -e -u -o pipefail`,
-`eval`, `exec COMMAND`, `source` (and `return` in it), `getopts`, `read`, `readonly`, `declare` (`-r -x -i -A`), associative arrays,
-`${@:N}`, `"$*"` with IFS, `case` with `;&` and `;;&`, `type`, `command -v`, background jobs (`&`, `wait`, `jobs`).
+`eval`, `exec COMMAND`, `source` (and `return` in it), `getopts`, `read`, `mapfile`, `printf -v`, `readonly`, `declare` (`-r -x -i -A`),
+associative arrays (`declare -A m=([k]=v)`), `${@:N}`, `"$*"` with IFS and word splitting at IFS, `case` with `;&` and `;;&`, `type`,
+`command -v`, `builtin`, `time`, `umask`, `ulimit`, `$(<file)`, `$LINENO` `${FUNCNAME[@]}` `${PIPESTATUS[@]}` `$RANDOM` `$SECONDS`,
+file descriptors 0 to 9 (`exec 3>file`, `>&3`, `<&4`, `3>&-`), `shopt -s dotglob nullglob`, background jobs (`&`, `wait`, `jobs`).
 
-Not done (yet): file descriptors above 2 (`exec 3>file`, `>&3`), `printf %q` (the `printf` program is GNU's, which has no `%q`),
-`shopt` options (accepted, nothing happens), glob order as the C locale has it (`B.txt a.txt`; here case is ignored), Ctrl+Z job
-control, `set -x` output, signals other than INT in `trap`.
+Not done (yet): `printf %q` (the `printf` program is GNU's, which has no `%q`), the other `shopt` options (accepted, nothing happens),
+Ctrl+Z job control, `set -x` output, running a `trap` for signals other than INT (the names are accepted, the traps never run),
+file descriptors above 2 for the programs that are started (they only see 0, 1 and 2). Glob order and case are those of the C locale
+when `LC_ALL=C`; otherwise case is ignored, as Windows file names are.
 Run `bash test/shell_compare.sh` (needs MSYS bash) to see what still differs from bash on the patterns in `test/shell/cases.txt`.
 
 ## Commands

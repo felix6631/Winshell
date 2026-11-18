@@ -19,6 +19,9 @@
 /** Whether the name is a builtin (the NAME=value words in front of it then hold for it only). */
 int builtin_exists(const char* name);
 
+/** Whether the shell runs the command itself: a builtin, or printf -v (the other printf is a program). */
+int builtin_wants(char* const argv[]);
+
 /**
  * Runs the command when it is a builtin.
  * Returns non-zero when it was one, and zero when it has to be started as a program.

@@ -129,7 +129,7 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
 - The goal is to do the same job as the Linux commands; only what does not work as is on Windows is adapted to Windows.
   (For example, `cat` does not translate bytes and treats a CR LF pair as one line ending.)
 - Exit with `exit [N]` or `quit`; without N the status of the last command is used. End of input (Ctrl+Z, Enter) also exits.
-- **Builtins:** `cd [DIR]`, `export NAME[=VALUE]...` (alone it lists the variables), `unset NAME...`, `exit [N]`, `quit`.
+- **Builtins:** `cd [DIR]`, `export NAME[=VALUE]...` (alone it lists the variables), `unset NAME...`, `exit [N]`, `quit`, and as in bash `mapfile`/`readarray [-t -n -s -O] [NAME]`, `printf -v NAME FORMAT...`, `builtin NAME...`, `umask` and `ulimit` (they keep and show values, nothing else), `time [-p] pipeline` (it tells the real time; `user` and `sys` are 0).
 - **Lists of commands**
   - `a ; b`: run b after a, always.
   - `a && b`: run b only when a succeeded (status 0).
@@ -143,6 +143,8 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
   - The value stays one word and has no wildcards. A `~` at its start is `$HOME`. The blanks of a `$B` in `A=$B` do not split it.
   - Expansion happens before the assignment, so `A=1 echo $A` sees the previous `$A`. `A=1 | cat` in a pipeline does not change the variables of the shell.
 - **Variables**
+  - The variables that bash makes up: `$RANDOM`, `$SECONDS`, `$BASH_VERSION` (5.2.21(1)-winshell), `$HOSTNAME`, `$UID`/`$EUID` (the number `id -u` shows), `$OSTYPE` (msys), `$LINENO` (the line in the file or -c text), `${FUNCNAME[@]}` (the functions being called, the innermost first), `${PIPESTATUS[@]}` (the status of each command of the last pipeline). A script that sets the same name wins.
+  - Word splitting of an unquoted expansion follows `IFS`: blanks of IFS around a word go, any other character of IFS ends a word (`a,,b` is three words, one empty), `IFS=` splits nothing. `$(<file)` is `$(cat <file)`.
   - `$NAME` and `${NAME}` are replaced by the value of the shell variable or of the environment variable, `$?` by the status of the last command. Names are not case sensitive, like Windows names.
   - In double quotes the value stays one word; outside of quotes it is cut at blanks into words, and wildcards in it act. Inside single quotes nothing is expanded. A variable that is not set makes no word when it stands alone outside of quotes.
   - A `$` that starts no name is just a `$`. Write a literal `$NAME` in single quotes (`\` is the path separator and is no escape).

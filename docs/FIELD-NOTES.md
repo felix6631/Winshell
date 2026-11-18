@@ -26,15 +26,43 @@ here documents into files and into `python -`, here-strings, process substitutio
 
 ## Known, not fixed
 
-* `/dev/urandom`, `/dev/zero`, `/dev/stdin`, `/dev/tty` do not exist (only `/dev/null` does). `head -c 16 /dev/urandom` fails.
+* `/dev/stdin` and `/dev/tty` cannot be opened by the tools (`cat /dev/stdin` fails; write `cat` or `cat -`). In a redirection of the shell
+  (`< /dev/stdin`, `> /dev/stderr`, `> /dev/stdout`) they work.
+* `/dev/zero` is a sparse file of 1 GiB and `/dev/urandom` a file of 4 MiB of fresh random bytes (made in the temporary directory at
+  the first use of a process); a program that reads more gets an end of file.
 * `echo $HOME` is what the environment says (a Windows path when the parent put one there); `~` and `cd ~` give `/c/Users/...`.
 * A script that needs `chmod +x` to run is run anyway (there is no executable bit); `chmod +x` is accepted.
-* `$$`, `$RANDOM`: `$$` is the id of the process of Windows; `$RANDOM` is not set.
+* `$$` is the id of the process of Windows. `time` reports the real time only (`user` and `sys` are 0).
+* `$OSTYPE` is `msys`, `$BASH_VERSION` says 5.2.21(1)-winshell, `$UID` is the number that `id -u` shows.
+* `umask` and `ulimit` keep and show values, they change nothing.
 * Pipelines that start programs of Windows with a console (`more`, `choice`) behave as on Windows.
-* The 9 patterns in `test/shell/cases.txt` that still differ from bash (see HARNESS-2026-11-10.md).
+* `test/shell/cases.txt` has no case that differs from bash (231 of them).
 * Paths are shown as `/c/Users/...` by `pwd` and `realpath`; programs of Windows get what the script gave them
   (`python a.py` is fine; a script that passes `/c/...` to a Windows program that knows no such path needs `cygpath`-like care:
   the shell does not rewrite arguments).
+
+## Round 2 (2026-11-18)
+
+110 more command lines, run by `shell.exe` and by bash (`CASES=file bash test/shell_compare.sh`); 20 differed. All but the ones
+below were real gaps and are fixed (the cases are in `test/shell/cases.txt` as `r2_*`).
+
+| Finding | Fix |
+| --- | --- |
+| `echo a \| { read x; exit 2; }; echo $?` ended the whole shell: an `exit` in the last stage of a pipeline was an `exit` of the shell | the stage is a subshell for `exit` too (`shell/src/command.c`) |
+| `cmd \| (subshell)` was a "Failed to execute command '(exit'" | a `(` after `\|` starts a compound stage |
+| `IFS=,; set -- $v` did not split at `,` (only at blanks) | word splitting follows IFS: blanks around a field go, other characters end a field, `IFS=` splits nothing (`shell/src/parser.c`) |
+| `$(<file)` gave nothing | it is `$(cat <file)` |
+| `declare -A m=([a]=1 [b]=2)`, `a=([0]=x [5]=y)`, `local -a arr=(...)` and `local -A` | the declaration and the array are two steps; `[key]=value` elements (`shell/src/interp.c`) |
+| `$((16#ff))`, `$((2#101))` | `BASE#NUMBER` in arithmetic (bases 2 to 64) |
+| `$'it\'s'` was an unterminated quote; `$'\u00e9'` stayed as it was | a backslash inside `$'...'` protects the next character; `\u` and `\U` are written as UTF-8 |
+| `${x:?msg}` ended a command with status 2 and went on | it ends the script with status 1, as `set -u` does |
+| no `mapfile`/`readarray`, `printf -v`, `builtin`, `umask`, `ulimit`, `time` | added (`mapfile -t -n -s -O`, `printf -v NAME`, `time [-p] pipeline` prints real time) |
+| `$RANDOM`, `$SECONDS`, `$BASH_VERSION`, `$HOSTNAME`, `$UID`, `$EUID`, `$OSTYPE`, `$LINENO`, `${FUNCNAME[@]}`, `${PIPESTATUS[@]}` were empty | made up as bash does (`$LINENO` is the line of the command in its file or text) |
+| `head -c 16 /dev/urandom \| base64`, `dd if=/dev/zero ...` failed: no such file | `/dev/zero`, `/dev/urandom` and `/dev/random` stand for files of the temporary directory (`common/vpath.c`); `> /dev/stderr` works in the shell |
+| a redirection that could not be made gave status 127 (`command not found`) | status 1, as in bash |
+
+Not fixed: `cd -` prints the path as `/c/Users/.../Temp/...` where bash with MSYS prints `/tmp/...` (paths are shown in the form of the
+drive); Windows `python` writes CRLF.
 
 ## How to add to this page
 

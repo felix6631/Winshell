@@ -9,10 +9,13 @@
 #include "variables.h"
 #include "arith.h"
 #include "vec.h"
+#include "ident.h"
 
 #define DELIMITERS " \t\r\n"
 
 static int lastStatus = 0;
+
+int winshell_lineno;
 
 void winshell_setLastStatus(int status) {
     lastStatus = status;
@@ -254,6 +257,61 @@ static const char* variable_value(const char* name, char* scratch, size_t size) 
     value = var_get(name);
     if (value != NULL)
         return value;
+
+    // the variables that bash makes up: they are there unless the script set them
+    if (strcmp(name, "RANDOM") == 0) {
+        static unsigned long long state;
+
+        if (state == 0) {
+            LARGE_INTEGER counter;
+
+            QueryPerformanceCounter(&counter);
+            state = (unsigned long long)counter.QuadPart ^ ((unsigned long long)GetCurrentProcessId() << 32) ^ 0x9E3779B97F4A7C15ULL;
+        }
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        snprintf(scratch, size, "%u", (unsigned)((state >> 11) & 32767));
+        return scratch;
+    }
+    if (strcmp(name, "SECONDS") == 0) {
+        FILETIME created, exited, kernel, user, now;
+        ULARGE_INTEGER a, b;
+
+        if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
+            GetSystemTimeAsFileTime(&now);
+            a.LowPart = created.dwLowDateTime;
+            a.HighPart = created.dwHighDateTime;
+            b.LowPart = now.dwLowDateTime;
+            b.HighPart = now.dwHighDateTime;
+            snprintf(scratch, size, "%llu", (b.QuadPart - a.QuadPart) / 10000000ULL);
+        } else {
+            snprintf(scratch, size, "0");
+        }
+        return scratch;
+    }
+    if (strcmp(name, "LINENO") == 0) {
+        snprintf(scratch, size, "%d", winshell_lineno);
+        return scratch;
+    }
+    if (strcmp(name, "BASH_VERSION") == 0)
+        return "5.2.21(1)-winshell";
+    if (strcmp(name, "HOSTNAME") == 0) {
+        DWORD length = (DWORD)size;
+
+        if (GetComputerNameA(scratch, &length))
+            return scratch;
+    }
+    if (strcmp(name, "UID") == 0 || strcmp(name, "EUID") == 0) {
+        Identity identity;
+
+        if (ident_current(&identity) == 0) {
+            snprintf(scratch, size, "%u", (unsigned)identity.user.id);
+            return scratch;
+        }
+    }
+    if (strcmp(name, "OSTYPE") == 0)
+        return "msys";
 
     if (_stricmp(name, "HOME") == 0) {
         const char* profile = getenv("USERPROFILE");
@@ -592,6 +650,37 @@ static int lex_ansi_quote(Lexer* L) {
                 c = digits > 0 ? (CHAR)value : 'x';
                 break;
             }
+            case 'u':
+            case 'U': {
+                // \uHHHH and \UHHHHHHHH: a character, written as UTF-8
+                unsigned long value = 0;
+                int digits = 0, most = *r == 'u' ? 4 : 8;
+
+                while (digits < most && isxdigit((unsigned char)r[1])) {
+                    r++;
+                    value = value * 16 + (unsigned long)(isdigit((unsigned char)*r) ? *r - '0' : (tolower((unsigned char)*r) - 'a' + 10));
+                    digits++;
+                }
+                if (digits == 0) {
+                    lexer_char(L, '\\', 1);
+                    c = most == 4 ? 'u' : 'U';
+                } else if (value < 0x80) {
+                    c = (CHAR)value;
+                } else if (value < 0x800) {
+                    lexer_char(L, (CHAR)(0xC0 | (value >> 6)), 1);
+                    c = (CHAR)(0x80 | (value & 0x3F));
+                } else if (value < 0x10000) {
+                    lexer_char(L, (CHAR)(0xE0 | (value >> 12)), 1);
+                    lexer_char(L, (CHAR)(0x80 | ((value >> 6) & 0x3F)), 1);
+                    c = (CHAR)(0x80 | (value & 0x3F));
+                } else {
+                    lexer_char(L, (CHAR)(0xF0 | ((value >> 18) & 0x07)), 1);
+                    lexer_char(L, (CHAR)(0x80 | ((value >> 12) & 0x3F)), 1);
+                    lexer_char(L, (CHAR)(0x80 | ((value >> 6) & 0x3F)), 1);
+                    c = (CHAR)(0x80 | (value & 0x3F));
+                }
+                break;
+            }
             default:
                 if (*r >= '0' && *r <= '7') {
                     int value = *r - '0', digits = 1;
@@ -812,16 +901,53 @@ size_t winshell_substitution_length(const CHAR* text) {
 
 /* ---- the value of a variable or of a substitution goes into the word ---------------------- */
 
-/** Puts a value into the word: one piece in quotes or in an assignment, else cut at blanks into words. */
+/**
+ * Puts a value into the word: one piece in quotes or in an assignment, else cut into words at the characters of IFS
+ * (blanks by default). Blanks of IFS around a field go; any other character of IFS ends a field, and two of them
+ * in a row have an empty field between. With IFS empty nothing is cut.
+ */
 static void lexer_value(Lexer* L, const char* value) {
+    const char* ifs = var_get("IFS");
+    int inWord, afterBlank = 0;
+
     L->dirty = 1;
+    if (L->quote == '"' || L->isAssign || (ifs != NULL && ifs[0] == '\0')) {
+        for (; value != NULL && *value != '\0'; value++)
+            lexer_char(L, *value, L->quote == '"' || L->isAssign);
+        return;
+    }
+    inWord = L->text.length > L->wordStart || L->quoted;
     for (; value != NULL && *value != '\0'; value++) {
-        if (L->quote == '"' || L->isAssign)
-            lexer_char(L, *value, 1);               // one piece, and no wildcards
-        else if (*value == ' ' || *value == '\t' || *value == '\n' || *value == '\r')
-            lexer_word(L);                          // split at blanks
-        else
-            lexer_char(L, *value, 0);
+        char c = *value;
+        int isDelimiter, isBlank;
+
+        if (ifs == NULL) {
+            isBlank = c == ' ' || c == '\t' || c == '\n' || c == '\r';
+            isDelimiter = isBlank;
+        } else {
+            isDelimiter = strchr(ifs, c) != NULL;
+            isBlank = isDelimiter && (c == ' ' || c == '\t' || c == '\n');
+        }
+        if (!isDelimiter) {
+            lexer_char(L, c, 0);
+            inWord = 1;
+            afterBlank = 0;
+        } else if (isBlank) {
+            if (inWord) {
+                lexer_word(L);
+                inWord = 0;
+                afterBlank = 1;
+            }
+        } else if (inWord) {
+            lexer_word(L);                          // a character of IFS that is no blank ends the field
+            inWord = 0;
+            afterBlank = 0;
+        } else if (afterBlank) {
+            afterBlank = 0;                         // it belongs to the blanks in front of it
+        } else {
+            L->quoted = 1;                          // an empty field
+            lexer_word(L);
+        }
     }
 }
 
@@ -947,6 +1073,26 @@ static int lex_substitution(Lexer* L) {
     }
     memcpy(inner, r + skip, innerLength);
     inner[innerLength] = '\0';
+
+    // $(<file) is $(cat <file)
+    {
+        const char* q = inner;
+
+        while (*q == ' ' || *q == '\t')
+            q++;
+        if (q[0] == '<' && q[1] != '<' && q[1] != '(' && q[1] != '&') {
+            char* cat = malloc(innerLength + 8);
+
+            if (cat == NULL) {
+                free(inner);
+                L->error = LEX_NOMEM;
+                return 1;
+            }
+            sprintf(cat, "cat %s", q);
+            free(inner);
+            inner = cat;
+        }
+    }
 
     L->read = r + total;
     if (substitutionHandler(inner, &output) != 0 || output == NULL) {
@@ -1926,6 +2072,7 @@ static int lex_braced(Lexer* L) {
                         expanded != NULL ? expanded : (colon ? "parameter null or not set" : "parameter not set"));
                 free(expanded);
                 L->error = LEX_SYNTAX;
+                winshell_unbound = 1;            // ${x:?msg} ends a script, as set -u does, with status 1
             } else {
                 // - and = with the word, + with the word
                 char* expanded = expand_text(word, &nomem);

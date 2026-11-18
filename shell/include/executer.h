@@ -44,6 +44,14 @@ typedef struct {
     int inputRedirected;    // standard input was replaced
 } StdRedirection;
 
+/**
+ * The exit status of every command of the pipeline that ran last (PIPESTATUS). executer_take_pipe_statuses copies them
+ * into codes (up to max) and returns how many, or 0 when no pipeline ran since the last call; the pipelines of
+ * compound commands record theirs with executer_set_pipe_statuses.
+ */
+int executer_take_pipe_statuses(int* codes, int max);
+void executer_set_pipe_statuses(const int* codes, int count);
+
 /** Applies the redirections in the order written. Returns 0, or -1 after a message (nothing is changed then). */
 int redirect_begin(const Command* command, StdRedirection* saved);
 

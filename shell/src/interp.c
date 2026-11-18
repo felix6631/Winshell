@@ -129,6 +129,57 @@ static int try_array_assignment(const char* text, int* status) {
         if (pipeline.count > 0 && pipeline.commands[0].argv != NULL)
             while (pipeline.commands[0].argv[1 + count] != NULL)
                 count++;
+        if (count > 0) {
+            // [key]=value elements: a name[key]=value for each; the others go to the next index
+            char* const* words = pipeline.commands[0].argv + 1;
+            size_t k;
+            int keyed = 0;
+
+            for (k = 0; k < count; k++) {
+                const char* close;
+
+                if (words[k][0] == '[' && (close = strstr(words[k], "]=")) != NULL && close > words[k] + 1)
+                    keyed = 1;
+            }
+            if (keyed) {
+                int assoc = var_is_assoc(name);
+                long next = 0;
+
+                if (!append)
+                    var_array_assign(name, NULL, 0);
+                else
+                    next = 0;
+                for (k = 0; k < count; k++) {
+                    const char* w = words[k];
+                    const char* close = w[0] == '[' ? strstr(w, "]=") : NULL;
+
+                    if (close != NULL && close > w + 1) {
+                        size_t keyLength = (size_t)(close - w) - 1;
+                        char* key = malloc(keyLength + 1);
+                        long index;
+
+                        if (key == NULL)
+                            continue;
+                        memcpy(key, w + 1, keyLength);
+                        key[keyLength] = '\0';
+                        if (assoc) {
+                            if (var_assoc_index(name, key, 1, &index) == 0)
+                                var_array_set(name, index, close + 2);
+                        } else {
+                            index = strtol(key, NULL, 10);
+                            var_array_set(name, index, close + 2);
+                            next = index + 1;
+                        }
+                        free(key);
+                    } else {
+                        var_array_set(name, next++, w);
+                    }
+                }
+                winshell_freePipeline(&pipeline);
+                *status = 0;
+                return 1;
+            }
+        }
         if (pipeline.count > 0 && pipeline.commands[0].argv != NULL) {
             *status = (append ? var_array_append(name, pipeline.commands[0].argv + 1, count)
                               : var_array_assign(name, pipeline.commands[0].argv + 1, count)) == 0 ? 0 : 1;
@@ -200,16 +251,87 @@ static int try_array_assignment(const char* text, int* status) {
     return 0;
 }
 
+/**
+ * `declare -A NAME=(...)`, `local -a NAME=(...)`, `readonly NAME=(...)`: the declaration and the assignment of the array are
+ * two steps here. Returns the status of both, or -1 when the text is not of that kind.
+ */
+static int declare_with_array(const char* text, int* exitShell, int status) {
+    const char* p = text;
+    const char* keyword;
+    size_t keywordLength = 0, nameStart, nameLength = 0;
+    char* declaration;
+    char* assignment;
+    int result;
+    static const char* const keywords[] = { "declare", "typeset", "local", "readonly" };
+    size_t k;
+
+    while (*p == ' ' || *p == '\t')
+        p++;
+    keyword = p;
+    while (is_name_body_char(p[keywordLength]))
+        keywordLength++;
+    for (k = 0; k < sizeof keywords / sizeof *keywords; k++)
+        if (strlen(keywords[k]) == keywordLength && strncmp(keyword, keywords[k], keywordLength) == 0)
+            break;
+    if (k == sizeof keywords / sizeof *keywords)
+        return -1;
+    p += keywordLength;
+    // the flags, then the name
+    for (;;) {
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (p[0] == '-' && p[1] != '\0' && p[1] != ' ')
+            while (*p != '\0' && *p != ' ' && *p != '\t')
+                p++;
+        else
+            break;
+    }
+    nameStart = (size_t)(p - text);
+    if (!is_name_start_char(*p))
+        return -1;
+    while (is_name_body_char(p[nameLength]))
+        nameLength++;
+    if (!(p[nameLength] == '=' && p[nameLength + 1] == '(') && !(p[nameLength] == '+' && p[nameLength + 1] == '=' && p[nameLength + 2] == '('))
+        return -1;
+    declaration = malloc(nameStart + nameLength + 1);
+    assignment = _strdup(p);
+    if (declaration == NULL || assignment == NULL) {
+        free(declaration);
+        free(assignment);
+        return 1;
+    }
+    memcpy(declaration, text, nameStart + nameLength);
+    declaration[nameStart + nameLength] = '\0';
+    if (k == 3) {                           // readonly: the value is set before it is made read-only
+        result = interp_run_simple(assignment, exitShell, status);
+        if (result == 0 && !*exitShell)
+            result = interp_run_simple(declaration, exitShell, result);
+    } else {
+        result = interp_run_simple(declaration, exitShell, status);
+        if (result == 0 && !*exitShell)
+            result = interp_run_simple(assignment, exitShell, result);
+    }
+    free(declaration);
+    free(assignment);
+    return result;
+}
+
 int interp_run_simple(const char* text, int* exitShell, int status) {
     Pipeline pipeline;
     unsigned long substitutionsBefore = interp_substitution_count();
 
+    {
+        int declared = declare_with_array(text, exitShell, status);
+
+        if (declared >= 0)
+            return declared;
+    }
     if (try_array_assignment(text, &status))
         return status;
 
     // the parser and the executer report their own errors
     if (winshell_parse(text, &pipeline) != 0)
-        return 2;
+        return winshell_unbound ? 1 : 2;
     if (winshell_unbound) {             // set -u: nothing runs; the runner ends the shell
         winshell_freePipeline(&pipeline);
         return 1;
@@ -262,7 +384,7 @@ int interp_run_simple(const char* text, int* exitShell, int status) {
             }
         // a builtin only makes sense as a command of its own, not inside a pipeline
         } else if (pipeline.count == 1 && pipeline.commands[0].argv != NULL &&
-                   (builtin_exists(pipeline.commands[0].argv[0]) ||
+                   (builtin_wants(pipeline.commands[0].argv) ||
                     command_has_function(pipeline.commands[0].argv[0]))) {
             // NAME=value in front of a builtin holds for the builtin only (IFS=: read a b)
             const Command* command = &pipeline.commands[0];

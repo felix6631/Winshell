@@ -37,6 +37,8 @@ static HANDLE open_input_file(const char* file) {
     SECURITY_ATTRIBUTES sa;
     char native[VPATH_MAX];
 
+    if (strcmp(file, "/dev/stdin") == 0)
+        return duplicate_inheritable(GetStdHandle(STD_INPUT_HANDLE));
     if (vpath_to_native(file, native, sizeof native) != 0)
         return INVALID_HANDLE_VALUE;
 
@@ -51,6 +53,10 @@ static HANDLE open_output_file(const char* file, int append) {
     SECURITY_ATTRIBUTES sa;
     char native[VPATH_MAX];
 
+    if (strcmp(file, "/dev/stdout") == 0)
+        return duplicate_inheritable(GetStdHandle(STD_OUTPUT_HANDLE));
+    if (strcmp(file, "/dev/stderr") == 0)
+        return duplicate_inheritable(GetStdHandle(STD_ERROR_HANDLE));
     if (vpath_to_native(file, native, sizeof native) != 0)
         return INVALID_HANDLE_VALUE;
 
@@ -353,6 +359,28 @@ err_start:
 #define COMMAND_FAILED 0    /* a message was printed; the neighbours see an empty input or a closed output */
 #define COMMAND_NOMEM (-1)
 
+static int pipeCodes[64];
+static int pipeCodeCount;
+
+int executer_take_pipe_statuses(int* codes, int max) {
+    int n = pipeCodeCount < max ? pipeCodeCount : max, i;
+
+    for (i = 0; i < n; i++)
+        codes[i] = pipeCodes[i];
+    pipeCodeCount = 0;
+    return n;
+}
+
+void executer_set_pipe_statuses(const int* codes, int count) {
+    int i;
+
+    if (count > 64)
+        count = 64;
+    for (i = 0; i < count; i++)
+        pipeCodes[i] = codes[i];
+    pipeCodeCount = count;
+}
+
 /** The descriptors 3 to 9 that the shell holds open (exec 3> file); 0, 1 and 2 are always there. */
 static int fdOpen[10];
 
@@ -562,6 +590,11 @@ static int run_pipeline(const Pipeline* pipeline, int background, HANDLE** keep,
         WaitForSingleObject(processes[i], INFINITE);
         if (i + 1 == pipeline->count && !GetExitCodeProcess(processes[i], &exitCode))
             exitCode = (DWORD)-1;
+        if (i < 64) {
+            DWORD code;
+
+            pipeCodes[i] = GetExitCodeProcess(processes[i], &code) ? (int)(code & 0xFF) : 127;
+        }
         if (i + 1 != pipeline->count && winshell_opt_pipefail) {
             DWORD code;
 
@@ -572,6 +605,10 @@ static int run_pipeline(const Pipeline* pipeline, int background, HANDLE** keep,
     }
     if (winshell_opt_pipefail && failed != 0 && (exitCode == 0 || exitCode == (DWORD)-1))
         exitCode = failed;
+    for (i = 0; i < pipeline->count && i < 64; i++)
+        if (processes[i] == NULL)
+            pipeCodes[i] = i + 1 == pipeline->count && redirectFailed ? 1 : 127;
+    pipeCodeCount = pipeline->count < 64 ? (int)pipeline->count : 64;
 
     if (noopSucceeded)
         exitCode = 0;

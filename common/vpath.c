@@ -1,6 +1,7 @@
 #include "vpath.h"
 #include <ctype.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
@@ -226,6 +227,81 @@ int vpath_getcwd(char* out, size_t size) {
     return vpath_from_native(native, out, size);
 }
 
+/*
+ * /dev/zero, /dev/urandom and /dev/random: Windows has no such devices, so a file of the temporary directory stands for each
+ * (made at the first use in a process): 1 GiB of zeros as a sparse file, and 4 MiB of random bytes of the system generator
+ * (fresh for every process). A program that reads more than that gets an end of file. The files of the processes that ended
+ * are deleted by the next process that makes one.
+ */
+static void delete_old_device_files(const char* directory) {
+    char pattern[MAX_PATH + 32], path[MAX_PATH + 64];
+    WIN32_FIND_DATAA data;
+    HANDLE find;
+
+    snprintf(pattern, sizeof pattern, "%swinshell-dev-*.tmp", directory);
+    find = FindFirstFileA(pattern, &data);
+    if (find == INVALID_HANDLE_VALUE)
+        return;
+    do {
+        snprintf(path, sizeof path, "%s%s", directory, data.cFileName);
+        DeleteFileA(path);                  // fails, harmlessly, for a file that a running program still has open
+    } while (FindNextFileA(find, &data));
+    FindClose(find);
+}
+
+static int device_file(int zero, char* out, size_t size) {
+    static char made[2][MAX_PATH + 64];
+    char directory[MAX_PATH];
+    char* path = made[zero ? 1 : 0];
+    HANDLE file;
+    DWORD returned;
+
+    if (path[0] == '\0') {
+        typedef BOOLEAN (WINAPI *RandomFunction)(PVOID, ULONG);
+        static unsigned counter;
+
+        if (GetTempPathA(sizeof directory, directory) == 0)
+            return -1;
+        delete_old_device_files(directory);
+        snprintf(path, MAX_PATH + 64, "%swinshell-dev-%s-%lu-%u.tmp", directory, zero ? "zero" : "random",
+                 (unsigned long)GetCurrentProcessId(), ++counter);
+        file = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, NULL);
+        if (file == INVALID_HANDLE_VALUE) {
+            path[0] = '\0';
+            return -1;
+        }
+        if (zero) {
+            LARGE_INTEGER length;
+
+            length.QuadPart = 1024LL * 1024 * 1024;
+            if (!DeviceIoControl(file, FSCTL_SET_SPARSE, NULL, 0, NULL, 0, &returned, NULL))
+                length.QuadPart = 64LL * 1024 * 1024;       // not an NTFS volume: a file that is only smaller
+            SetFilePointerEx(file, length, NULL, FILE_BEGIN);
+            SetEndOfFile(file);
+        } else {
+            HMODULE advapi = LoadLibraryA("advapi32.dll");
+            RandomFunction generate = advapi != NULL ? (RandomFunction)GetProcAddress(advapi, "SystemFunction036") : NULL;
+            static unsigned char block[65536];
+            int i;
+
+            for (i = 0; i < 64 && generate != NULL; i++) {
+                DWORD written;
+
+                if (!generate(block, sizeof block) || !WriteFile(file, block, sizeof block, &written, NULL))
+                    break;
+            }
+        }
+        CloseHandle(file);
+    }
+    if (strlen(path) + 1 > size) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    strcpy(out, path);
+    return 0;
+}
+
 int vpath_to_native(const char* path, char* out, size_t size) {
     char base[VPATH_MAX], absolute[VPATH_MAX];
 
@@ -237,6 +313,11 @@ int vpath_to_native(const char* path, char* out, size_t size) {
         }
         strcpy(out, "NUL");
         return 0;
+    }
+
+    if (strcmp(path, "/dev/zero") == 0 || strcmp(path, "/dev/urandom") == 0 || strcmp(path, "/dev/random") == 0) {
+        if (device_file(strcmp(path, "/dev/zero") == 0, out, size) == 0)
+            return 0;
     }
 
     // not part of the virtual tree: hand it to Windows as it is

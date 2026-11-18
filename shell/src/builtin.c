@@ -791,8 +791,258 @@ static int builtin_getopts(char* const argv[]) {
     return 0;
 }
 
+/* ---- mapfile, printf -v, umask, ulimit ------------------------------------------------------------------ */
+
+/** mapfile [-t] [-n COUNT] [-s SKIP] [-O ORIGIN] [NAME]: the lines of the input go to the array NAME (MAPFILE). */
+static int builtin_mapfile(char* const argv[]) {
+    int trim = 0, i;
+    long maxCount = 0, skip = 0, origin = 0, count = 0, lineNumber = 0;
+    const char* name = "MAPFILE";
+    char** items = NULL;
+    size_t used = 0, capacity = 0, k;
+    char* line = NULL;
+
+    for (i = 1; argv[i] != NULL && argv[i][0] == '-' && argv[i][1] != '\0'; i++) {
+        const char* o = argv[i] + 1;
+
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
+        for (; *o != '\0'; o++) {
+            if (*o == 't') {
+                trim = 1;
+            } else if (*o == 'n' || *o == 's' || *o == 'O' || *o == 'd' || *o == 'u' || *o == 'C' || *o == 'c') {
+                const char* value = o[1] != '\0' ? o + 1 : argv[++i];
+
+                if (value == NULL) {
+                    fprintf(stderr, "mapfile: -%c: option requires an argument\n", *o);
+                    return 2;
+                }
+                if (*o == 'n')
+                    maxCount = atol(value);
+                else if (*o == 's')
+                    skip = atol(value);
+                else if (*o == 'O')
+                    origin = atol(value);
+                else if (*o == 'd' && value[0] != '\0' && value[0] != '\n') {
+                    fprintf(stderr, "mapfile: -d: only a line feed is supported\n");
+                    return 2;
+                }
+                break;
+            } else {
+                fprintf(stderr, "mapfile: -%c: invalid option\n", *o);
+                return 2;
+            }
+        }
+    }
+    if (argv[i] != NULL)
+        name = argv[i];
+    while (interp_read_line(&line)) {
+        size_t n = strlen(line);
+
+        lineNumber++;
+        if (lineNumber <= skip) {
+            free(line);
+            continue;
+        }
+        if (VEC_RESERVE(items, capacity, used + 1) != 0) {
+            free(line);
+            return 1;
+        }
+        if (!trim) {
+            char* with = malloc(n + 2);
+
+            if (with == NULL) {
+                free(line);
+                return 1;
+            }
+            memcpy(with, line, n);
+            with[n] = '\n';
+            with[n + 1] = '\0';
+            free(line);
+            line = with;
+        }
+        items[used++] = line;
+        line = NULL;
+        if (maxCount > 0 && ++count >= maxCount)
+            break;
+    }
+    if (used == 0) {
+        var_array_assign(name, NULL, 0);
+    } else if (origin == 0) {
+        var_array_assign(name, items, used);
+    } else {
+        for (k = 0; k < used; k++)
+            var_array_set(name, origin + (long)k, items[k]);
+    }
+    for (k = 0; k < used; k++)
+        free(items[k]);
+    free(items);
+    return 0;
+}
+
+/** printf -v NAME FORMAT [ARG...]: the output of printf goes to the variable. */
+static int builtin_printf_v(char* const argv[]) {
+    char* command;
+    char* output = NULL;
+    size_t length = 0, i, total = 16;
+    int status = 0;
+
+    if (argv[2] == NULL) {
+        fprintf(stderr, "printf: -v: option requires an argument\n");
+        return 2;
+    }
+    for (i = 3; argv[i] != NULL; i++)
+        total += strlen(argv[i]) * 4 + 4;
+    command = malloc(total);
+    if (command == NULL)
+        return 1;
+    strcpy(command, "command printf");
+    for (i = 3; argv[i] != NULL; i++) {
+        char* quoted = quote_word(argv[i]);
+
+        if (quoted == NULL) {
+            free(command);
+            return 1;
+        }
+        strcat(command, " ");
+        strcat(command, quoted);
+        free(quoted);
+    }
+    if (interp_capture(command, &output, &length, &status) != 0) {
+        free(command);
+        return 1;
+    }
+    free(command);
+    {
+        char* value = malloc(length + 1);
+
+        if (value == NULL) {
+            free(output);
+            return 1;
+        }
+        memcpy(value, output != NULL ? output : "", length);
+        value[length] = '\0';
+        var_set(argv[2], value);
+        free(value);
+    }
+    free(output);
+    return status;
+}
+
+/** umask [-p] [-S] [MODE]: Windows has no file creation mask; it is kept and shown, nothing more. */
+static int builtin_umask(char* const argv[]) {
+    static unsigned mask = 022;
+    int symbolic = 0, print = 0, i = 1;
+
+    for (; argv[i] != NULL && argv[i][0] == '-' && argv[i][1] != '\0'; i++) {
+        if (strcmp(argv[i], "-S") == 0) {
+            symbolic = 1;
+        } else if (strcmp(argv[i], "-p") == 0) {
+            print = 1;
+        } else if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        } else {
+            fprintf(stderr, "umask: %s: invalid option\n", argv[i]);
+            return 2;
+        }
+    }
+    if (argv[i] != NULL) {
+        char* end;
+        unsigned long value = strtoul(argv[i], &end, 8);
+
+        if (*end != '\0' || argv[i][0] == '\0' || value > 0777) {
+            fprintf(stderr, "umask: %s: invalid octal number\n", argv[i]);
+            return 1;
+        }
+        mask = (unsigned)value;
+        return 0;
+    }
+    if (symbolic) {
+        unsigned allowed = ~mask & 0777;
+
+        printf("%su=%s%s%s,g=%s%s%s,o=%s%s%s\n", print ? "umask -S " : "",
+               allowed & 0400 ? "r" : "", allowed & 0200 ? "w" : "", allowed & 0100 ? "x" : "",
+               allowed & 040 ? "r" : "", allowed & 020 ? "w" : "", allowed & 010 ? "x" : "",
+               allowed & 04 ? "r" : "", allowed & 02 ? "w" : "", allowed & 01 ? "x" : "");
+    } else {
+        printf("%s%04o\n", print ? "umask " : "", mask);
+    }
+    return 0;
+}
+
+/** ulimit [-SH] [-a] [-c -d -e -f -i -l -m -n -p -q -r -s -t -u -v -x] [LIMIT]: the limits that a UNIX shell shows; none applies. */
+static int builtin_ulimit(char* const argv[]) {
+    static const struct {
+        char        letter;
+        const char* description;
+        const char* value;
+    } table[] = {
+        { 'c', "core file size          (blocks, -c)", "0" },
+        { 'd', "data seg size           (kbytes, -d)", "unlimited" },
+        { 'e', "scheduling priority             (-e)", "0" },
+        { 'f', "file size               (blocks, -f)", "unlimited" },
+        { 'i', "pending signals                 (-i)", "63000" },
+        { 'l', "max locked memory       (kbytes, -l)", "65536" },
+        { 'm', "max memory size         (kbytes, -m)", "unlimited" },
+        { 'n', "open files                      (-n)", "1024" },
+        { 'p', "pipe size            (512 bytes, -p)", "8" },
+        { 'q', "POSIX message queues     (bytes, -q)", "819200" },
+        { 'r', "real-time priority              (-r)", "0" },
+        { 's', "stack size              (kbytes, -s)", "8192" },
+        { 't', "cpu time               (seconds, -t)", "unlimited" },
+        { 'u', "max user processes              (-u)", "63000" },
+        { 'v', "virtual memory          (kbytes, -v)", "unlimited" },
+        { 'x', "file locks                      (-x)", "unlimited" },
+    };
+    int all = 0, i = 1;
+    char letter = 'f';
+    size_t k;
+
+    for (; argv[i] != NULL && argv[i][0] == '-' && argv[i][1] != '\0'; i++) {
+        const char* o = argv[i] + 1;
+
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
+        for (; *o != '\0'; o++) {
+            if (*o == 'S' || *o == 'H') {
+                continue;
+            } else if (*o == 'a') {
+                all = 1;
+            } else if (strchr("cdefilmnpqrstuvx", *o) != NULL) {
+                letter = *o;
+            } else {
+                fprintf(stderr, "ulimit: -%c: invalid option\n", *o);
+                return 2;
+            }
+        }
+    }
+    if (argv[i] != NULL)
+        return 0;                       // setting a limit: accepted, nothing changes
+    for (k = 0; k < sizeof table / sizeof table[0]; k++) {
+        if (all)
+            printf("%s %s\n", table[k].description, table[k].value);
+        else if (table[k].letter == letter)
+            printf("%s\n", table[k].value);
+    }
+    return 0;
+}
+
+/** Whether the command is one that the shell runs itself: a builtin by name, or printf -v. */
+int builtin_wants(char* const argv[]) {
+    if (argv[0] == NULL)
+        return 0;
+    if (builtin_exists(argv[0]))
+        return 1;
+    return strcmp(argv[0], "printf") == 0 && argv[1] != NULL && strcmp(argv[1], "-v") == 0;
+}
+
 int builtin_exists(const char* name) {
-    static const char* const names[] = { "cd", "export", "unset", "exit", "quit", "source", ".", ":", "break",
+    static const char* const names[] = { "mapfile", "readarray", "builtin", "umask", "ulimit", "cd", "export", "unset", "exit", "quit", "source", ".", ":", "break",
                                          "continue", "read", "return", "local", "trap", "jobs", "wait", "shift", "fg", "bg", "disown", "set", "eval", "let", "readonly", "declare", "typeset", "type", "command", "getopts", "shopt", "exec" };
     size_t i;
 
@@ -821,6 +1071,47 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
         *status = builtin_read(command->argv);
         return 1;
     }
+    if (strcmp(name, "mapfile") == 0 || strcmp(name, "readarray") == 0) {
+        *status = builtin_mapfile(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "printf") == 0 && command->argv[1] != NULL && strcmp(command->argv[1], "-v") == 0) {
+        *status = builtin_printf_v(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "umask") == 0) {
+        *status = builtin_umask(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "ulimit") == 0) {
+        *status = builtin_ulimit(command->argv);
+        return 1;
+    }
+    if (strcmp(name, "builtin") == 0) {
+        // builtin NAME ARG...: NAME is not looked for among the functions (bash builtins that are programs here run as programs)
+        Command shifted = *command;
+        char** argv;
+        size_t n = 0, i;
+
+        if (command->argv[1] == NULL) {
+            *status = 0;
+            return 1;
+        }
+        while (command->argv[n] != NULL)
+            n++;
+        argv = calloc(n + 1, sizeof *argv);
+        if (argv == NULL) {
+            *status = 1;
+            return 1;
+        }
+        argv[0] = "command";
+        for (i = 1; i < n; i++)
+            argv[i] = command->argv[i];
+        shifted.argv = argv;
+        builtin_run(&shifted, status, exitShell);
+        free(argv);
+        return 1;
+    }
     if (strcmp(name, "return") == 0) {
         int value = *status;
 
@@ -838,10 +1129,25 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
         return 1;
     }
     if (strcmp(name, "local") == 0) {
-        int i, failed = 0;
+        int i, failed = 0, assoc = 0, integer = 0, readonly = 0;
 
         for (i = 1; command->argv[i] != NULL; i++) {
             const char* equals = strchr(command->argv[i], '=');
+
+            if (command->argv[i][0] == '-' && command->argv[i][1] != '\0' && equals == NULL) {
+                // local -a -A -i -r -x -n NAME: the flags that mean something here are kept for the names after them
+                const char* f;
+
+                for (f = command->argv[i] + 1; *f != '\0'; f++) {
+                    if (*f == 'A')
+                        assoc = 1;
+                    else if (*f == 'i')
+                        integer = 1;
+                    else if (*f == 'r')
+                        readonly = 1;
+                }
+                continue;
+            }
             char variable[256];
             size_t length = equals != NULL ? (size_t)(equals - command->argv[i]) : strlen(command->argv[i]);
 
@@ -854,6 +1160,12 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
             variable[length] = '\0';
             if (command_local(variable, equals != NULL ? equals + 1 : NULL) != 0)
                 failed = 1;
+            if (assoc)
+                var_declare_assoc(variable);
+            if (integer)
+                var_set_integer(variable);
+            if (readonly)
+                var_set_readonly(variable);
         }
         *status = failed;
         return 1;

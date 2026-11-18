@@ -672,3 +672,267 @@ echo ${arr[1]} ${arr[2]} ${arr[3]}
 s=abc; i=0; while [ $i -lt ${#s} ]; do echo ${s:$i:1}; i=$((i+1)); done
 === default_assign_in_loop
 for f in a b; do : ${count:=0}; count=$((count+1)); done; echo $count
+
+=== r2_arr_basic
+a=(one two three); echo "${#a[@]} ${a[1]} ${a[@]:1}"; a+=(four); echo "${a[@]}"; unset 'a[0]'; echo "${!a[@]}"
+=== r2_arr_loop_quote
+files=("a b.txt" "c.txt"); for f in "${files[@]}"; do echo "[$f]"; done; printf '<%s>\n' "${files[@]}"
+=== r2_arr_read
+IFS=, read -r -a parts <<< "x,y,z"; echo "${#parts[@]} ${parts[2]}"
+=== r2_mapfile_basic
+printf 'l1\nl2\nl3\n' > f.txt; mapfile -t lines < f.txt; echo "${#lines[@]} ${lines[1]}"; readarray -t two < <(printf 'p\nq\n'); echo "${two[*]}"
+=== r2_str_ops
+s=hello.world.txt; echo "${s#*.} ${s##*.} ${s%.*} ${s%%.*} ${s/o/0} ${s//o/0} ${s:2:3} ${#s} ${s^^} ${s^}"
+=== r2_str_defaults
+unset x; echo "${x:-d} ${x-e}"; echo "${x:=set}" "$x"; y=; echo "[${y:-d}] [${y-e}] [${y:+alt}] [${x:+alt}]"
+=== r2_str_error_exit
+unset q; ( echo "${q:?missing}" ) 2>/dev/null; echo "st=$?"
+=== r2_arith_forms
+x=5; echo $((x*2+1)) $((x%3)) $((x**2)) $((x<<2)) $((x>3?1:0)) $((16#ff)) $((2#101)); ((x++)); ((x+=3)); echo $x; let y=x*2; echo $y
+=== r2_arith_cond
+i=0; while ((i<3)); do echo -n "$i "; ((i++)); done; echo; for ((j=0;j<3;j++)); do echo -n "$j,"; done; echo
+=== r2_cond_dbracket
+s=file.txt; [[ $s == *.txt ]] && echo txt; [[ $s =~ ^f(.*)\.txt$ ]] && echo "${BASH_REMATCH[1]}"; [[ -z "" && -n x ]] && echo ok; [[ a < b ]] && echo lt
+=== r2_cond_test_files
+mkdir d; touch f; [ -d d ] && [ -f f ] && [ ! -e nope ] && echo yes; [ -s f ] || echo empty; [ -w f ] && echo w; [ -r f ] && echo r
+=== r2_case_patterns
+for w in apple banana cherry 42 ""; do case "$w" in a*) echo A;; b*|c*) echo BC;; [0-9]*) echo N;; "") echo empty;; esac; done
+=== r2_func_return_value
+f() { local r=$(( $1 * 2 )); echo $r; return 3; }; v=$(f 4); echo "v=$v st=$?"; f 2; echo "st=$?"
+=== r2_func_recursion
+fact() { if [ "$1" -le 1 ]; then echo 1; else echo $(( $1 * $(fact $(( $1 - 1 ))) )); fi; }; fact 6
+=== r2_func_args
+f() { echo "$#:$1:$2:$*"; shift; echo "$#:$1"; }; f a "b c" d
+=== r2_func_local_scope
+x=outer; f() { local x=inner; echo $x; }; f; echo $x; g() { x=changed; }; g; echo $x
+=== r2_getopts_loop
+parse() { local OPTIND o; while getopts "vn:" o; do case $o in v) echo verbose;; n) echo "n=$OPTARG";; \?) echo bad;; esac; done; shift $((OPTIND-1)); echo "rest: $*"; }; parse -v -n 5 a b
+=== r2_heredoc_expand
+name=World; cat <<EOF
+Hello $name
+Sum: $((1+2))
+Cmd: $(echo hi)
+EOF
+=== r2_heredoc_quoted
+cat <<'EOF'
+no $expand `here` \n
+EOF
+=== r2_heredoc_indent
+if true; then
+    cat <<-EOF
+	tabbed $((2*3))
+	EOF
+fi
+=== r2_heredoc_to_file_append
+cat > a.txt <<EOF
+one
+EOF
+cat >> a.txt <<EOF
+two
+EOF
+cat a.txt
+=== r2_herestring_pipe
+cat <<< "a b c" | tr ' ' '\n' | sort -r
+=== r2_proc_subst
+diff <(printf '1\n2\n') <(printf '1\n3\n'); echo "st=$?"
+=== r2_cmd_subst_nested
+echo "$(echo "$(echo deep)")"; echo "$(printf 'a\nb\n')" | wc -l; x=$(printf 'trail\n\n\n'); echo "[$x]"
+=== r2_cmd_subst_file
+printf 'content\n' > c.txt; echo "$(<c.txt)"; v=$(cat c.txt); echo "$v"
+=== r2_pipestatus
+false | true; echo "${PIPESTATUS[@]}"; true | false | true; echo "${PIPESTATUS[*]}"
+=== r2_pipefail_modes
+set -o pipefail; false | true; echo "st=$?"; set +o pipefail; false | true; echo "st=$?"
+=== r2_errexit_flow
+set -e; echo a; false || echo recovered; if false; then :; fi; echo b; (false; echo no) || echo sub_failed; echo end
+=== r2_errexit_trap
+trap 'echo cleanup' EXIT; set -e; echo work; false; echo unreachable
+=== r2_nounset
+set -u; ( echo "$undefined_var" ) 2>/dev/null; echo "st=$?"
+=== r2_trap_int_exit_term
+trap 'echo bye' EXIT INT TERM; echo body
+=== r2_subshell_isolation
+x=1; (x=2; cd /; echo in:$x); echo out:$x; echo $PWD | grep -c /
+=== r2_subshell_exit
+(exit 3); echo $?; ( (exit 4) ); echo $?; { exit 5; } ; echo not
+=== r2_group_redirect
+{ echo a; echo b; } > g.txt; cat g.txt; { echo c; echo d; } | sort -r
+=== r2_redirect_dup_order
+echo out; echo err >&2; ( echo o; echo e >&2 ) 2>&1 | sort
+=== r2_redirect_both
+ls nonexist_zz > both.txt 2>&1; echo "st=$?"; grep -c . both.txt; echo x &> both2.txt; cat both2.txt
+=== r2_redirect_append_clobber
+echo 1 > r.txt; echo 2 >> r.txt; echo 3 >| r.txt; cat r.txt
+=== r2_redirect_devnull
+echo hidden > /dev/null; echo shown; cat nonexist_zz 2>/dev/null; echo "st=$?"; cat < /dev/null | wc -c
+=== r2_read_loop_lines
+printf 'a 1\nb 2\nc 3\n' | while read -r k v; do echo "$k=$v"; done; printf 'x\ny' | while read -r l; do echo "[$l]"; done
+=== r2_read_ifs_fields
+IFS=: read -r a b c <<< "1:2:3:4"; echo "$a|$b|$c"; IFS= read -r l <<< "  keep  "; echo "[$l]"
+=== r2_read_from_file_loop
+printf 'one\ntwo\n' > in.txt; n=0; while IFS= read -r line; do n=$((n+1)); echo "$n:$line"; done < in.txt
+=== r2_for_glob
+touch a.c b.c c.h; for f in *.c; do echo "cc $f"; done; for f in *.nomatch; do echo "lit:$f"; done
+=== r2_for_brace_seq
+for i in {1..3}; do echo -n $i; done; echo; for i in $(seq 1 3); do echo -n $i; done; echo; for c in {a..c}; do echo -n $c; done; echo
+=== r2_while_until_break
+i=0; until [ $i -ge 3 ]; do echo $i; i=$((i+1)); done; while true; do i=$((i+1)); [ $i -gt 5 ] && break; done; echo $i
+=== r2_nested_loops_continue
+for i in 1 2 3; do for j in a b; do [ $j = b ] && continue; echo $i$j; done; done
+=== r2_find_sort
+mkdir -p src/lib; touch src/a.c src/lib/b.c src/lib/c.h; find src -name '*.c' | sort; find src -type f | wc -l; find src -type d | sort
+=== r2_find_exec_grep
+mkdir s; printf 'TODO fix\nok\n' > s/a.txt; printf 'nothing\n' > s/b.txt; grep -rn TODO s; grep -rl TODO s; grep -rc ok s | sort
+=== r2_find_print0_xargs
+mkdir t; touch "t/a b" t/c; find t -type f -print0 | xargs -0 -n1 echo | sort
+=== r2_xargs_forms
+printf '1\n2\n3\n' | xargs; printf '1\n2\n3\n' | xargs -n1 echo n; printf 'a\nb\n' | xargs -I{} echo "<{}>"; echo | xargs echo none
+=== r2_sed_forms
+printf 'foo bar\nbaz\n' > s.txt; sed 's/foo/X/' s.txt; sed -n '2p' s.txt; sed '1d' s.txt; sed -e 's/a/A/g' -e 's/z/Z/' s.txt; sed -i 's/baz/BAZ/' s.txt; cat s.txt
+=== r2_awk_forms
+printf 'a 1\nb 2\nc 3\n' > t.txt; awk '{s+=$2} END {print s}' t.txt; awk -F' ' '$2>1 {print $1}' t.txt; awk 'NR==2' t.txt
+=== r2_sort_uniq_count
+printf 'b\na\nb\nc\nb\n' | sort | uniq -c | sort -rn | head -2; printf '3\n10\n2\n' | sort -n | tr '\n' ' '; echo
+=== r2_cut_paste_tr
+printf 'a,b,c\n1,2,3\n' | cut -d, -f2,3; printf 'x\ny\n' | paste -sd,; echo hello | tr a-z A-Z; echo "a  b" | tr -s ' '
+=== r2_head_tail_wc
+seq 1 10 > n.txt; head -3 n.txt | tr '\n' ' '; tail -2 n.txt | tr '\n' ' '; tail -n +9 n.txt | tr '\n' ' '; wc -l < n.txt; wc -c < n.txt
+=== r2_diff_unified
+printf 'a\nb\nc\n' > x1; printf 'a\nB\nc\n' > x2; diff x1 x2; echo "st=$?"; diff -u x1 x2 | tail -n +3
+=== r2_cp_mv_rm_tree
+mkdir -p a/b; echo hi > a/b/f; cp -r a c; mv c d; ls d/b; rm -rf a d; ls | wc -l
+=== r2_file_info
+printf 'hello\n' > f; stat -c %s f; wc -c < f; test -s f && echo nonempty; basename /x/y.txt .txt; dirname /x/y/z
+=== r2_printf_forms
+printf '%s|%5s|%-5s|%05d|%x|%o|%e\n' a b c 42 255 8 1.5; printf '%d%%\n' 50; printf '%s\n' a b c; printf 'no newline'; echo
+=== r2_echo_forms
+echo -n a; echo -e 'b\tc'; echo "x   y"; echo x    y; echo -e '\x41\0102'; echo "a\tb"
+=== r2_quoting_mix
+echo "it's" 'say "hi"' "tab\there" 'back\slash' "dollar\$"; x="a b"; echo $x "$x" '$x'
+=== r2_ansi_c_quote
+echo $'a\tb\nc'; echo $'\x41é'; printf '%s\n' $'q\'q'
+=== r2_line_continuation
+echo one \
+  two \
+  three; x="a\
+b"; echo $x
+=== r2_long_pipeline_chain
+seq 1 20 | grep -v 5 | sed 's/^/n/' | head -5 | tr '\n' ' ' ; echo; seq 1 5 | xargs -n2 | tr ' ' '+'
+=== r2_and_or_chain
+true && echo a || echo b; false && echo c || echo d; true || echo e && echo f; ! false && echo g
+=== r2_exit_codes
+true; echo $?; false; echo $?; (exit 7); echo $?; test 1 -eq 2; echo $?; [ a = a ]; echo $?
+=== r2_command_builtin_type
+type -t cd; type -t ls | head -1; command -v echo >/dev/null && echo has; command -v nonexistent_zz || echo missing
+=== r2_source_script
+printf 'V=sourced\nf() { echo in_f; }\n' > lib.sh; . ./lib.sh; echo $V; f; source ./lib.sh; echo again
+=== r2_script_args
+printf 'echo "n=$# a=$1 all=$*"\nshift\necho "$@"\n' > s.sh; bash s.sh x "y z" 2>/dev/null || true
+=== r2_env_prefix
+FOO=bar sh -c 'echo $FOO' 2>/dev/null; FOO=1; echo ${FOO}; export FOO; env | grep -c '^FOO='; unset FOO; echo "[${FOO}]"
+=== r2_special_vars
+echo $0 | wc -c | tr -d ' ' | grep -c .; echo "$#"; set -- a b; echo "$# $1 $2"; echo $-  | grep -c .; [ -n "$PWD" ] && echo pwd; [ -n "$$" ] && echo pid
+=== r2_tilde_home
+cd ~ && pwd | grep -c .; echo ~ | grep -c .; cd - > /dev/null; [ "$PWD" != "$HOME" ] && echo moved
+=== r2_readlink_realpath
+mkdir d; touch d/f; realpath d/f | sed 's#.*/d/f#D/F#'; readlink -f d/../d/f | sed 's#.*/d/f#D/F#'; realpath -m nope/x | sed 's#.*/nope/x#N/X#'
+=== r2_spaces_in_names
+mkdir "my dir"; echo x > "my dir/my file.txt"; ls "my dir"; cat "my dir/my file.txt"; for f in "my dir"/*; do echo "[$f]"; done; cp "my dir/my file.txt" "copy of it.txt"; ls | wc -l
+=== r2_unicode_names
+mkdir 한글; echo 내용 > 한글/파일.txt; cat 한글/파일.txt; ls 한글; echo "${#PWD}" | grep -c .; printf 'é\n' | wc -c
+=== r2_glob_classes
+touch a1 a2 b1 Ab; echo a?; echo [ab]1; echo [!a]*; echo a[0-9]; echo {a,b}1
+=== r2_glob_nullglob_dot
+touch .hid vis; echo *; echo .[a-z]*; ls -A | tr '\n' ' '; echo
+=== r2_brace_forms
+echo {1..3}{a,b}; echo x{,y}z; echo {a,b,c}{1,2}; mkdir -p p/{x,y}/z; find p -type d | sort
+=== r2_background_wait
+sleep 0.2 & p=$!; echo started; wait $p; echo "st=$?"; (sleep 0.1; exit 4) & wait $!; echo "st=$?"
+=== r2_tee_forms
+echo a | tee t1 > /dev/null; echo b | tee -a t1 > /dev/null; cat t1; echo c | tee t2 t3 | cat; cat t2 t3 | wc -l
+=== r2_sort_forms
+printf 'b 2\na 10\nc 1\n' | sort -k2 -n; printf 'b\nA\na\nB\n' | sort -u; printf '1\n1\n2\n' | sort -u | wc -l; printf 'x\nz\ny\n' | sort -r | head -1
+=== r2_grep_forms
+printf 'Apple\nbanana\napple pie\n' > g.txt; grep -i apple g.txt; grep -v apple g.txt; grep -c a g.txt; grep -n ban g.txt; grep -E '^(A|b)' g.txt; grep -o 'p*ie' g.txt; grep -w apple g.txt; grep -q zzz g.txt; echo "st=$?"
+=== r2_grep_context
+seq 1 10 > n; grep -A1 -B1 5 n | tr '\n' ' '; echo; grep -m2 1 n | tr '\n' ' '; echo; grep -x 7 n; grep -F '1' n | wc -l
+=== r2_env_var_path_lookup
+mkdir bin2; printf '#!/bin/sh\necho mytool\n' > bin2/mytool; chmod +x bin2/mytool; PATH="$PWD/bin2:$PATH"; mytool
+=== r2_quoted_cmd_names
+"echo" quoted; 'echo' single; e=echo; $e viavar; "$e" quotedvar
+=== r2_alias_unsupported_ok
+alias ll='ls -l' 2>/dev/null; echo done
+=== r2_ifs_split_words
+v="a b  c"; set -- $v; echo $#; IFS=,; v2="x,y,z"; set -- $v2; echo $# $2; IFS=$' \t\n'
+=== r2_array_assoc
+declare -A m=([a]=1 [b]=2); echo "${m[a]} ${m[b]} ${#m[@]}"; for k in "${!m[@]}"; do echo "$k"; done | sort
+=== r2_printf_v_and_substr
+printf -v s '%03d' 7; echo $s; str="abcdef"; echo "${str: -2} ${str:0:-1}"
+=== r2_here_in_function_pipe
+f() { cat <<EOF
+fn $1
+EOF
+}; f one | tr a-z A-Z
+=== r2_command_not_found_status
+nonexistent_cmd_zz 2>/dev/null; echo "st=$?"; ./nonexistent_zz 2>/dev/null; echo "st=$?"
+=== r2_exit_in_pipeline_subshell
+echo a | { read x; echo "got $x"; exit 2; }; echo "st=$?"
+=== r2_eval_forms
+cmd='echo "a b"'; eval $cmd; eval "x=5"; echo $x; eval 'for i in 1 2; do echo e$i; done'
+=== r2_trap_err
+trap 'echo "err at $LINENO"' ERR; false; echo after
+=== r2_set_x_trace_off
+set -x; echo traced 2>&1 | wc -l; set +x; echo plain
+=== r2_wait_all
+sleep 0.1 & sleep 0.1 & wait; echo all
+=== r2_line_count_idiom
+printf 'a\nb\nc\n' | wc -l | tr -d ' '; printf 'a\nb\n' | sed -n '$='; printf 'a\nb\n' | awk 'END{print NR}'
+=== r2_number_compare
+[ 10 -gt 9 ] && echo gt; [ "10" \> "9" ] && echo strgt; [[ 10 -eq 10 ]] && echo eq; (( 10 > 9 )) && echo arith
+=== r2_string_empty_tests
+s=""; [ -z "$s" ] && echo empty; [ -n "$s" ] || echo notn; t="x"; [ "$t" = x ] && echo eq; [ "$t" != y ] && echo ne
+=== r2_sudo_like_wrappers
+env FOO=1 sh -c 'echo $FOO' 2>/dev/null; command echo via_command; builtin echo via_builtin 2>/dev/null || echo nobuiltin
+=== r2_yes_head
+yes | head -3 | tr '\n' ' '; echo; yes ab | head -2 | tr '\n' ' '; echo
+=== r2_seq_forms
+seq 3; seq 2 4; seq 1 2 7 | tr '\n' ' '; echo; seq -s, 1 4; seq -w 8 10 | tr '\n' ' '; echo
+=== r2_tac_rev_nl
+printf 'a\nb\nc\n' | tac | tr '\n' ' '; echo; printf 'abc\n' | rev; printf 'a\nb\n' | nl | tr -s ' \t' ' '
+=== r2_base64_md5
+echo -n hello | base64; echo aGVsbG8= | base64 -d; echo; echo -n hello | md5sum | cut -c1-32; echo -n hello | sha256sum | cut -c1-16
+=== r2_dev_files
+head -c 4 /dev/zero | wc -c; head -c 8 /dev/urandom | wc -c; head -c 8 /dev/urandom | base64 | wc -c; cat < /dev/null; echo done
+=== r2_dynamic_vars
+[ -n "$RANDOM" ] && echo random; [ "$RANDOM" -ge 0 ] && [ "$RANDOM" -le 32767 ] && echo range; echo $SECONDS | grep -c '^[0-9]'; [ -n "$BASH_VERSION" ] && echo bv; [ -n "$HOSTNAME" ] && echo host; echo "$UID" | grep -c '^[0-9]'
+=== r2_lineno_funcname
+echo "line $LINENO"
+f() {
+  echo "in f at $LINENO, name ${FUNCNAME[0]}"
+  g
+}
+g() { echo "g: ${FUNCNAME[0]} <- ${FUNCNAME[1]}"; }
+f
+trap 'echo "err at $LINENO"' ERR
+false
+echo "end $LINENO"
+=== r2_umask_ulimit
+umask 022; umask; umask -S; ulimit -n | grep -c '^[0-9]'
+=== r2_ifs_forms
+v="a b  c"; set -- $v; echo $#
+IFS=,; v2="x,y,z"; set -- $v2; echo $# $2
+v3="a,,b,"; set -- $v3; echo $# "[$2]"
+v4=",a"; set -- $v4; echo $# "[$1]"
+IFS=": "; v5="a : b"; set -- $v5; echo $# $1 $2
+IFS=; v6="a b"; set -- $v6; echo $# "[$1]"
+unset IFS; v7="  p   q "; set -- $v7; echo $# "[$1][$2]"
+IFS=$'\n'; v8=$(printf 'l 1\nl 2\n'); set -- $v8; echo $# "[$1]"
+=== r2_exit_in_stage
+echo a | { read x; echo got $x; exit 2; }; echo st=$?
+echo a | (exit 4); echo st=$?
+true | (echo hi)
+echo x | (read v; echo got $v) | tr a-z A-Z
+=== r2_fd_pipe_status
+exec 3>f3.txt; echo to3 >&3; exec 3>&-; cat f3.txt
+echo 1 > in.txt; exec 4< in.txt; read l <&4; echo "[$l]"; exec 4<&-
+false | true; echo "${PIPESTATUS[@]}"; echo a | { exit 3; } | cat; echo "${PIPESTATUS[*]}"

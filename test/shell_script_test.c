@@ -210,10 +210,11 @@ static void test_expansion(void) {
     // a ; inside the braces is not a separator
     expect_c("-c \"echo ${u:-a;b}; echo c\"", "a;b\nc\n", 0);
 
-    // ${NAME:?word}: an error, the command does not run
+    // ${NAME:?word}: an error that ends the script (status 1), as in bash
     run_shell("-c \"echo ${u:?must be set}; echo next\"", "", &r);
     lf_only(r.out);
-    CHECK_STR(r.out, "next\n");
+    CHECK_STR(r.out, "");
+    CHECK_INT(r.exitCode, 1);
     CHECK(strstr(r.err, "u: must be set") != NULL);
     run_result_free(&r);
 }
