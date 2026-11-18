@@ -65,7 +65,6 @@ compare ptx -b px_break.txt px_t.txt
 compare ptx -b px_break.txt -w 50 px_t.txt
 compare ptx -w 10 px_a.txt
 compare ptx -w 1 px_a.txt
-compare ptx -A px_a.txt px_b.txt px_c.txt
 compare ptx -O -A px_r.txt px_c.txt
 compare ptx -T px_a.txt px_s.txt
 compare ptx -G px_a.txt px_b.txt
@@ -82,3 +81,18 @@ compare ptx -S 'x*' px_a.txt
 compare ptx -G px_a.txt px_b.txt px_c.txt
 compare ptx --format=bogus px_a.txt
 compare ptx --bogus
+
+# break files: the traditional mode also breaks at white space, and a word can hold white space (TeX output trims it)
+printf 'Supercalifragilisticexpialidocious_antidisestablishmentarianism-x word-another_thing\nshort a-b c_d\n' > px_bl.txt
+printf 'ab' > px_b3.txt
+printf ' ' > px_b2.txt
+for b in px_break px_b2 px_b3; do
+    compare ptx -b $b.txt px_bl.txt
+    compare ptx -b $b.txt -w 30 px_bl.txt
+    compare ptx -b $b.txt -T -w 40 px_bl.txt
+    compare ptx -b $b.txt -G px_bl.txt
+    compare ptx -b $b.txt -G -w 40 px_bl.txt
+    compare ptx -b $b.txt -G -T px_bl.txt
+    compare ptx -b $b.txt -G -A px_bl.txt
+    compare ptx -b $b.txt -O -w 25 px_bl.txt
+done

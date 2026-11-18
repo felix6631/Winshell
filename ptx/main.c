@@ -757,8 +757,9 @@ static void define_all_fields(const Ptx* x, const Occurrence* occurs, Fields* f)
     }
 
     if (x->format == FORMAT_TEX) {
-        f->keyword.start = occurs->start;
-        f->keyword.end = occurs->start + occurs->size;
+        // GNU skips one word or separator from the start of keyafter (which has lost its trailing white space)
+        f->keyword.start = f->keyafter.start;
+        f->keyword.end = skip_something(x, f->keyafter.start, f->keyafter.end);
         f->after.start = f->keyword.end;
         f->after.end = f->keyafter.end;
     }
@@ -1048,6 +1049,12 @@ int main(int argc, char* argv[]) {
         memset(x.wordMap, 1, sizeof x.wordMap);
         for (k = 0; k < size; k++)
             x.wordMap[data[k]] = 0;
+        if (!x.gnu) {
+            // traditional mode: a space, a tab and a newline always break words, even when the file does not list them
+            x.wordMap[' '] = 0;
+            x.wordMap['\t'] = 0;
+            x.wordMap['\n'] = 0;
+        }
         free(data);
     } else {
         int c;

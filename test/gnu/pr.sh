@@ -62,30 +62,33 @@ done
 compare pr --pages=2:3 -l 12 pr_seq.txt
 compare pr -N 50 -n +2 -l 12 pr_seq.txt
 
-# columns: down, across, with numbers, separators and widths. (-s together with -n in columns that are filled down, and tabs
-# in numbered columns, are not compared: the position pr counts for them is not the one it prints.)
+# columns: down, across, with numbers, separators and widths, also -s with -n and tabs in numbered columns.
 for f in pr_seq pr_ten pr_five pr_mix pr_tabs pr_ff pr_ctl pr_nonl pr_blank; do
     for c in 2 3 4 5; do
         compare pr -$c $f.txt
         compare pr -$c -t $f.txt
         compare pr -$c -a $f.txt
         compare pr -$c -a -t $f.txt
-        [ $f = pr_tabs ] || compare pr -$c -n -t $f.txt
-        [ $f = pr_tabs ] || compare pr -$c -a -n -t $f.txt
+        compare pr -$c -n -t $f.txt
+        compare pr -$c -a -n -t $f.txt
         compare pr -$c -d -t $f.txt
         compare pr -$c -a -d -t $f.txt
         compare pr -$c -s -t $f.txt
-        [ $f = pr_tabs ] || compare pr -$c -s: -t $f.txt
+        compare pr -$c -s -n -t $f.txt
+        compare pr -$c -s, -n $f.txt
+        compare pr -$c -n -w 30 -t $f.txt
+        compare pr -$c -a -s -n -t $f.txt
+        compare pr -$c -s: -t $f.txt
         compare pr -$c -S'| ' -t $f.txt
         compare pr -$c -a -S'| ' -t $f.txt
-        [ $f = pr_tabs ] || compare pr -$c -Sab -n -t $f.txt
+        compare pr -$c -Sab -n -t $f.txt
         compare pr -$c -J -t $f.txt
         compare pr -$c -w 50 -t $f.txt
         compare pr -$c -W 50 -a -t $f.txt
-        [ $f = pr_tabs ] || compare pr -$c -w 60 -n -t $f.txt
+        compare pr -$c -w 60 -n -t $f.txt
         compare pr -$c -s -w 60 -t $f.txt
         compare pr -$c -o 4 -t $f.txt
-        [ $f = pr_tabs ] || compare pr -$c -o 8 -n -t $f.txt
+        compare pr -$c -o 8 -n -t $f.txt
         compare pr -$c -e -t $f.txt
         compare pr -$c -i,3 -t $f.txt
         compare pr -$c -l 14 $f.txt

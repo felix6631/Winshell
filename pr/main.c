@@ -156,6 +156,8 @@ typedef struct {
     int*           tabs;            /* the columns each tab character of the text takes */
     size_t         tabCount, tabCapacity;
     int            dropped;         /* the line was cut away completely (nothing of it fits the column) */
+    int            endPos;          /* the horizontal position after the line (GNU's end_vector) */
+    int            noNumber;        /* its first character did not fit: GNU 8.32 stores an empty line without a number */
 } Cell;
 
 /** One cell of a page: the text of a line (or nothing) and the number the line has. */
@@ -286,10 +288,7 @@ static void print_sep_string(Pr* p) {
             } else {
                 if (p->spaces > 0)
                     print_white_space(p);
-                if (*s == '\t')
-                    p->outPos += 1 + (p->accurateTabs ? TAB_WIDTH(8, p->outPos) : 0);
-                else
-                    p->outPos++;
+                p->outPos++;
                 emit(p, (unsigned char)*s++);
             }
         }
@@ -407,12 +406,13 @@ static void eat_newline(Input* in) {
  * a line it ends it, and the line feed after it is swallowed. Returns 1 when there is a line.
  */
 static int read_cell(Pr* p, Input* in, Cell* cell, int limit, int startPosition) {
-    int inputPosition = startPosition, last = startPosition;
+    int inputPosition = startPosition, last = startPosition, first = 1;
     unsigned char c;
 
     cell->length = 0;
     cell->tabCount = 0;
     cell->dropped = 0;
+    cell->noNumber = 0;
     if (in->pos >= in->length) {
         in->status = CLOSED;
         in->eof = 1;
@@ -436,12 +436,19 @@ static int read_cell(Pr* p, Input* in, Cell* cell, int limit, int startPosition)
             size_t before = cell->length, tabsBefore = cell->tabCount;
 
             add_clump(p, cell, c, &inputPosition);
-            if (p->truncateLines && inputPosition > limit) {
+            // the first clump is checked without the line number (GNU read_line adds the number width after it)
+            int over = first ? inputPosition - startPosition > (p->parallel ? limit - startPosition : limit) : inputPosition > limit;
+
+            if (p->truncateLines && over && first)
+                cell->noNumber = 1;
+            first = 0;
+            if (p->truncateLines && over) {
                 cell->length = before;
                 cell->tabCount = tabsBefore;
                 if (cell->length == 0 && !p->accurateTabs)
                     cell->dropped = 1;
                 inputPosition = last;
+                cell->endPos = inputPosition;
                 while (in->pos < in->length && in->data[in->pos] != '\n')
                     in->pos++;
                 if (in->pos < in->length)
@@ -456,6 +463,7 @@ static int read_cell(Pr* p, Input* in, Cell* cell, int limit, int startPosition)
         }
         c = in->data[in->pos++];
     }
+    cell->endPos = inputPosition;
     return 1;
 }
 
@@ -582,7 +590,7 @@ static void fill_down(Pr* p, Input* in, Page* page) {
         s->present = read_cell(p, in, &s->cell, text_limit(p, p->numbered), text_start(p, p->numbered));
         if (!s->present)
             break;
-        s->number = p->lineNumber++;
+        s->number = s->cell.noNumber ? 0 : p->lineNumber++;
         stored++;
     }
     if (stored < capacity && in->status == OPEN && !has_data(in))
@@ -602,6 +610,8 @@ static void fill_down(Pr* p, Input* in, Page* page) {
             row[j].cell.length = 0;
             row[j].cell.tabCount = 0;
             row[j].cell.dropped = from->cell.dropped;
+            row[j].cell.endPos = from->cell.endPos;
+            row[j].cell.noNumber = from->cell.noNumber;
             {
                 size_t k;
 
@@ -824,7 +834,7 @@ static void print_row(Pr* p, const Slot* row, int columns, int blankAfter) {
             owed = 0;
             print_sep_string(p);
         }
-        if (p->numbered && (!p->parallel || j == 0))
+        if (p->numbered && (!p->parallel || j == 0) && !slot->cell.noNumber)
             add_line_number(p, slot->number);
         {
             size_t t = 0;
@@ -837,6 +847,9 @@ static void print_row(Pr* p, const Slot* row, int columns, int blankAfter) {
                     advance = slot->cell.tabs[t++];
                 print_char(p, c, advance);
             }
+            // columns filled downwards: the position comes from the stored line, not from what was printed (GNU print_stored)
+            if (p->multi && !p->across && !p->parallel && p->spaces == 0)
+                p->outPos = (p->truncateLines ? column_start(p, j) : (j == 0 ? p->margin : 0)) + slot->cell.endPos;
         }
     }
     if (row[0].abortRow)
