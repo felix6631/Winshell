@@ -40,7 +40,7 @@ int execute_pipeline_background(const Pipeline* pipeline, HANDLE** processes, si
  * the parser made of "x <redirections>"; its words are not used.
  */
 typedef struct {
-    int saved[3];           // the descriptors 0, 1, 2 as they were, or -1 when not changed
+    int saved[10];          // the descriptors 0 to 9 as they were (a copy of each, numbered 10 and up), -1 when not changed, -2 when it was closed
     int inputRedirected;    // standard input was replaced
 } StdRedirection;
 
@@ -49,5 +49,8 @@ int redirect_begin(const Command* command, StdRedirection* saved);
 
 /** Puts the descriptors back. */
 void redirect_end(StdRedirection* saved);
+
+/** Keeps the redirections for good (exec > file, exec 3< file): the saved copies are dropped, nothing is put back. */
+void redirect_commit(StdRedirection* saved);
 
 #endif //EXECUTER_H

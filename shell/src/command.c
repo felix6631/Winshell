@@ -644,7 +644,7 @@ static int parse_trailer(Parser* p, Node* node) {
         return 0;                       // the next stage of a pipeline: parse_command goes on
     if (c == '&' && next != '&' && next != '>')
         return 0;                       // a background job: parse_andor takes the &
-    if (c == '<' || c == '>' || (c == '&' && next == '>') || (isdigit((unsigned char)c) && next == '>')) {
+    if (c == '<' || c == '>' || (c == '&' && next == '>') || (isdigit((unsigned char)c) && (next == '>' || next == '<'))) {
         size_t start = p->pos, end;
 
         p->stopAtPipe = 1;

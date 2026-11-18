@@ -15,10 +15,11 @@
  * redirections written next to it.
  */
 typedef struct {
-    int    fd;          // 1 (standard output) or 2 (standard error)
-    LPSTR  file;        // the file it goes to, or NULL for a copy of another descriptor
+    int    fd;          // the descriptor, 0 to 9 (1 is standard output, 2 standard error)
+    LPSTR  file;        // the file it goes to (or comes from), or NULL for a copy of another descriptor
     int    append;      // non-zero for ">>"
-    int    dupOf;       // when file is NULL: 1 or 2, the descriptor this one becomes a copy of
+    int    input;       // non-zero when file is opened for reading (N< file)
+    int    dupOf;       // when file is NULL: the descriptor this one becomes a copy of, or -1 to close it (N>&-)
 } Redirect;
 
 typedef struct {
@@ -209,6 +210,9 @@ int winshell_parse(const CHAR* line, Pipeline* pipeline);
  * Returns 0, or -1 when out of memory (a message is printed).
  */
 int winshell_glob(Pipeline* pipeline);
+
+/** shopt -s dotglob / nullglob: names with a leading dot match a wildcard / a pattern without a match expands to nothing. */
+void winshell_glob_options(int dotglob, int nullglob);
 
 void winshell_freePipeline(Pipeline* pipeline);
 

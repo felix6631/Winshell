@@ -353,6 +353,13 @@ err_start:
 #define COMMAND_FAILED 0    /* a message was printed; the neighbours see an empty input or a closed output */
 #define COMMAND_NOMEM (-1)
 
+/** The descriptors 3 to 9 that the shell holds open (exec 3> file); 0, 1 and 2 are always there. */
+static int fdOpen[10];
+
+static int fd_is_open(int fd) {
+    return fd >= 0 && fd < 10 && (fd < 3 || fdOpen[fd]);
+}
+
 /**
  * Starts one command of a pipeline. pipeRead is the end of the pipe coming from the
  * previous command and pipeWrite the one going to the next, or NULL; the shell keeps
@@ -362,9 +369,11 @@ err_start:
 static int start_command(const Command* command, HANDLE pipeRead, HANDLE pipeWrite,
                          HANDLE shellIn, HANDLE shellOut, HANDLE shellErr, DWORD flags, HANDLE* process) {
     HANDLE in = shellIn, out = shellOut, err = shellErr;
+    HANDLE table[10];
+    int k;
     // the copies and files opened for this command, to close afterwards; descriptors that
     // were made copies of another one (2>&1) refer to the same handle, which is closed once
-    HANDLE* owned = malloc((2 + command->redirectCount) * sizeof *owned);
+    HANDLE* owned = malloc((3 + command->redirectCount) * sizeof *owned);
     size_t ownedCount = 0, r;
     char* environment;
     int ready = 1, failed = 0;
@@ -394,13 +403,45 @@ static int start_command(const Command* command, HANDLE pipeRead, HANDLE pipeWri
         owned[ownedCount++] = out;
     }
 
-    // standard output and error, as written: a later redirection does not change a copy made before it
+    // the descriptors 0 to 9 as the program sees them: 3 and up are the ones the shell holds (exec 3> file)
+    table[0] = in;
+    table[1] = out;
+    table[2] = err;
+    for (k = 3; k < 10; k++)
+        table[k] = fd_is_open(k) ? (HANDLE)_get_osfhandle(k) : NULL;
+
+    // the redirections, as written: a later redirection does not change a copy made before it
     for (r = 0; r < command->redirectCount; r++) {
         const Redirect* redirect = &command->redirects[r];
-        HANDLE* slot = redirect->fd == 2 ? &err : &out;
+        int fd = redirect->fd;
 
+        if (fd < 0 || fd > 9)
+            continue;
         if (redirect->file == NULL) {
-            *slot = redirect->dupOf == 2 ? err : out;
+            if (redirect->dupOf < 0) {
+                // N>&-: a program cannot be started with a closed standard descriptor, so it gets NUL
+                HANDLE closed = fd == 0 ? open_input_file("/dev/null") : open_output_file("/dev/null", 0);
+
+                if (closed != INVALID_HANDLE_VALUE) {
+                    owned[ownedCount++] = closed;
+                    table[fd] = closed;
+                }
+            } else if (redirect->dupOf > 9 || table[redirect->dupOf] == NULL) {
+                fprintf(stderr, "Error: %d: Bad file descriptor\n", redirect->dupOf);
+                ready = 0;
+            } else {
+                table[fd] = table[redirect->dupOf];
+            }
+        } else if (redirect->input) {
+            HANDLE file = open_input_file(redirect->file);
+
+            if (file == INVALID_HANDLE_VALUE) {
+                fprintf(stderr, "Error: Cannot open '%s' for reading\n", redirect->file);
+                ready = 0;
+            } else {
+                owned[ownedCount++] = file;
+                table[fd] = file;
+            }
         } else {
             HANDLE file = open_output_file(redirect->file, redirect->append);
             if (file == INVALID_HANDLE_VALUE) {
@@ -408,10 +449,16 @@ static int start_command(const Command* command, HANDLE pipeRead, HANDLE pipeWri
                 ready = 0;
             } else {
                 owned[ownedCount++] = file;
-                *slot = file;
+                table[fd] = file;
             }
         }
     }
+    in = table[0];
+    out = table[1];
+    err = table[2];
+    for (k = 0; k < 3; k++)
+        if (table[k] != NULL)
+            SetHandleInformation(table[k], HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
 
     environment = build_environment(command, &failed);
     if (failed) {
@@ -443,6 +490,7 @@ static int run_pipeline(const Pipeline* pipeline, int background, HANDLE** keep,
     HANDLE pipeRead = NULL;     // read end of the pipe coming from the previous command
     DWORD exitCode = (DWORD)-1;
     int noopSucceeded = 0;      // the last command was NAME=value alone
+    int redirectFailed = 0;     // a redirection of the last command could not be made: the status is 1, as in bash
     DWORD failed = 0;           // the status of the last command before the end of the pipeline that failed (set -o pipefail)
     size_t i;
 
@@ -482,6 +530,8 @@ static int run_pipeline(const Pipeline* pipeline, int background, HANDLE** keep,
         result = start_command(command, pipeRead, pipeWrite, shellIn, shellOut, shellErr, flags, &processes[i]);
         if (result == COMMAND_READY && command->argv == NULL && isLast)
             noopSucceeded = 1;
+        if (result == COMMAND_FAILED && isLast)
+            redirectFailed = 1;
 
         close_handle(&pipeRead);
         close_handle(&pipeWrite);
@@ -526,7 +576,7 @@ static int run_pipeline(const Pipeline* pipeline, int background, HANDLE** keep,
     if (noopSucceeded)
         exitCode = 0;
     else if (processes[pipeline->count - 1] == NULL)
-        exitCode = (DWORD)-1;
+        exitCode = redirectFailed ? 1 : (DWORD)-1;
 
     free(processes);
     return (int)exitCode;
@@ -542,30 +592,86 @@ int execute_pipeline_background(const Pipeline* pipeline, HANDLE** processes, si
 
 /* ---- redirections of the shell itself, for compound commands ------------------------------- */
 
+/* the copies of the descriptors that a redirection replaced: numbered from 10, so that 0 to 9 stay free for the user */
+static unsigned char copyUsed[256];
+
+static int copy_descriptor(int fd) {
+    int n;
+
+    for (n = 10; n < 256; n++) {
+        if (!copyUsed[n]) {
+            if (_dup2(fd, n) != 0)
+                return -1;
+            copyUsed[n] = 1;
+            return n;
+        }
+    }
+    return -1;
+}
+
+static void drop_copy(int n) {
+    _close(n);
+    copyUsed[n] = 0;
+}
+
 void redirect_end(StdRedirection* r) {
     int fd;
 
     fflush(stdout);
     fflush(stderr);
-    for (fd = 0; fd < 3; fd++) {
+    for (fd = 0; fd < 10; fd++) {
         if (r->saved[fd] >= 0) {
             _dup2(r->saved[fd], fd);
-            _close(r->saved[fd]);
-            r->saved[fd] = -1;
+            drop_copy(r->saved[fd]);
+            if (fd >= 3)
+                fdOpen[fd] = 1;
+        } else if (r->saved[fd] == -2) {
+            _close(fd);                 // it was not open before
+            fdOpen[fd] = 0;
         }
+        r->saved[fd] = -1;
+    }
+}
+
+void redirect_commit(StdRedirection* r) {
+    int fd;
+
+    fflush(stdout);
+    fflush(stderr);
+    for (fd = 0; fd < 10; fd++) {
+        if (r->saved[fd] >= 0)
+            drop_copy(r->saved[fd]);
+        r->saved[fd] = -1;
     }
 }
 
 static int redirect_save(StdRedirection* r, int fd) {
-    if (r->saved[fd] < 0)
-        r->saved[fd] = _dup(fd);
+    if (r->saved[fd] != -1)
+        return 1;
+    if (!fd_is_open(fd)) {
+        r->saved[fd] = -2;
+        return 1;
+    }
+    r->saved[fd] = copy_descriptor(fd);
     return r->saved[fd] >= 0;
+}
+
+/** Makes descriptor slot refer to the file descriptor fd (which is closed), and notes that it is open. */
+static void redirect_take(int fd, int slot) {
+    if (fd != slot) {
+        _dup2(fd, slot);
+        _close(fd);
+    }
+    if (slot >= 3)
+        fdOpen[slot] = 1;
 }
 
 int redirect_begin(const Command* command, StdRedirection* r) {
     size_t i;
+    int k;
 
-    r->saved[0] = r->saved[1] = r->saved[2] = -1;
+    for (k = 0; k < 10; k++)
+        r->saved[k] = -1;
     r->inputRedirected = 0;
     fflush(stdout);
     fflush(stderr);
@@ -585,21 +691,55 @@ int redirect_begin(const Command* command, StdRedirection* r) {
             redirect_end(r);
             return -1;
         }
-        _dup2(fd, 0);
-        _close(fd);
+        redirect_take(fd, 0);
         r->inputRedirected = 1;
     }
 
     for (i = 0; i < command->redirectCount; i++) {
         const Redirect* redirect = &command->redirects[i];
-        int slot = redirect->fd == 2 ? 2 : 1;
+        int slot = redirect->fd;
 
+        if (slot < 0 || slot > 9)
+            continue;
         if (!redirect_save(r, slot)) {
             redirect_end(r);
             return -1;
         }
+        if (slot == 0)
+            r->inputRedirected = 1;
         if (redirect->file == NULL) {
-            _dup2(redirect->dupOf == 2 ? 2 : 1, slot);
+            if (redirect->dupOf < 0) {
+                // N>&-: a closed standard descriptor is NUL, as no program could be started with one
+                if (slot < 3) {
+                    int fd = _open("NUL", slot == 0 ? _O_RDONLY : _O_WRONLY);
+
+                    if (fd >= 0)
+                        redirect_take(fd, slot);
+                } else if (fdOpen[slot]) {
+                    _close(slot);
+                    fdOpen[slot] = 0;
+                }
+            } else if (!fd_is_open(redirect->dupOf)) {
+                fprintf(stderr, "Error: %d: Bad file descriptor\n", redirect->dupOf);
+                redirect_end(r);
+                return -1;
+            } else if (redirect->dupOf != slot) {
+                _dup2(redirect->dupOf, slot);
+                if (slot >= 3)
+                    fdOpen[slot] = 1;
+            }
+        } else if (redirect->input) {
+            char native[VPATH_MAX];
+            int fd = -1;
+
+            if (vpath_to_native(redirect->file, native, sizeof native) == 0)
+                fd = _open(native, _O_RDONLY | _O_BINARY);
+            if (fd < 0) {
+                fprintf(stderr, "Error: Cannot open '%s' for reading\n", redirect->file);
+                redirect_end(r);
+                return -1;
+            }
+            redirect_take(fd, slot);
         } else {
             char native[VPATH_MAX];
             int fd = -1;
@@ -620,8 +760,7 @@ int redirect_begin(const Command* command, StdRedirection* r) {
                 redirect_end(r);
                 return -1;
             }
-            _dup2(fd, slot);
-            _close(fd);
+            redirect_take(fd, slot);
         }
     }
     return 0;

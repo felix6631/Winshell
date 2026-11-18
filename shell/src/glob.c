@@ -29,6 +29,7 @@
 #include "vpath.h"
 #include "utf8.h"
 #include "vec.h"
+#include "variables.h"
 
 typedef struct {
     char** items;
@@ -51,10 +52,37 @@ static void list_free(StringList* list) {
     list->count = list->capacity = 0;
 }
 
+static int globDotglob, globNullglob, globBytes;
+
+void winshell_glob_options(int dotglob, int nullglob) {
+    globDotglob = dotglob;
+    globNullglob = nullglob;
+}
+
+/** The C and POSIX locales sort by byte value, as on Linux; any other locale (and none) ignores the case, as Windows does. */
+static int collate_bytes(void) {
+    static const char* const names[] = { "LC_ALL", "LC_COLLATE", "LANG" };
+    size_t i;
+
+    for (i = 0; i < sizeof names / sizeof *names; i++) {
+        const char* value = var_get(names[i]);
+
+        if (value == NULL)
+            value = getenv(names[i]);
+        if (value != NULL && value[0] != 0)
+            return strcmp(value, "C") == 0 || strcmp(value, "POSIX") == 0;
+    }
+    return 0;
+}
+
 static int compare_names(const void* left, const void* right) {
     const char* a = *(const char* const*)left;
     const char* b = *(const char* const*)right;
-    int result = _stricmp(a, b);
+    int result;
+
+    if (globBytes)
+        return strcmp(a, b);
+    result = _stricmp(a, b);
     return result != 0 ? result : strcmp(a, b);
 }
 
@@ -96,6 +124,9 @@ static uint32_t take_char(const char** p, size_t left) {
     return c;
 }
 
+/** Letters match without regard to case, except in the C and POSIX locales (globBytes), where a pattern is case sensitive as on Linux. */
+#define FOLD(c) (globBytes ? (c) : utf8_fold(c))
+
 /** Matches the pattern [p, pEnd) against the whole name, a character at a time, ignoring case. */
 static int match(const char* p, const char* pEnd, const char* name) {
     while (p < pEnd) {
@@ -124,7 +155,7 @@ static int match(const char* p, const char* pEnd, const char* name) {
 
             if (*name == '\0')
                 return 0;
-            c = utf8_fold(take_char(&name, 4));
+            c = FOLD(take_char(&name, 4));
             if (*q == '!' || *q == '^') {
                 negate = 1;
                 q++;
@@ -133,13 +164,13 @@ static int match(const char* p, const char* pEnd, const char* name) {
                 uint32_t low, high;
                 if (*q == GLOB_ESCAPE && q + 1 < end)
                     q++;
-                low = utf8_fold(take_char(&q, (size_t)(end - q)));
+                low = FOLD(take_char(&q, (size_t)(end - q)));
                 high = low;
                 if (q + 1 < end && *q == '-') {
                     q++;
                     if (*q == GLOB_ESCAPE && q + 1 < end)
                         q++;
-                    high = utf8_fold(take_char(&q, (size_t)(end - q)));
+                    high = FOLD(take_char(&q, (size_t)(end - q)));
                 }
                 if (c >= low && c <= high)
                     found = 1;
@@ -155,7 +186,7 @@ static int match(const char* p, const char* pEnd, const char* name) {
                 return 0;
             want = take_char(&p, (size_t)(pEnd - p));
             have = take_char(&name, 4);
-            if (utf8_fold(want) != utf8_fold(have))
+            if (FOLD(want) != FOLD(have))
                 return 0;
         }
     }
@@ -266,7 +297,7 @@ static int matching_names(const char* directory, const char* segment, size_t len
                 continue;
             if (data.dwFileAttributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM))
                 continue;
-            if (data.cFileName[0] == '.' && !dotAllowed)
+            if (data.cFileName[0] == '.' && !dotAllowed && !globDotglob)
                 continue;
             if (needDirectory && !(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
                 continue;
@@ -383,6 +414,7 @@ static int expand_pattern(const char* pattern, StringList* results) {
     Context context;
 
     memset(&context, 0, sizeof context);
+    globBytes = collate_bytes();
     // /? and /[x] are the switches of Windows programs (nmake /?, cmd /c), not the drives /c and /d
     if (pattern[0] == '/' && (strcmp(pattern, "/?") == 0 || (pattern[1] == '[' && strchr(pattern, '/') == pattern && strchr(pattern + 1, '/') == NULL))) {
         *results = context.results;
@@ -434,8 +466,8 @@ int winshell_glob(Pipeline* pipeline) {
                     goto err_memory;
 
                 if (matches.count == 0) {
-                    // like UNIX: no match, the word stays
-                    if (list_push(&words, command->argv[i]) != 0)
+                    // like UNIX: no match, the word stays (shopt -s nullglob: it goes)
+                    if (!globNullglob && list_push(&words, command->argv[i]) != 0)
                         goto err_memory;
                 } else {
                     for (m = 0; m < matches.count; m++) {

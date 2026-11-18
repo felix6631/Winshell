@@ -297,7 +297,9 @@ int interp_run_simple(const char* text, int* exitShell, int status) {
                         builtin_run(command, &builtinStatus, exitShell);
                     if (redirected && saved.inputRedirected)
                         interp_input_redirected(-1);
-                    if (redirected)
+                    if (redirected && strcmp(command->argv[0], "exec") == 0 && command->argv[1] == NULL && builtinStatus == 0)
+                        redirect_commit(&saved);        // exec > file: the shell keeps them
+                    else if (redirected)
                         redirect_end(&saved);
                 }
             }

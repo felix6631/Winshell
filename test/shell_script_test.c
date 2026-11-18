@@ -295,6 +295,15 @@ static void test_agent_scripts(void) {
     expect_script("m4.sh", "echo 'echo in; return 4; echo no' > r.sh\n. ./r.sh\necho $?\nexec echo replaced\necho not reached\n", "", "in\n4\nreplaced\n", 0);
     expect_script("d5.sh", "f() { while getopts \"ab:\" o; do case $o in a) echo A;; b) echo B=$OPTARG;; esac; done; }\nf -a -b val\nOPTIND=1\nf -ab x\n", "",
                   "A\nB=val\nA\nB=x\n", 0);
+    // descriptors above 2, and exec with only redirections
+    expect_script("x1.sh", "exec 3> fd3.txt\necho to3 >&3\n{ echo b; echo c; } >&3\nexec 3>&-\ncat fd3.txt\n", "", "to3\nb\nc\n", 0);
+    expect_script("x2.sh", "echo hi > in.txt\nexec 4< in.txt\nread l <&4; echo \"[$l]\"\nexec 4<&-\necho done\n", "", "[hi]\ndone\n", 0);
+    expect_script("x3.sh", "exec > out.txt 2>&1\necho one\necho two >&2\nls no_such_file_zz\n", "", "", 2);
+    expect_script("x4.sh", "echo b >&3\necho status $?\n", "", "status 1\n", 0);
+    expect_script("x5.sh", "echo data > x5src.txt\ncat x5src.txt 3> x5.txt >&3\ncat x5.txt\nf() { echo in_f >&3; }\nexec 3> x5b.txt; f; exec 3>&-; cat x5b.txt\n", "", "data\nin_f\n", 0);
+    // shopt: dotglob, nullglob, and the byte order of the C locale
+    expect_script("g1.sh", "touch a.dat B.dat .hid.dat\nLC_ALL=C; echo *.dat\nshopt -s dotglob; echo *.dat\nshopt -u dotglob\nshopt -s nullglob; echo zz*.nope; echo [A-Z]*.dat\nshopt -q nullglob && echo on\nshopt -u nullglob; echo zz*.nope\n", "",
+                  "B.dat a.dat\n.hid.dat B.dat a.dat\n\nB.dat\non\nzz*.nope\n", 0);
 }
 
 int main(void) {

@@ -732,7 +732,7 @@ static void test_duplication(void) {
     mute_stderr();
     CHECK_INT(winshell_parse_list("echo hi &", &list), -1);
     CHECK_INT(parse("echo hi 2>&", &p), -1);
-    CHECK_INT(parse("echo hi 2>&3", &p), -1);
+    CHECK_INT(parse("echo hi 2>&10", &p), -1);
     CHECK_INT(parse("echo hi >&1x", &p), -1);
     CHECK_INT(parse("echo hi 2>>&1", &p), -1);
 }

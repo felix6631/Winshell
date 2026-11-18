@@ -34,7 +34,10 @@ typedef enum {
     LEX_DUP,          // 2>&1, 1>&2: fd becomes a copy of target
     LEX_BOTH,         // &>
     LEX_BOTH_APPEND,  // &>>
-    LEX_HERESTRING    // <<<
+    LEX_HERESTRING,   // <<<
+    LEX_FD_OUT,       // 3> (the descriptor is in the lexeme)
+    LEX_FD_APPEND,    // 3>>
+    LEX_FD_IN         // 3<
 } LexemeType;
 
 typedef struct {
@@ -353,15 +356,29 @@ static void lexer_word(Lexer* L) {
     L->quoted = 0;
 }
 
-/** At an '&' after '>': 1 or 2 for "&1" or "&2" that ends a word, 0 for anything else. */
-static int dup_target(const CHAR* p) {
+/**
+ * At an '&' after '>' or '<': the descriptor of "&N" (a digit), or -1 for "&-" (close), when it ends a word;
+ * -2 for anything else. *length gets the characters taken, the '&' included.
+ */
+static int dup_target(const CHAR* p, size_t* length) {
     CHAR after;
-    if (p[0] != '&' || (p[1] != '1' && p[1] != '2'))
-        return 0;
-    after = p[2];
+    int target;
+
+    if (p[0] != '&')
+        return -2;
+    if (p[1] == '-') {
+        target = -1;
+        *length = 2;
+    } else if (p[1] >= '0' && p[1] <= '9') {
+        target = p[1] - '0';
+        *length = 2;
+    } else {
+        return -2;
+    }
+    after = p[*length];
     if (after != '\0' && !is_delimiter(after) && after != '|' && after != '<' && after != '>')
-        return 0;
-    return p[1] - '0';
+        return -2;
+    return target;
 }
 
 /** Whether text[0..length) is a variable name, which an assignment starts with. */
@@ -377,12 +394,13 @@ static int is_assignment_name(const CHAR* text, size_t length) {
 
 /* ---- operators ------------------------------------------------------------------ */
 
-/** read is at the '&' of ">&1": fd becomes a copy of descriptor 1 or 2. */
+/** read is at the '&' of ">&1", ">&-" or "<&0": fd becomes a copy of that descriptor, or is closed. */
 static void lex_dup(Lexer* L, int fd, int append) {
-    int target = append ? 0 : dup_target(L->read);
+    size_t length = 0;
+    int target = append ? -2 : dup_target(L->read, &length);
 
-    if (target == 0) {
-        lexer_syntax_error(L, "Syntax error: '&' after '>' must be followed by 1 or 2");
+    if (target == -2) {
+        lexer_syntax_error(L, "Syntax error: '&' after '>' must be followed by a descriptor number or '-'");
         return;
     }
     lexer_push(L, LEX_DUP, 0, 0, 0);
@@ -390,7 +408,7 @@ static void lex_dup(Lexer* L, int fd, int append) {
         return;
     L->lexemes[L->count - 1].fd = fd;
     L->lexemes[L->count - 1].target = target;
-    L->read += 2;
+    L->read += length;
 }
 
 /** read is at the '>' of > or >> (or 2> and 2>>, with fd 2); a ">&n" copies a descriptor. */
@@ -408,10 +426,32 @@ static void lex_output_operator(Lexer* L, int fd) {
         lex_dup(L, fd, append);
         return;
     }
-    if (fd == 2)
+    if (fd == 2) {
         lexer_push(L, append ? LEX_ERROR_APPEND : LEX_ERROR, 0, 0, 0);
-    else
+    } else if (fd == 1) {
         lexer_push(L, append ? LEX_APPEND : LEX_OUTPUT, 0, 0, 0);
+    } else {
+        lexer_push(L, append ? LEX_FD_APPEND : LEX_FD_OUT, 0, 0, 0);
+        if (!L->error)
+            L->lexemes[L->count - 1].fd = fd;
+    }
+    L->expectFile = 1;
+}
+
+/** read is at the '<' of < or <&N (or N< and N<&M, with fd N): the input of a descriptor. */
+static void lex_input_operator(Lexer* L, int fd) {
+    L->read++;
+    if (*L->read == '&') {
+        lex_dup(L, fd, 0);
+        return;
+    }
+    if (fd == 0) {
+        lexer_push(L, LEX_INPUT, 0, 0, 0);
+    } else {
+        lexer_push(L, LEX_FD_IN, 0, 0, 0);
+        if (!L->error)
+            L->lexemes[L->count - 1].fd = fd;
+    }
     L->expectFile = 1;
 }
 
@@ -433,9 +473,7 @@ static int lex_operator(Lexer* L) {
         return 1;
     }
     if (*r == '<') {
-        lexer_push(L, LEX_INPUT, 0, 0, 0);
-        L->expectFile = 1;
-        L->read++;
+        lex_input_operator(L, 0);
         return 1;
     }
     if (r[0] == '&' && r[1] == '>') {
@@ -2012,19 +2050,24 @@ static int lex_quoted_char(Lexer* L) {
     return 1;
 }
 
-/** "2>", "2>>", "1>" and "1>>": the digit is a file descriptor, not an argument. */
+/** "2>", "2>>", "3>", "3<", "3>&1" and the like: the digit is a file descriptor, not an argument. */
 static int lex_fd_redirect(Lexer* L) {
     CHAR digit;
 
-    if (*L->read != '>' || L->quoted || L->dirty || L->text.length - L->wordStart != 1)
+    if ((*L->read != '>' && *L->read != '<') || L->quoted || L->dirty || L->text.length - L->wordStart != 1)
         return 0;
     digit = L->text.data[L->wordStart];
-    if (digit != '1' && digit != '2')
+    if (digit < '0' || digit > '9')
         return 0;
+    if (*L->read == '<' && L->read[1] == '<')
+        return 0;                       // 3<<EOF and 3<<<x are not made here
 
     L->text.length = L->wordStart;      // the digit was not a word
     L->pat.length = L->patStart;
-    lex_output_operator(L, digit - '0');
+    if (*L->read == '<')
+        lex_input_operator(L, digit - '0');
+    else
+        lex_output_operator(L, digit - '0');
     L->operatorDone = 1;
     return 1;
 }
@@ -2146,6 +2189,9 @@ static const char* operator_name(LexemeType type) {
         case LEX_APPEND:       return ">>";
         case LEX_ERROR:        return "2>";
         case LEX_ERROR_APPEND: return "2>>";
+        case LEX_FD_OUT:       return "N>";
+        case LEX_FD_APPEND:    return "N>>";
+        case LEX_FD_IN:        return "N<";
         case LEX_BOTH:         return "&>";
         case LEX_BOTH_APPEND:  return "&>>";
         case LEX_HERESTRING:   return "<<<";
@@ -2204,7 +2250,13 @@ static int builder_argument(Builder* b, LPSTR word, LPSTR pattern) {
     return 0;
 }
 
+static int add_redirect_kind(Command* command, int fd, LPSTR file, int append, int input, int dupOf);
+
 static int add_redirect(Command* command, int fd, LPSTR file, int append, int dupOf) {
+    return add_redirect_kind(command, fd, file, append, 0, dupOf);
+}
+
+static int add_redirect_kind(Command* command, int fd, LPSTR file, int append, int input, int dupOf) {
     Redirect* redirect;
 
     if (VEC_GROW_BY_COUNT(command->redirects, command->redirectCount) != 0)
@@ -2213,6 +2265,7 @@ static int add_redirect(Command* command, int fd, LPSTR file, int append, int du
     redirect->fd = fd;
     redirect->file = file;
     redirect->append = append;
+    redirect->input = input;
     redirect->dupOf = dupOf;
     return 0;
 }
@@ -2283,6 +2336,13 @@ static int parse_redirection(Builder* b, const Lexeme* lexemes, size_t count, si
             command->input = kept;
             return PARSE_OK;
         }
+        case LEX_FD_OUT:
+        case LEX_FD_APPEND:
+        case LEX_FD_IN:
+            // a descriptor other than 1 and 2: 3> file, 3>> file, 3< file
+            if (add_redirect_kind(command, lexeme->fd, file, lexeme->type == LEX_FD_APPEND, lexeme->type == LEX_FD_IN, 0) != 0)
+                return PARSE_MEMORY;
+            return PARSE_OK;
         case LEX_APPEND:       append = 1; break;
         case LEX_ERROR:        fd = 2; break;
         case LEX_ERROR_APPEND: fd = 2; append = 1; break;

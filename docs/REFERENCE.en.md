@@ -161,6 +161,8 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
   - Virtual paths, Windows paths and subdirectories all work (`/c/Users/*`, `*/*.c`, `sub\*.dat`). The matches are written the way the pattern was.
   - A pattern that matches nothing is passed as typed. A wildcard in quotes (`"*.txt"`) is not expanded.
   - Adapted to Windows: names are matched without regard to case, a name starting with a dot is matched only by a pattern that starts with a dot (`.*`), and files with the hidden or system attribute are never matched (so `rm *` does not touch system files).
+  - When `LC_ALL` (or `LC_COLLATE`, `LANG`) is `C` or `POSIX`, the matches are sorted by byte value and matched with case, as on Linux (`[A-Z]*` finds `B.txt`, not `a.txt`). With any other value, or none, the Windows way above applies.
+  - `shopt -s dotglob` lets `*` match names that start with a dot, and `shopt -s nullglob` turns a pattern without a match into nothing (`-u` turns them off, `-q` only returns the state). The other `shopt` options are accepted and shown only.
   - The file names of redirections are not expanded.
 - **Pipes and redirection**
   - `a | b`: connects the standard output of a to the standard input of b. All commands run at the same time.
@@ -170,8 +172,9 @@ For what is still to come, see the [roadmap in the README](../README.en.md#roadm
   - Spaces around operators are optional (`echo hi>out.txt`). Operators have no meaning inside quotes.
   - `2>&1`: send standard error where standard output goes. `1>&2` (`>&2`) is the other way round.
   - `&> file`, `&>> file`: write standard output and standard error to the same file.
+  - Descriptors 0 to 9: `3> file`, `3>> file`, `3< file`, `N>&M`, `N<&M`, `N>&-` (close). With only redirections, `exec 3> file`, `exec 4< file` or `exec > file 2>&1` the shell keeps them. `echo x >&3`, `read l <&4` and `{ ...; } >&3` work for builtins, functions, groups, and as the standard input and output of programs. Adapted to Windows: a program cannot inherit a descriptor above 2, so the 3 of `cmd 3> f` is not seen by that program (it is used only when it is connected to 0 to 2, as in `cmd >&3`). A closed 0 to 2 is NUL. A descriptor that is not open gives `N: Bad file descriptor` and status 1.
   - Redirections of standard output and error are applied in the order written: `a > f 2>&1` sends both to f, `a 2>&1 > f` sends the error to the old output and only the output to f.
-  - A redirection takes precedence over a pipe. The exit code of the last command is the result.
+  - A redirection takes precedence over a pipe. The exit code of the last command is the result. When a redirection cannot be made (a file that cannot be opened) the status is 1.
   - Brace expansion is done before the other expansions on the words outside quotes: `a{b,c}d` -> `abd acd`, `{1..5}`, `{5..1}`, `{01..10}`
     (a leading 0 pads), `{a..e}`, `{1..10..3}` (a step), nested `x{a,b{1,2}}y`, several `{a,b}{1,2}` -> `a1 a2 b1 b2`. It is an expression
     only with a comma at its top level or a range of two numbers or two letters; `{}`, `{a}`, `{ list; }` and `find -exec {}` stay. Not

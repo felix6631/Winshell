@@ -105,8 +105,8 @@ int winshell_operator_at(const CHAR* line, size_t i, size_t* length, size_t* ski
         return LIST_OR;
     }
     if (c == '&') {
-        if (i > 0 && line[i - 1] == '>')
-            return 0;                   // 2>&1 and the like
+        if (i > 0 && (line[i - 1] == '>' || line[i - 1] == '<'))
+            return 0;                   // 2>&1, <&3 and the like
         if (line[i + 1] == '>') {
             *skip = 1;                  // &> and &>>
             return 0;

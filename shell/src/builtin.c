@@ -584,6 +584,106 @@ static int builtin_type(char* const argv[], int isType) {
     return status;
 }
 
+/* ---- shopt ---------------------------------------------------------------------------------------------- */
+
+/** The options of bash's shopt. Those that change something here are dotglob and nullglob; the others are kept and shown only. */
+static struct {
+    const char* name;
+    int         on;
+} shoptTable[] = {
+    { "autocd", 0 }, { "cdspell", 0 }, { "checkwinsize", 1 }, { "cmdhist", 1 }, { "dotglob", 0 }, { "execfail", 0 },
+    { "expand_aliases", 1 }, { "extglob", 1 }, { "failglob", 0 }, { "globstar", 0 }, { "histappend", 0 }, { "hostcomplete", 1 },
+    { "inherit_errexit", 0 }, { "lastpipe", 0 }, { "nocaseglob", 0 }, { "nocasematch", 0 }, { "nullglob", 0 },
+    { "progcomp", 1 }, { "promptvars", 1 }, { "sourcepath", 1 }, { "xpg_echo", 0 },
+};
+
+static void shopt_apply(void) {
+    int dotglob = 0, nullglob = 0;
+    size_t i;
+
+    for (i = 0; i < sizeof shoptTable / sizeof *shoptTable; i++) {
+        if (strcmp(shoptTable[i].name, "dotglob") == 0)
+            dotglob = shoptTable[i].on;
+        else if (strcmp(shoptTable[i].name, "nullglob") == 0)
+            nullglob = shoptTable[i].on;
+    }
+    winshell_glob_options(dotglob, nullglob);
+}
+
+/** shopt [-pqsu] [-o] [NAME...] */
+static int builtin_shopt(char* const argv[]) {
+    int set = 0, unset = 0, quiet = 0, print = 0;
+    int i = 1, status = 0;
+    size_t k;
+
+    for (; argv[i] != NULL && argv[i][0] == '-' && argv[i][1] != '\0'; i++) {
+        const char* o;
+
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
+        for (o = argv[i] + 1; *o != '\0'; o++) {
+            switch (*o) {
+                case 's': set = 1; break;
+                case 'u': unset = 1; break;
+                case 'q': quiet = 1; break;
+                case 'p': print = 1; break;
+                case 'o': break;
+                default:
+                    fprintf(stderr, "shopt: -%c: invalid option\n"
+                                    "shopt: usage: shopt [-pqsu] [-o] [optname ...]\n", *o);
+                    return 2;
+            }
+        }
+    }
+    if (set && unset) {
+        fprintf(stderr, "shopt: cannot set and unset shell options simultaneously\n");
+        return 1;
+    }
+    if (argv[i] == NULL) {
+        // every option, or (-s, -u) the ones that are on, or off
+        for (k = 0; k < sizeof shoptTable / sizeof *shoptTable; k++) {
+            if ((set && !shoptTable[k].on) || (unset && shoptTable[k].on))
+                continue;
+            if (quiet)
+                continue;
+            if (print)
+                printf("shopt -%c %s\n", shoptTable[k].on ? 's' : 'u', shoptTable[k].name);
+            else
+                printf("%-15s\t%s\n", shoptTable[k].name, shoptTable[k].on ? "on" : "off");
+        }
+        return 0;
+    }
+    for (; argv[i] != NULL; i++) {
+        for (k = 0; k < sizeof shoptTable / sizeof *shoptTable; k++)
+            if (strcmp(shoptTable[k].name, argv[i]) == 0)
+                break;
+        if (k == sizeof shoptTable / sizeof *shoptTable) {
+            fprintf(stderr, "shopt: %s: invalid shell option name\n", argv[i]);
+            status = 1;
+            continue;
+        }
+        if (set) {
+            shoptTable[k].on = 1;
+        } else if (unset) {
+            shoptTable[k].on = 0;
+        } else {
+            // a query: the status says whether the option is on
+            if (!shoptTable[k].on)
+                status = 1;
+            if (!quiet) {
+                if (print)
+                    printf("shopt -%c %s\n", shoptTable[k].on ? 's' : 'u', shoptTable[k].name);
+                else
+                    printf("%-15s\t%s\n", shoptTable[k].name, shoptTable[k].on ? "on" : "off");
+            }
+        }
+    }
+    shopt_apply();
+    return status;
+}
+
 /** getopts OPTSTRING NAME [ARG...] */
 static int builtin_getopts(char* const argv[]) {
     static long stateIndex = 0, stateOffset = 1;
@@ -892,7 +992,7 @@ int builtin_run(const Command* command, int* status, int* exitShell) {
         return 1;
     }
     if (strcmp(name, "shopt") == 0) {
-        *status = 0;                // the options of bash that matter here are on already or not supported
+        *status = builtin_shopt(command->argv);
         return 1;
     }
     if (strcmp(name, "command") == 0) {

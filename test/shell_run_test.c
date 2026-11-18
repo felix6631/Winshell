@@ -318,7 +318,7 @@ static void test_duplication(void) {
 
     // only &1 and &2 are descriptors; anything else after '>&' is refused, a quoted name is a file
     script("echo hi 2>&1x\n", &r);
-    CHECK(strstr(r.err, "'&' after '>' must be followed by 1 or 2") != NULL);
+    CHECK(strstr(r.err, "'&' after '>' must be followed by a descriptor number or '-'") != NULL);
     CHECK_STR(r.out, "");
     run_result_free(&r);
     SCRIPT_OUT("echo quoted > '&1'\ncat '&1'\n", "quoted\n");
